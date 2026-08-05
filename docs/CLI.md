@@ -286,7 +286,7 @@ LIVE ACTIVITY
 00:03:15  agent-b  READ     src/db/pool.ts
 00:03:18  agent-a  EDIT     releaseConnection()
 00:03:20  agent-b  TEST     refresh-session.test.ts
-00:03:21  patchmesh WARNING  Work convergence detected
+00:03:21  patchmesh NOTICE   Same-symbol activity observed
 ```
 
 ### Recommended TUI controls
@@ -337,8 +337,10 @@ patchmesh agents --active
 ID        RUNTIME       TASK                  STATUS
 agent-a   claude-code   Fix login timeout     running
 agent-b   claude-code   Add session refresh   running
-agent-c   codex         Add auth tests        paused
+agent-c   claude-code   -                     waiting
 ```
+
+`-` represents unavailable task attribution; JSON output uses `"taskId": null`.
 
 ---
 
@@ -428,28 +430,32 @@ patchmesh inspect agent:agent-b
 ### Example output
 
 ```text
-Agent:      agent-b
-Runtime:    claude-code
-Task:       Add session refresh
-Status:     possibly_stale
-Worktree:   .patchmesh/worktrees/agent-b
+Agent:              agent-b
+Agent status:       running
+Task:               session-refresh
+Task validity:      possibly_stale
+Repository:         repo-7
+Workspace:          worktree-agent-b
+Integration target: main@4f92c1a
 
-Current footprint:
-  Reading:
-    src/session/refresh.ts
-    src/db/pool.ts
+Observed dependency:
+  Resource:          symbol:src/db/pool.ts::releaseConnection
+  Version domain:    repo-7/worktree-agent-b
+  Observed version:  git:1a83e9b
 
-  Modifying:
-    src/session/refresh.ts
+Candidate change:
+  Version domain:    repo-7/worktree-agent-a
+  Candidate version: git:9c21d4e
 
-Dependencies:
-  db/pool.ts::releaseConnection at version 12
+Finding:             fnd-42
+Decision:            dec-42
+Coordination action: request_revalidation
+Gateway directive:  allow_with_notice
+Coverage:            intercepted, verified
 
-Warning:
-  Current version is 13 after agent-a's edit.
-
-Required action:
-  Revalidate the session-refresh implementation.
+Recommended check:
+  Revalidate the session-refresh implementation against main@4f92c1a plus the
+  candidate change.
 ```
 
 ---
@@ -518,15 +524,16 @@ patchmesh overlaps [options]
 --json                     Print machine-readable output
 ```
 
-### Overlap types
+### Phase 2 deterministic finding types
 
 ```text
-harmless
-complementary
-duplicate
-conflicting
-dependency
+same_symbol_overlap
+stale_read_before_write
+exported_contract_invalidation
 ```
+
+Semantic duplicate-work and architectural-conflict classifications are deferred to
+Phase 5 and are not emitted by the report-only MVP.
 
 ### Example
 
@@ -537,22 +544,22 @@ patchmesh overlaps --active
 ### Example output
 
 ```text
-HIGH  agent-a ↔ agent-b
-
-Type:
-  duplicate
-
-Shared resource:
-  src/db/pool.ts::releaseConnection
+Finding:             fnd-42
+Decision:            dec-42
+Severity:            high
+Type:                same_symbol_overlap
+Agents:              agent-a, agent-b
+Shared resource:     symbol:src/db/pool.ts::releaseConnection
 
 Evidence:
   agent-a is modifying the symbol
   agent-b requested an edit to the same symbol
-  both tasks reference a database connection leak
 
-Decision:
-  agent-a retains ownership
-  agent-b should continue with validation tests
+Coordination action: request_recheck
+Gateway directive:  allow_with_notice
+
+Recommendation:
+  agent-b should recheck its intended edit before continuing.
 ```
 
 ---
@@ -620,22 +627,32 @@ patchmesh explain dec-42
 ### Example output
 
 ```text
-Decision:   Request revalidation
-Target:     agent-b
-Confidence: high
+Decision:            dec-42
+Finding:             fnd-42
+Target agent:        agent-b
+Target task:         session-refresh
+Confidence:          high
+Coordination action: request_revalidation
+Gateway directive:  allow_with_notice
 
 Reason:
-  Agent B read authenticate() at version 12.
-  Agent A changed authenticate() to version 13.
+  Agent B used authenticate() from repo-7/worktree-agent-b at git:1a83e9b.
+  Agent A proposed git:9c21d4e from repo-7/worktree-agent-a.
   Agent B is modifying a direct caller.
+
+Integration target:
+  main@4f92c1a
 
 Dependency path:
   authenticate()
-  → login-handler.ts
-  → Login frontend task
+  -> login-handler.ts
+  -> task:session-refresh
 
-Required action:
-  Recheck the implementation and rerun login tests.
+Coverage:
+  intercepted, verified
+
+Recommended check:
+  Recheck the implementation and rerun login tests against the candidate change.
 ```
 
 ---
@@ -812,8 +829,8 @@ Example:
   "reasons": [
     {
       "dependency": "src/db/pool.ts::releaseConnection",
-      "readVersion": 12,
-      "currentVersion": 13
+      "observedVersion": "git:1a83e9b",
+      "candidateVersion": "git:9c21d4e"
     }
   ]
 }
