@@ -473,8 +473,6 @@ It records task and work-product identity, base revision, observed dependencies 
 versions, dependency provenance, validation commands and results, observability
 coverage, validation time, integration target, and the evidence behind state changes.
 
-The act of marking work as requiring revalidation or as confirmed stale.
-
 ## 8. Assumption and Discovery Terms
 
 ### Assumption
