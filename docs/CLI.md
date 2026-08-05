@@ -233,6 +233,10 @@ Paused tasks:    1
 Open overlaps:   1
 Possibly stale:  2
 Events recorded: 1,482
+Coverage:        degraded
+Coverage modes:  intercepted, verified
+Coverage gap:    opaque shell effects
+Unattributed:    3 events
 ```
 
 ---
@@ -363,7 +367,7 @@ patchmesh follow <agent-id> [options]
 ```text
 --since <duration>  Include earlier events, such as 10m or 1h
 --type <type>       Filter by event type
---raw               Show raw normalized events
+--raw               Show minimally formatted, redacted normalized events
 --json              Print newline-delimited JSON
 ```
 
@@ -681,9 +685,11 @@ patchmesh events [options]
 --until <time>      Set an ending timestamp
 --limit <number>    Limit returned events
 --follow            Continue streaming new events
---raw               Show full event payloads
+--raw               Show full normalized fields with secrets redacted
 --json              Print newline-delimited JSON
 ```
+
+`--raw`, JSON, and newline-delimited JSON never bypass secret redaction.
 
 ### Examples
 
@@ -776,7 +782,7 @@ PATCHMESH READINESS
 [OK] Filesystem watcher active
 [OK] Agent IDs present in tool events
 [WARN] Direct shell access may bypass tool-level intent tracking
-[WARN] Codex adapter is not configured
+[WARN] Coverage is degraded: shell effects are verified after execution
 ```
 
 ---
@@ -793,12 +799,14 @@ PatchMesh commands should use stable exit codes.
 4   Daemon is unavailable
 5   Configuration is invalid
 6   Requested agent, task, or event was not found
-7   Operation was blocked by policy
-8   Observability is degraded
+7   Reserved for Phase 4 policy enforcement; unavailable in Phases 0-3
+8   Required observability was unavailable, so the operation could not complete
 9   Internal storage or replay failure
 ```
 
-Commands that only report warnings should normally still exit with `0`.
+Commands that successfully report warnings or degraded coverage exit with `0`. Exit
+code `8` applies only when required observability is unavailable and the requested
+operation therefore cannot complete.
 
 ---
 
@@ -823,18 +831,35 @@ Example:
 
 ```json
 {
+  "schemaVersion": 1,
+  "findingId": "fnd-42",
+  "decisionId": "dec-42",
   "agentId": "agent-b",
   "taskId": "session-refresh",
-  "status": "possibly_stale",
+  "agentStatus": "running",
+  "taskValidity": "possibly_stale",
+  "integrationTarget": "main@4f92c1a",
+  "coordinationAction": "request_revalidation",
+  "gatewayDirective": "allow_with_notice",
+  "coverage": ["intercepted", "verified"],
   "reasons": [
     {
-      "dependency": "src/db/pool.ts::releaseConnection",
-      "observedVersion": "git:1a83e9b",
-      "candidateVersion": "git:9c21d4e"
+      "dependency": "symbol:src/db/pool.ts::releaseConnection",
+      "observedVersion": {
+        "domain": "repo-7/worktree-agent-b",
+        "value": "git:1a83e9b"
+      },
+      "candidateVersion": {
+        "domain": "repo-7/worktree-agent-a",
+        "value": "git:9c21d4e"
+      }
     }
   ]
 }
 ```
+
+This is an illustrative CLI envelope, not a finalized protocol schema. Unknown task
+attribution is represented as `"taskId": null`.
 
 ## Secret handling
 
@@ -869,6 +894,19 @@ patchmesh benchmark
 implementation.
 
 ---
+
+# Roadmap-Required CLI Design Gaps
+
+The roadmap requires these user interactions, but their CLI shape is not yet
+designed. They are obligations, not available commands:
+
+- Phase 2: dismiss a finding and record notification usefulness.
+- Phase 3: inspect validity history and recommended checks.
+- Phase 3: link revalidation results to decisions and show the proof required for a
+  confirmed `stale` status.
+
+Do not invent or implement commands for these interactions without a focused design
+and an explicit roadmap-compatible update to this reference.
 
 # Documentation Rule
 
