@@ -561,6 +561,8 @@ Evidence:
 
 Coordination action: request_recheck
 Gateway directive:  allow_with_notice
+Coverage:            intercepted, verified
+Coverage gap:        opaque shell effects
 
 Recommendation:
   agent-b should recheck its intended edit before continuing.
@@ -585,7 +587,6 @@ patchmesh stale [options]
 ```text
 --agent <id>       Filter by agent
 --task <id>        Filter by task
---confirmed        Show confirmed stale work only
 --possible         Show possibly stale work only
 --json             Print machine-readable output
 ```
@@ -595,8 +596,10 @@ patchmesh stale [options]
 ```text
 TASK              STATUS           REASON
 Login frontend    possibly_stale   Built against POST /login v3
-Auth docs         stale            Documents removed response field
 ```
+
+Confirmed `stale` status and validity history depend on Phase 3 and are not
+available in the Phase 2 target.
 
 ---
 
@@ -604,14 +607,14 @@ Auth docs         stale            Documents removed response field
 
 **Roadmap placement:** Phase 2 - Deterministic Detection. Planned, not implemented.
 
-Explain a PatchMesh finding or decision.
+Explain a PatchMesh decision.
 
 Every disruptive decision must be explainable.
 
 ### Usage
 
 ```bash
-patchmesh explain <id> [options]
+patchmesh explain <decision-id> [options]
 ```
 
 ### Options
