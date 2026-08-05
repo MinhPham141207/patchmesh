@@ -1,22 +1,50 @@
-# PatchMesh CLI Reference
+# PatchMesh CLI Target Reference
 
-## 1. Purpose
+## 1. Status and Purpose
 
-The PatchMesh CLI provides local setup, runtime control, live agent observation, coordination inspection, and troubleshooting.
+> **Status:** Planned. PatchMesh is documentation-first and has no released
+> implementation.
 
-The primary workflow is:
+This document describes target CLI behavior. No command is available until its
+implementation, help output, and tests exist.
+
+Roadmap placement means that a command is scheduled for a phase; it does not mean the
+command is implemented. An unscheduled command requires an explicit roadmap update
+before implementation.
+
+The planned Phase 1 evidence workflow is:
 
 ```bash
-patchmesh init
-patchmesh start
-patchmesh watch
+patchmesh status
+patchmesh events --follow
+patchmesh graph
 ```
 
-This document defines the intended MVP command surface. A command should only be marked as available once it is implemented.
+This is a target observation workflow, not a runnable quick start.
 
 ---
 
-## 2. Global Usage
+## 2. Command Roadmap and Availability
+
+| Command | Roadmap placement | Availability |
+| --- | --- | --- |
+| `status` | Phase 1 - Observe and Replay | Planned, not implemented |
+| `agents` | Phase 1 - Observe and Replay | Planned, not implemented |
+| `events` | Phase 1 - Observe and Replay | Planned, not implemented |
+| `graph` | Phase 1 - Observe and Replay | Planned, not implemented |
+| `overlaps` | Phase 2 - Deterministic Detection | Planned, not implemented |
+| `stale` | Phase 2 - Deterministic Detection | Planned, not implemented |
+| `explain` | Phase 2 - Deterministic Detection | Planned, not implemented |
+| `init`, `start`, `stop` | Unscheduled support designs | Not available |
+| `follow`, `inspect`, `doctor` | Unscheduled support designs | Not available |
+| `watch` | Deferred dashboard design | Not available |
+
+The detailed unscheduled sections below preserve design work only. They are not MVP
+commitments.
+
+---
+
+## 3. Global Usage
 
 ```bash
 patchmesh <command> [options]
@@ -50,6 +78,8 @@ Command-line options take priority over environment variables.
 # Core Workflow
 
 ## `patchmesh init`
+
+**Roadmap placement:** Unscheduled support design. Not available.
 
 Initialize PatchMesh in the current Git repository.
 
@@ -112,6 +142,8 @@ Run:
 
 ## `patchmesh start`
 
+**Roadmap placement:** Unscheduled support design. Not available.
+
 Start the PatchMesh daemon, gateway, event collector, and filesystem observers.
 
 ### Usage
@@ -152,6 +184,8 @@ Starting an already running daemon must not create a duplicate process.
 
 ## `patchmesh stop`
 
+**Roadmap placement:** Unscheduled support design. Not available.
+
 Stop the local PatchMesh daemon cleanly.
 
 ### Usage
@@ -169,6 +203,8 @@ patchmesh stop [options]
 ---
 
 ## `patchmesh status`
+
+**Roadmap placement:** Phase 1 - Observe and Replay. Planned, not implemented.
 
 Show the health and current state of PatchMesh.
 
@@ -205,9 +241,12 @@ Events recorded: 1,482
 
 ## `patchmesh watch`
 
+**Roadmap placement:** Deferred dashboard design. Not available.
+
 Open the live terminal dashboard.
 
-This is the main PatchMesh user interface.
+This terminal dashboard concept is deferred by the current roadmap. Its presence in
+this target catalog does not make it an MVP commitment.
 
 ### Usage
 
@@ -266,6 +305,8 @@ q          Exit
 
 ## `patchmesh agents`
 
+**Roadmap placement:** Phase 1 - Observe and Replay. Planned, not implemented.
+
 List active and recent agents.
 
 ### Usage
@@ -302,6 +343,8 @@ agent-c   codex         Add auth tests        paused
 ---
 
 ## `patchmesh follow`
+
+**Roadmap placement:** Unscheduled support design. Not available.
 
 Stream one agent's observable activity.
 
@@ -344,6 +387,8 @@ patchmesh follow agent-a
 ---
 
 ## `patchmesh inspect`
+
+**Roadmap placement:** Unscheduled support design. Not available.
 
 Show detailed state for an agent, task, resource, finding, or decision.
 
@@ -409,9 +454,50 @@ Required action:
 
 ---
 
+## `patchmesh graph`
+
+**Roadmap placement:** Phase 1 - Observe and Replay. Planned, not implemented.
+
+Inspect the current rebuildable work-graph projection. This command is read-only;
+the append-only event log remains the source of truth.
+
+### Usage
+
+```bash
+patchmesh graph [options]
+```
+
+### Options
+
+```text
+--agent <id>      Limit the projection to one agent
+--task <id>       Limit the projection to one task
+--resource <id>   Limit the projection to one resource
+--json            Print machine-readable output
+```
+
+### Example output
+
+```text
+WORK GRAPH
+
+Integration target: main@4f92c1a
+Coverage:           degraded
+Coverage evidence:  intercepted, verified
+Coverage gap:       opaque shell effects
+
+agent:agent-b
+  -> task:session-refresh
+     -> symbol:src/db/pool.ts::releaseConnection
+```
+
+---
+
 # Coordination Inspection
 
 ## `patchmesh overlaps`
+
+**Roadmap placement:** Phase 2 - Deterministic Detection. Planned, not implemented.
 
 Show active and historical overlap findings.
 
@@ -473,6 +559,8 @@ Decision:
 
 ## `patchmesh stale`
 
+**Roadmap placement:** Phase 2 - Deterministic Detection. Planned, not implemented.
+
 Show running or completed work that may no longer be valid.
 
 ### Usage
@@ -502,6 +590,8 @@ Auth docs         stale            Documents removed response field
 ---
 
 ## `patchmesh explain`
+
+**Roadmap placement:** Phase 2 - Deterministic Detection. Planned, not implemented.
 
 Explain a PatchMesh finding or decision.
 
@@ -553,6 +643,8 @@ Required action:
 # Event and Debug Commands
 
 ## `patchmesh events`
+
+**Roadmap placement:** Phase 1 - Observe and Replay. Planned, not implemented.
 
 Inspect recorded normalized events.
 
@@ -619,6 +711,8 @@ decision.resolved
 ---
 
 ## `patchmesh doctor`
+
+**Roadmap placement:** Unscheduled support design. Not available.
 
 Check whether PatchMesh can reliably observe the repository and configured runtimes.
 
@@ -738,42 +832,12 @@ PatchMesh must redact:
 
 ---
 
-# MVP Command Set
+# Later and Unscheduled Command Concepts
 
-The initial CLI should contain:
-
-```text
-patchmesh init
-patchmesh start
-patchmesh stop
-patchmesh status
-patchmesh watch
-patchmesh agents
-patchmesh follow
-patchmesh inspect
-patchmesh overlaps
-patchmesh stale
-patchmesh explain
-patchmesh events
-patchmesh doctor
-```
-
-The essential first-run experience is:
-
-```bash
-patchmesh init
-patchmesh start
-patchmesh watch
-```
-
----
-
-# Planned Commands
-
-These commands should remain in the roadmap until implemented:
+The following concepts are not available and are not scheduled Phase 1 or Phase 2
+commands:
 
 ```text
-patchmesh graph
 patchmesh replay
 patchmesh claims
 patchmesh tasks
@@ -783,7 +847,9 @@ patchmesh export
 patchmesh benchmark
 ```
 
-Do not document planned commands as available.
+`claims` depends on measured enforcement. A second runtime adapter belongs to Phase
+5 expansion. The remaining concepts require explicit roadmap placement before
+implementation.
 
 ---
 
