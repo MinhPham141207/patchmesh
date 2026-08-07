@@ -95,12 +95,15 @@ function instance(schema, value, context, at, currentId, stack) {
     if (stack.has(resolved.id)) return [diagnostic('PHASE0_REFERENCE_MISSING', context.path, at, 'cyclic schema reference is unsupported')];
     return instance(resolved.schema, value, context, at, resolved.document.schema.$id, new Set([...stack, resolved.id]));
   }
+  const diagnostics = [];
   if (Array.isArray(schema.oneOf)) {
     const matches = schema.oneOf.filter((branch) => instance(branch, value, context, at, currentId, new Set(stack)).length === 0).length;
-    return matches === 1 ? [] : [diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'value must match exactly one schema branch')];
+    if (matches !== 1) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'value must match exactly one schema branch'));
   }
-  if (schema.type && !typeMatches(schema.type, value)) return [diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, `value must have type ${schema.type}`)];
-  const diagnostics = [];
+  if (schema.type && !typeMatches(schema.type, value)) {
+    diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, `value must have type ${schema.type}`));
+    return diagnostics;
+  }
   if ('const' in schema && canonicalize(value) !== canonicalize(schema.const)) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'value does not match const'));
   if (Array.isArray(schema.enum) && !schema.enum.some((item) => canonicalize(item) === canonicalize(value))) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'value is outside enum'));
   if (typeof value === 'string' && schema.pattern && !new RegExp(schema.pattern, 'u').test(value)) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'string does not match pattern'));

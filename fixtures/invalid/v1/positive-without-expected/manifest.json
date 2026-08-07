@@ -1,0 +1,1 @@
+{"schemaVersion":1,"scenarioId":"scenario_positive_without_expected","title":"Positive scenarios must declare expected projections","targetPhase":1,"kind":"positive","eventsFile":"events.ndjson","expected":null,"variants":[],"expectedError":null}

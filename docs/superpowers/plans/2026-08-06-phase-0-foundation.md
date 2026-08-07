@@ -6128,3 +6128,13 @@ corpus validation pass; the complete Phase 0 commit range has no whitespace erro
 | Dependency-free validator and stable diagnostics | Tasks 1–10 |
 | Canonical-document synchronization | Task 11 |
 | Every roadmap exit gate mechanically reviewed | Task 12 |
+
+## Repair Reconciliation (2026-08-07)
+
+The Phase 0 validator repair plan at
+`docs/superpowers/plans/2026-08-07-phase-0-validator-repair.md` strengthened the
+manifest, dependency-edge, validity, decision-target, event-payload, benchmark,
+secret-scan, and canonical-ordering invariants. After the repair, the Node test
+suite and `node tools/phase0/validate.mjs` both pass, `git diff --check` is clean,
+and the Phase 0 status line above remains `Complete — contract corpus and exit
+evidence verified.` No commit was created unless explicitly requested.

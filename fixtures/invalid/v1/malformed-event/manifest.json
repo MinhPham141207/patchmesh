@@ -1,0 +1,1 @@
+{"schemaVersion":1,"scenarioId":"scenario_malformed_event","title":"Malformed events produce contract diagnostics without validator crashes","targetPhase":1,"kind":"negative","eventsFile":"events.ndjson","expected":null,"variants":[],"expectedError":"PHASE0_SCHEMA_INVALID"}
