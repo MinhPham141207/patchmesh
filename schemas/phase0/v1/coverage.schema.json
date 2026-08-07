@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase0/v1/coverage.schema.json",
+  "$defs": {
+    "coverageId": { "type": "string", "pattern": "^coverage_[0-9a-f]{32}$" },
+    "gap": { "type": "object", "properties": { "kind": { "enum": ["bypassed", "opaque", "missing_sequence", "unattributed", "unverified"] }, "scope": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "reason": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "evidenceEventIds": { "type": "array", "items": { "$ref": "./identities.schema.json#/$defs/eventId" }, "uniqueItems": true } }, "required": ["kind", "scope", "reason", "evidenceEventIds"], "additionalProperties": false }
+  },
+  "type": "object", "properties": {
+    "coverageId": { "$ref": "#/$defs/coverageId" }, "scope": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "modes": { "type": "array", "items": { "enum": ["intercepted", "verified", "inferred", "unknown"] }, "minItems": 1, "uniqueItems": true }, "evidenceEventIds": { "type": "array", "items": { "$ref": "./identities.schema.json#/$defs/eventId" }, "uniqueItems": true }, "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } }, "presentation": { "enum": ["sufficient", "degraded", "unknown"] }
+  }, "required": ["coverageId", "scope", "modes", "evidenceEventIds", "gaps", "presentation"], "additionalProperties": false
+}

@@ -8,3 +8,9 @@ AGENTS.md
 
 # local worktrees
 .worktrees/
+
+opencode.json
+
+.vscode/
+
+.mcp.json

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase0/v1/graph.schema.json",
+  "$defs": {
+    "node": { "type": "object", "properties": { "nodeId": { "type": "string", "pattern": "^node_[0-9a-f]{32}$" }, "kind": { "enum": ["agent", "task", "resource", "work_product", "target_snapshot", "finding", "decision"] }, "entityId": { "type": "string", "pattern": "^\\S+$" } }, "required": ["nodeId", "kind", "entityId"], "additionalProperties": false },
+    "edge": { "type": "object", "properties": { "edgeId": { "type": "string", "pattern": "^edge_[0-9a-f]{32}$" }, "kind": { "enum": ["depends_on", "observed", "produced", "affects", "derived_from", "targets"] }, "fromNodeId": { "type": "string", "pattern": "^node_[0-9a-f]{32}$" }, "toNodeId": { "type": "string", "pattern": "^node_[0-9a-f]{32}$" }, "dependency": { "oneOf": [{ "$ref": "./dependency.schema.json" }, { "type": "null" }] }, "evidenceEventIds": { "type": "array", "items": { "$ref": "./identities.schema.json#/$defs/eventId" }, "uniqueItems": true } }, "required": ["edgeId", "kind", "fromNodeId", "toNodeId", "dependency", "evidenceEventIds"], "additionalProperties": false }
+  },
+  "type": "object", "properties": { "resources": { "type": "array", "items": { "$ref": "./identities.schema.json#/$defs/logicalResource" }, "uniqueItems": true }, "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" }, "uniqueItems": true }, "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" }, "uniqueItems": true }, "targetSnapshots": { "type": "array", "items": { "$ref": "./identities.schema.json#/$defs/targetSnapshot" }, "uniqueItems": true } }, "required": ["resources", "nodes", "edges", "targetSnapshots"], "additionalProperties": false
+}

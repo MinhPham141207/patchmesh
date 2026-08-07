@@ -353,7 +353,8 @@ A version may be represented by:
 
 ### Read Version
 
-The version of a resource observed by an agent.
+A prose alias for **Observed Version**. Protocol schemas use `observed` and do not
+define a separate read-version field.
 
 ### Repository
 
@@ -361,19 +362,31 @@ The Git repository whose work is being observed.
 
 Repository identity must be stable across its worktrees.
 
+The machine identity is an opaque `repositoryId` persisted in PatchMesh-owned Git
+common-directory metadata. It is not derived from a remote URL, path, branch, or
+commit. See [Identity and Resource-Version Protocol](protocol/identities.md).
+
 ### Workspace
 
 The filesystem and execution context observed for an agent. A workspace may be a Git
 worktree, checkout, container mount, or another isolated view of a repository.
 
+`workspaceId` identifies the filesystem and execution context. It is distinct from the
+worktree identity; multiple workspaces may refer to one worktree.
+
 ### Worktree
 
 A Git-backed workspace with its own checked-out revision and uncommitted changes.
+
+`worktreeId` is path-independent. Linked worktrees share a repository ID and retain
+distinct worktree IDs.
 
 ### Integration Target
 
 The branch, revision, or candidate aggregate against which prospective compatibility
 and task validity are evaluated.
+
+Validity uses an immutable `targetSnapshotId`, never only a moving branch name.
 
 ### Version Domain
 
@@ -464,6 +477,10 @@ it confirmed an effect through filesystem, Git, process, test, or equivalent evi
 `inferred` means the relationship is derived without direct observation. `unknown`
 marks an explicit gap. Coverage may contain more than one value for one operation.
 
+Coverage records are scoped evidence. `intercepted` and `verified` are orthogonal. A
+relevant gap derives `degraded` presentation, and `inferred` evidence cannot silently
+substitute for direct observation. See [Dependency Evidence and Observability Coverage](protocol/evidence-and-coverage.md).
+
 ### Task Validity Record
 
 A durable explanation of why a completed work product is believed to be valid,
@@ -472,6 +489,10 @@ possibly stale, or stale against an integration target.
 It records task and work-product identity, base revision, observed dependencies and
 versions, dependency provenance, validation commands and results, observability
 coverage, validation time, integration target, and the evidence behind state changes.
+
+Task execution state and work-product validity are separate projections. `completed`
+is an execution state; `valid`, `possibly_stale`, `revalidating`, and `stale` are
+validity states for a named work product and target snapshot.
 
 ## 8. Assumption and Discovery Terms
 
@@ -701,12 +722,15 @@ The result of applying policy to a finding.
 
 A decision must include:
 
-- Action
-- Target
+- Source finding
+- Target agent or task
+- Coordination action
+- Gateway directive
 - Reason
 - Evidence
-- Confidence
+- Confidence and policy version
 - Expected response
+- Coverage evidence and gaps
 
 ### Coordination Action
 

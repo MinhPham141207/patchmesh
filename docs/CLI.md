@@ -22,6 +22,12 @@ patchmesh graph
 
 This is a target observation workflow, not a runnable quick start.
 
+The eventual JSON protocol envelope requires `workspaceId`, `worktreeId`, nullable
+`agentId`, and nullable `taskId`; examples remain illustrative. Unavailable agent or
+task attribution is represented by `null`. Later attribution is an immutable correction event,
+not mutation of the original event. See [Event Protocol V1](protocol/events.md) and the
+[Threat Model](THREAT_MODEL.md).
+
 ---
 
 ## 2. Command Roadmap and Availability

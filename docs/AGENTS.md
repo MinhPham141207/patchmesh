@@ -20,6 +20,9 @@ Before making changes:
 4. Read `docs/TERMINOLOGY.md` before changing public protocol vocabulary.
 5. Inspect existing code and tests before proposing a new abstraction.
 
+For protocol, identity, event, validity, coverage, or security changes, also read
+`docs/protocol/` and `docs/THREAT_MODEL.md`.
+
 Do not implement a major architectural change without checking whether it conflicts with these documents.
 
 The architecture and lifecycle documents describe planned target behavior unless a
@@ -174,6 +177,9 @@ Every event must include:
 
 Events must be immutable after storage.
 
+The complete envelope is defined by [Event Protocol V1](protocol/events.md), including
+`worktreeId` and nullable `agentId`/`taskId`.
+
 Do not store hidden model reasoning.
 
 Do not store secrets, tokens, credentials, or full environment values.
@@ -326,6 +332,14 @@ When fixing a bug:
 4. Run broader tests when shared protocol or core logic changed.
 
 Do not weaken tests to make a change pass.
+
+Phase 0 contract changes must update normative Markdown, versioned schemas, affected
+golden and negative fixtures, canonical documentation, and validator tests together.
+Run `node tools/phase0/validate.mjs` before committing.
+
+Phase 0 may contain documentation, schemas, fixtures, benchmark definitions, and
+dependency-free validation tooling. Do not introduce the TypeScript/pnpm product
+workspace, adapters, storage, daemon, or CLI until Phase 1 work is explicitly started.
 
 Do not replace behavioral assertions with snapshots when explicit assertions are clearer.
 

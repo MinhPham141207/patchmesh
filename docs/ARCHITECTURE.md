@@ -142,25 +142,14 @@ decision.created
 decision.resolved
 ```
 
-Every event must include:
+Every stored event follows [Event Protocol V1](protocol/events.md) and its versioned
+JSON Schema. The closed envelope includes explicit worktree identity, required
+nullable agent/task attribution, source-instance sequencing, correlation, causation,
+and one event-type-selected payload. Event ingestion is idempotent by event ID and
+canonical content digest; timestamp, source, and causal order remain distinct.
 
-- `schemaVersion`
-- `eventId`
-- `eventType`
-- `source`
-- `timestamp`
-- `repositoryId`
-- `workspaceId`
-- `agentId`
-- `taskId`, as `string | null` until attributed
-- `correlationId` for one tool call or operation
-- `causationId`, when another event caused this event
-- `sourceSequence`, when the source provides ordered delivery
-- relevant payload
-
-Event ingestion must be idempotent by `eventId`. Source ordering, timestamp ordering,
-and causal ordering are distinct; replay must not infer causality from wall-clock time
-alone. Later attribution is represented by a new event rather than mutation.
+The protocol is the source of truth for event field names and nullability. Later
+attribution is represented by a new event rather than mutation.
 
 Events are append-only.
 
@@ -229,7 +218,8 @@ An unmerged change in another worktree is a candidate version, not a global curr
 version. Detectors evaluate prospective impact by comparing an agent's observed
 version and the candidate version against an explicit integration target.
 
-Resource identity must include enough information to distinguish repositories,
+Resource identity follows [the identity contract](protocol/identities.md), and
+evaluations pin immutable target snapshots. It must include enough information to distinguish repositories,
 worktrees, revisions, paths, and symbols without treating equivalent Git objects as
 unrelated solely because their filesystem roots differ.
 
@@ -536,9 +526,13 @@ needs_more_information
 
 ### Event replay
 
-The same event sequence should rebuild the same graph and decisions where deterministic rules apply.
+Replay follows [the replay-equivalence contract](protocol/replay-equivalence.md):
+incremental, cold, duplicate, and valid out-of-order inputs must converge.
 
 ## 9. Security Principles
+
+Phase 0 defines mitigations and residual risks but implements no sandbox or event
+signing. See the [threat model](THREAT_MODEL.md).
 
 - Give agents only the tools required for their task.
 - Do not store hidden chain-of-thought.
@@ -570,6 +564,8 @@ Each scenario should define:
 - Expected findings
 - Expected decisions
 - Expected graph state
+- Expected validity
+- Expected coverage
 
 ## 11. MVP Technical Direction
 

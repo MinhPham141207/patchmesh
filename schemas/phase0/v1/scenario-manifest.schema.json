@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase0/v1/scenario-manifest.schema.json",
+  "$defs": {
+    "expectedOutputs": { "type": "object", "properties": { "graph": { "$ref": "./identities.schema.json#/$defs/logicalPath" }, "findings": { "$ref": "./identities.schema.json#/$defs/logicalPath" }, "decisions": { "$ref": "./identities.schema.json#/$defs/logicalPath" }, "validity": { "$ref": "./identities.schema.json#/$defs/logicalPath" }, "coverage": { "$ref": "./identities.schema.json#/$defs/logicalPath" } }, "required": ["graph", "findings", "decisions", "validity", "coverage"], "additionalProperties": false },
+    "variant": { "type": "object", "properties": { "name": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }, "eventsFile": { "$ref": "./identities.schema.json#/$defs/logicalPath" }, "equivalentTo": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }, "expected": { "$ref": "#/$defs/expectedOutputs" } }, "required": ["name", "eventsFile", "equivalentTo", "expected"], "additionalProperties": false }
+  },
+  "type": "object", "properties": { "schemaVersion": { "const": 1 }, "scenarioId": { "type": "string", "pattern": "^scenario_[a-z0-9]+(?:_[a-z0-9]+)*$" }, "title": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "targetPhase": { "enum": [0, 1, 2, 3] }, "kind": { "enum": ["positive", "negative"] }, "eventsFile": { "$ref": "./identities.schema.json#/$defs/logicalPath" }, "expected": { "oneOf": [{ "$ref": "#/$defs/expectedOutputs" }, { "type": "null" }] }, "variants": { "type": "array", "items": { "$ref": "#/$defs/variant" }, "uniqueItems": true }, "expectedError": { "oneOf": [{ "enum": ["PHASE0_SCHEMA_INVALID", "PHASE0_SCHEMA_UNSUPPORTED", "PHASE0_SCHEMA_KEYWORD_UNSUPPORTED", "PHASE0_REFERENCE_MISSING", "PHASE0_ID_CONFLICT", "PHASE0_TRANSITION_INVALID", "PHASE0_COVERAGE_OVERCLAIMED", "PHASE0_SECRET_PATTERN"] }, { "type": "null" }] } },
+  "required": ["schemaVersion", "scenarioId", "title", "targetPhase", "kind", "eventsFile", "expected", "variants", "expectedError"], "additionalProperties": false
+}

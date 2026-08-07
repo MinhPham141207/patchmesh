@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "scenario_relevant_exported_contract",
+  "title": "Candidate exported-contract change affects an observed consumer",
+  "targetPhase": 2,
+  "kind": "positive",
+  "eventsFile": "events.ndjson",
+  "expected": { "graph": "expected-graph.json", "findings": "expected-findings.json", "decisions": "expected-decisions.json", "validity": "expected-validity.json", "coverage": "expected-coverage.json" },
+  "variants": [],
+  "expectedError": null
+}

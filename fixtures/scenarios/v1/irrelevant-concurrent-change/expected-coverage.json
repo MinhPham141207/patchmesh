@@ -1,0 +1,3 @@
+[
+  { "coverageId": "coverage_00000000000000000000000000000002", "scope": "notes file operation", "modes": ["intercepted", "verified"], "evidenceEventIds": ["evt_00000000000000000000000000000051", "evt_00000000000000000000000000000052", "evt_00000000000000000000000000000053"], "gaps": [], "presentation": "sufficient" }
+]

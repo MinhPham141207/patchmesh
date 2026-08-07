@@ -1,0 +1,27 @@
+{
+  "resources": [
+    {"resourceId":"res_c0375c9ba513eb7029ccce578c9b58dc6debded701c5afd9708102a3acec3a8b","repositoryId":"repo_11111111-1111-4111-8111-111111111111","kind":"symbol","locator":"src/auth.ts#typescript:function:authenticate"},
+    {"resourceId":"res_6b967ca968e10ea05d94e7ad7adf88b3e97b339c9a64a30e8f3ccab1ae6df030","repositoryId":"repo_11111111-1111-4111-8111-111111111111","kind":"symbol","locator":"src/session.ts#typescript:function:createSession"}
+  ],
+  "nodes": [
+    {"nodeId":"node_00000000000000000000000000000001","kind":"agent","entityId":"agent_b"},
+    {"nodeId":"node_00000000000000000000000000000002","kind":"task","entityId":"task_consumer"},
+    {"nodeId":"node_00000000000000000000000000000003","kind":"resource","entityId":"res_c0375c9ba513eb7029ccce578c9b58dc6debded701c5afd9708102a3acec3a8b"},
+    {"nodeId":"node_00000000000000000000000000000004","kind":"resource","entityId":"res_6b967ca968e10ea05d94e7ad7adf88b3e97b339c9a64a30e8f3ccab1ae6df030"},
+    {"nodeId":"node_00000000000000000000000000000005","kind":"work_product","entityId":"work_00000000000000000000000000000001"},
+    {"nodeId":"node_00000000000000000000000000000006","kind":"finding","entityId":"finding_00000000000000000000000000000001"},
+    {"nodeId":"node_00000000000000000000000000000007","kind":"decision","entityId":"decision_00000000000000000000000000000001"}
+  ],
+  "edges": [
+    {"edgeId":"edge_00000000000000000000000000000001","kind":"observed","fromNodeId":"node_00000000000000000000000000000001","toNodeId":"node_00000000000000000000000000000003","dependency":null,"evidenceEventIds":["evt_00000000000000000000000000000002"]},
+    {"edgeId":"edge_00000000000000000000000000000002","kind":"depends_on","fromNodeId":"node_00000000000000000000000000000004","toNodeId":"node_00000000000000000000000000000003","dependency":{"dependencyId":"dep_00000000000000000000000000000001","dependentResourceId":"res_6b967ca968e10ea05d94e7ad7adf88b3e97b339c9a64a30e8f3ccab1ae6df030","dependencyResourceId":"res_c0375c9ba513eb7029ccce578c9b58dc6debded701c5afd9708102a3acec3a8b","dependentVersion":{"resourceId":"res_6b967ca968e10ea05d94e7ad7adf88b3e97b339c9a64a30e8f3ccab1ae6df030","domain":{"repositoryId":"repo_11111111-1111-4111-8111-111111111111","workspaceId":"ws_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","worktreeId":"wt_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},"kind":"symbol_signature","value":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","evidenceEventIds":["evt_00000000000000000000000000000002"]},"dependencyVersion":{"resourceId":"res_c0375c9ba513eb7029ccce578c9b58dc6debded701c5afd9708102a3acec3a8b","domain":{"repositoryId":"repo_11111111-1111-4111-8111-111111111111","workspaceId":"ws_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","worktreeId":"wt_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},"kind":"symbol_signature","value":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","evidenceEventIds":["evt_00000000000000000000000000000002"]},"observations":[{"kind":"statically_observed","producer":{"sourceId":"source_analyzer","version":"1"},"rule":{"ruleId":"rule_typescript_import","version":"1"},"evidenceEventIds":["evt_00000000000000000000000000000002"]}],"evidenceEventIds":["evt_00000000000000000000000000000002","evt_00000000000000000000000000000004"]},"evidenceEventIds":["evt_00000000000000000000000000000002","evt_00000000000000000000000000000004"]},
+    {"edgeId":"edge_00000000000000000000000000000003","kind":"produced","fromNodeId":"node_00000000000000000000000000000002","toNodeId":"node_00000000000000000000000000000005","dependency":null,"evidenceEventIds":["evt_00000000000000000000000000000005"]},
+    {"edgeId":"edge_00000000000000000000000000000004","kind":"affects","fromNodeId":"node_00000000000000000000000000000006","toNodeId":"node_00000000000000000000000000000002","dependency":null,"evidenceEventIds":["evt_00000000000000000000000000000002","evt_00000000000000000000000000000004","evt_00000000000000000000000000000007"]},
+    {"edgeId":"edge_00000000000000000000000000000005","kind":"derived_from","fromNodeId":"node_00000000000000000000000000000007","toNodeId":"node_00000000000000000000000000000006","dependency":null,"evidenceEventIds":["evt_00000000000000000000000000000009"]},
+    {"edgeId":"edge_00000000000000000000000000000006","kind":"targets","fromNodeId":"node_00000000000000000000000000000007","toNodeId":"node_00000000000000000000000000000002","dependency":null,"evidenceEventIds":["evt_0000000000000000000000000000000a"]}
+  ],
+  "targetSnapshots": [
+    {"targetSnapshotId":"snapshot_bb7d60fbf9da67062adc152cdf0e8a1ad15542c354f2caf14fa63fd0fea3fe87","integrationTargetId":"target_84382d24e7e9d1442e40dd3c53b1d963b79434955dd909fe4d86bf9c891261a0","repositoryId":"repo_11111111-1111-4111-8111-111111111111","kind":"branch","locator":"refs/heads/main","baseCommit":"1111111111111111111111111111111111111111","candidateIds":[],"digest":"bb7d60fbf9da67062adc152cdf0e8a1ad15542c354f2caf14fa63fd0fea3fe87"},
+    {"targetSnapshotId":"snapshot_c618b284d547a3d866a9f42a3faa578f4feab8259437c376a5538dcd23562f88","integrationTargetId":"target_84382d24e7e9d1442e40dd3c53b1d963b79434955dd909fe4d86bf9c891261a0","repositoryId":"repo_11111111-1111-4111-8111-111111111111","kind":"branch","locator":"refs/heads/main","baseCommit":"1111111111111111111111111111111111111111","candidateIds":["candidate_77da495c18b095d91131eba596a644add6d0535ead8fa03cd5d935440362ee57"],"digest":"c618b284d547a3d866a9f42a3faa578f4feab8259437c376a5538dcd23562f88"}
+  ]
+}

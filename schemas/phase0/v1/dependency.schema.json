@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase0/v1/dependency.schema.json",
+  "$defs": {
+    "provenanceObservation": {
+      "type": "object", "properties": {
+        "kind": { "enum": ["declared", "statically_observed", "dynamically_observed", "semantically_inferred"] },
+        "producer": { "type": "object", "properties": { "sourceId": { "type": "string", "pattern": "^source_[a-z0-9][a-z0-9._-]{0,63}$" }, "version": { "type": "string", "pattern": "^\\S+$" } }, "required": ["sourceId", "version"], "additionalProperties": false },
+        "rule": { "oneOf": [{ "type": "object", "properties": { "ruleId": { "type": "string", "pattern": "^rule_[a-z0-9][a-z0-9._-]{0,63}$" }, "version": { "type": "string", "pattern": "^\\S+$" } }, "required": ["ruleId", "version"], "additionalProperties": false }, { "type": "null" }] },
+        "evidenceEventIds": { "type": "array", "items": { "$ref": "./identities.schema.json#/$defs/eventId" }, "minItems": 1, "uniqueItems": true }
+      }, "required": ["kind", "producer", "rule", "evidenceEventIds"], "additionalProperties": false
+    }
+  },
+  "type": "object", "properties": {
+    "dependencyId": { "type": "string", "pattern": "^dep_[0-9a-f]{32}$" },
+    "dependentResourceId": { "$ref": "./identities.schema.json#/$defs/resourceId" },
+    "dependencyResourceId": { "$ref": "./identities.schema.json#/$defs/resourceId" },
+    "dependentVersion": { "$ref": "./identities.schema.json#/$defs/resourceVersion" },
+    "dependencyVersion": { "$ref": "./identities.schema.json#/$defs/resourceVersion" },
+    "observations": { "type": "array", "items": { "$ref": "#/$defs/provenanceObservation" }, "minItems": 1, "uniqueItems": true },
+    "evidenceEventIds": { "type": "array", "items": { "$ref": "./identities.schema.json#/$defs/eventId" }, "minItems": 1, "uniqueItems": true }
+  }, "required": ["dependencyId", "dependentResourceId", "dependencyResourceId", "dependentVersion", "dependencyVersion", "observations", "evidenceEventIds"], "additionalProperties": false
+}

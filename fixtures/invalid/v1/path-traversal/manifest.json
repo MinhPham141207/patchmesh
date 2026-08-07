@@ -1,0 +1,1 @@
+{"schemaVersion":1,"scenarioId":"scenario_invalid_path_traversal","title":"Traversal path is rejected","targetPhase":1,"kind":"negative","eventsFile":"events.ndjson","expected":null,"variants":[],"expectedError":"PHASE0_SCHEMA_INVALID"}

@@ -81,6 +81,11 @@ test replacement, or project-management platform.
 - [Lifecycle](docs/LIFECYCLE.md) — agent, task, event, decision, and revalidation flows
 - [Terminology](docs/TERMINOLOGY.md) — canonical vocabulary
 - [Agent rules](docs/AGENTS.md) — implementation constraints for repository changes
+- [Phase 0 contracts](docs/protocol/identities.md) — versioned identities, events,
+  coordination, validity, evidence, replay fixtures, security, and benchmark inputs
+
+Run `node tools/phase0/validate.mjs` to verify the Phase 0 contract corpus. This is
+development validation, not a released PatchMesh CLI.
 
 ## Contributing
 

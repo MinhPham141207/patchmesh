@@ -1,0 +1,3 @@
+[
+  { "coverageId": "coverage_00000000000000000000000000000001", "scope": "authenticate observation and candidate change", "modes": ["intercepted", "verified"], "evidenceEventIds": ["evt_00000000000000000000000000000001", "evt_00000000000000000000000000000002", "evt_00000000000000000000000000000006", "evt_00000000000000000000000000000007"], "gaps": [], "presentation": "sufficient" }
+]

@@ -1,0 +1,1 @@
+{"schemaVersion":1,"scenarioId":"scenario_conflicting_duplicate_id","title":"Conflicting content under one event ID is rejected","targetPhase":1,"kind":"negative","eventsFile":"events.ndjson","expected":null,"variants":[],"expectedError":"PHASE0_ID_CONFLICT"}

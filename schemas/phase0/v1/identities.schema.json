@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase0/v1/identities.schema.json",
+  "$defs": {
+    "repositoryId": { "type": "string", "pattern": "^repo_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "workspaceId": { "type": "string", "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "worktreeId": { "type": "string", "pattern": "^wt_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "agentId": { "oneOf": [{ "type": "string", "pattern": "^agent_[a-z0-9][a-z0-9._-]{0,63}$" }, { "type": "null" }] },
+    "taskId": { "oneOf": [{ "type": "string", "pattern": "^task_[a-z0-9][a-z0-9._-]{0,63}$" }, { "type": "null" }] },
+    "eventId": { "type": "string", "pattern": "^evt_[0-9a-f]{32}$" },
+    "resourceId": { "type": "string", "pattern": "^res_[0-9a-f]{64}$" },
+    "targetId": { "type": "string", "pattern": "^target_[a-z0-9][a-z0-9._-]{0,127}$" },
+    "targetSnapshotId": { "type": "string", "pattern": "^snapshot_[0-9a-f]{64}$" },
+    "logicalPath": { "type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*\\/$)[^\\u0000]+$" },
+    "versionDomain": {
+      "type": "object", "properties": { "repositoryId": { "$ref": "#/$defs/repositoryId" }, "workspaceId": { "$ref": "#/$defs/workspaceId" }, "worktreeId": { "$ref": "#/$defs/worktreeId" } },
+      "required": ["repositoryId", "workspaceId", "worktreeId"], "additionalProperties": false
+    },
+    "integrationTarget": {
+      "type": "object", "properties": { "integrationTargetId": { "$ref": "#/$defs/targetId" }, "repositoryId": { "$ref": "#/$defs/repositoryId" }, "kind": { "enum": ["branch", "revision", "candidate_aggregate"] }, "locator": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" } },
+      "required": ["integrationTargetId", "repositoryId", "kind", "locator"], "additionalProperties": false
+    },
+    "targetSnapshot": {
+      "type": "object", "properties": { "targetSnapshotId": { "$ref": "#/$defs/targetSnapshotId" }, "integrationTargetId": { "$ref": "#/$defs/targetId" }, "repositoryId": { "$ref": "#/$defs/repositoryId" }, "kind": { "enum": ["branch", "revision", "candidate_aggregate"] }, "locator": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "baseCommit": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }, "candidateIds": { "type": "array", "items": { "type": "string", "pattern": "^candidate_[0-9a-f]{64}$" }, "uniqueItems": true }, "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+      "required": ["targetSnapshotId", "integrationTargetId", "repositoryId", "kind", "locator", "baseCommit", "candidateIds", "digest"], "additionalProperties": false
+    },
+    "logicalResource": {
+      "type": "object", "properties": { "resourceId": { "$ref": "#/$defs/resourceId" }, "repositoryId": { "$ref": "#/$defs/repositoryId" }, "kind": { "enum": ["file", "symbol", "api", "schema", "test"] }, "locator": { "$ref": "#/$defs/logicalPath" } },
+      "required": ["resourceId", "repositoryId", "kind", "locator"], "additionalProperties": false
+    },
+    "resourceVersion": {
+      "type": "object", "properties": { "resourceId": { "$ref": "#/$defs/resourceId" }, "domain": { "$ref": "#/$defs/versionDomain" }, "kind": { "enum": ["git_commit", "git_blob", "content_hash", "symbol_signature", "schema_version", "api_version", "deleted"] }, "value": { "oneOf": [{ "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, { "type": "null" }] }, "evidenceEventIds": { "type": "array", "items": { "$ref": "#/$defs/eventId" }, "minItems": 1, "uniqueItems": true } },
+      "required": ["resourceId", "domain", "kind", "value", "evidenceEventIds"], "additionalProperties": false
+    }
+  }
+}

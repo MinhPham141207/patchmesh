@@ -165,6 +165,13 @@ The task could not be completed.
 
 The user or orchestrator intentionally ended the task.
 
+### Work-product validity
+
+Validity is a separate projection defined by [the validity contract](protocol/validity.md).
+Its states are `unassessed`, `valid`, `possibly_stale`, `revalidating`, and `stale`.
+`completed` is execution state, not validity. Assessed transitions require a current
+target validation or evidence-backed dependency impact.
+
 ### Task validity transition invariants
 
 ```text
@@ -212,9 +219,10 @@ run_test
 git_commit
 ```
 
-PatchMesh records the agent's intent. Every event contains `taskId`, whose value may
-be `null` when an adapter or watcher cannot attribute the activity. Later attribution
-is represented by a new immutable event.
+PatchMesh records the agent's intent. Every event contains required `agentId` and
+`taskId` fields whose values may be null when attribution is unavailable. Later
+attribution is a new immutable `attribution.corrected` event; the original event is
+never rewritten.
 
 ### Step 2: Pre-check
 
@@ -274,6 +282,8 @@ dependency.changed
 The live work graph updates the agent's footprint, resource versions, dependencies, and task state.
 
 ## 5. Event Lifecycle
+
+Idempotency, correlation, causation, and source ordering follow [Event Protocol V1](protocol/events.md).
 
 Events are immutable facts.
 

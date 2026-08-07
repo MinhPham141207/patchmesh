@@ -1,0 +1,1 @@
+{"schemaVersion":1,"scenarioId":"scenario_unsupported_schema","title":"Unsupported event schema is rejected","targetPhase":1,"kind":"negative","eventsFile":"events.ndjson","expected":null,"variants":[],"expectedError":"PHASE0_SCHEMA_UNSUPPORTED"}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": "phase0-v1",
+  "environmentFields": ["timestamp", "commit", "os", "architecture", "cpu", "memoryBytes", "nodeVersion"],
+  "workloads": [
+    {"workloadId":"benchmark_interception_noop_route","kind":"interception_latency","operation":"noop_route","baseline":"direct_operation","instrumented":"gateway_observation","warmupSamples":100,"measuredSamples":1000,"metrics":["baseline_ns","instrumented_ns","overhead_ns","p50_ns","p95_ns","failures"]},
+    {"workloadId":"benchmark_interception_small_file_read","kind":"interception_latency","operation":"small_file_read","baseline":"direct_operation","instrumented":"gateway_observation","warmupSamples":100,"measuredSamples":1000,"metrics":["baseline_ns","instrumented_ns","overhead_ns","p50_ns","p95_ns","failures"]},
+    {"workloadId":"benchmark_interception_opaque_shell","kind":"interception_latency","operation":"opaque_shell","baseline":"direct_operation","instrumented":"gateway_observation","warmupSamples":50,"measuredSamples":500,"metrics":["baseline_ns","instrumented_ns","overhead_ns","p50_ns","p95_ns","failures"]},
+    {"workloadId":"benchmark_replay_1000","kind":"replay","eventCount":1000,"variants":["canonical","duplicates","out_of_order"],"warmupRuns":3,"measuredRuns":10,"metrics":["elapsed_ns","events_per_second","peak_memory_bytes","p50_ns","p95_ns","snapshot_digest","failures"]},
+    {"workloadId":"benchmark_replay_10000","kind":"replay","eventCount":10000,"variants":["canonical","duplicates","out_of_order"],"warmupRuns":3,"measuredRuns":10,"metrics":["elapsed_ns","events_per_second","peak_memory_bytes","p50_ns","p95_ns","snapshot_digest","failures"]},
+    {"workloadId":"benchmark_replay_100000","kind":"replay","eventCount":100000,"variants":["canonical","duplicates","out_of_order"],"warmupRuns":1,"measuredRuns":5,"metrics":["elapsed_ns","events_per_second","peak_memory_bytes","p50_ns","p95_ns","snapshot_digest","failures"]},
+    {"workloadId":"benchmark_detector_same_symbol_overlap","kind":"detector_quality","detector":"same_symbol_overlap","corpusSource":"phase2_labeled_scenario_corpus","requiredLabels":["relevant","irrelevant"],"findingMatchFields":["detector","subject_resource","affected_task","evidence_path"],"metrics":["true_positive","false_positive","true_negative","false_negative","precision","recall"]},
+    {"workloadId":"benchmark_detector_stale_read_before_write","kind":"detector_quality","detector":"stale_read_before_write","corpusSource":"phase2_labeled_scenario_corpus","requiredLabels":["relevant","irrelevant"],"findingMatchFields":["detector","subject_resource","affected_task","evidence_path"],"metrics":["true_positive","false_positive","true_negative","false_negative","precision","recall"]},
+    {"workloadId":"benchmark_detector_exported_contract_invalidation","kind":"detector_quality","detector":"exported_contract_invalidation","corpusSource":"phase2_labeled_scenario_corpus","requiredLabels":["relevant","irrelevant"],"findingMatchFields":["detector","subject_resource","affected_task","evidence_path"],"metrics":["true_positive","false_positive","true_negative","false_negative","precision","recall"]}
+  ]
+}

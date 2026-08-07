@@ -29,7 +29,7 @@ prospective impact and requests targeted revalidation before integration.
 
 ## Phase 0 — Foundation
 
-**Status:** Current
+**Status:** Complete — contract corpus and exit evidence verified.
 
 **Goal:** Make the first implementation slice unambiguous and measurable.
 
@@ -51,6 +51,22 @@ prospective impact and requests targeted revalidation before integration.
 - replay and projection-equivalence tests can be implemented without inventing behavior;
 - opaque shell and adapter limitations have explicit degraded-mode behavior;
 - planned behavior is labeled consistently throughout the documentation.
+
+**Evidence implementation:**
+
+- identity and version rules: [`docs/protocol/identities.md`](protocol/identities.md);
+- event envelope and ordering: [`docs/protocol/events.md`](protocol/events.md);
+- action, directive, and delivery rules: [`docs/protocol/coordination.md`](protocol/coordination.md);
+- validity invariants: [`docs/protocol/validity.md`](protocol/validity.md);
+- provenance and coverage: [`docs/protocol/evidence-and-coverage.md`](protocol/evidence-and-coverage.md);
+- replay equivalence: [`docs/protocol/replay-equivalence.md`](protocol/replay-equivalence.md);
+- threat model: [`docs/THREAT_MODEL.md`](THREAT_MODEL.md);
+- schemas, golden scenarios, benchmark definitions, and validator:
+  `schemas/phase0/`, `fixtures/`, `benchmarks/phase0/`, and
+  `tools/phase0/validate.mjs`.
+
+These artifacts define and validate Phase 0 behavior. They do not implement Phase 1
+runtime observation, storage, projections, or CLI commands.
 
 ## Phase 1 — Observe and Replay
 
@@ -159,7 +175,6 @@ remain advisory until independently corroborated.
 ## Metrics
 
 Track at least:
-
 - observation coverage and bypass rate;
 - unknown agent and task attribution rate;
 - detector precision, recall, and confidence calibration by class;

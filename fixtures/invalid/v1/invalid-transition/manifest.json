@@ -1,0 +1,1 @@
+{"schemaVersion":1,"scenarioId":"scenario_invalid_transition","title":"Validity transition guard is enforced","targetPhase":1,"kind":"negative","eventsFile":"events.ndjson","expected":null,"variants":[],"expectedError":"PHASE0_TRANSITION_INVALID"}

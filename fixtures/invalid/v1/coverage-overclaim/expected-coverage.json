@@ -1,0 +1,1 @@
+[{"coverageId":"coverage_00000000000000000000000000000094","scope":"opaque request","modes":["intercepted","unknown"],"evidenceEventIds":["evt_00000000000000000000000000000094"],"gaps":[{"kind":"opaque","scope":"effects","reason":"shell effects are not enumerable","evidenceEventIds":["evt_00000000000000000000000000000094"]}],"presentation":"sufficient"}]

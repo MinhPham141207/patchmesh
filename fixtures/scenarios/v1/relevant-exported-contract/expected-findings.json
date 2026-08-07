@@ -1,0 +1,3 @@
+[
+  { "findingId": "finding_00000000000000000000000000000001", "findingType": "exported_contract_invalidation", "status": "open", "subjectResourceId": "res_c0375c9ba513eb7029ccce578c9b58dc6debded701c5afd9708102a3acec3a8b", "affectedTaskId": "task_consumer", "dependencyIds": ["dep_00000000000000000000000000000001"], "evidenceEventIds": ["evt_00000000000000000000000000000002", "evt_00000000000000000000000000000004", "evt_00000000000000000000000000000007"], "confidence": 1, "confidenceBand": "high", "severity": "warning", "coverageIds": ["coverage_00000000000000000000000000000001"], "detector": { "detectorId": "detector_exported_contract", "version": "1" } }
+]
