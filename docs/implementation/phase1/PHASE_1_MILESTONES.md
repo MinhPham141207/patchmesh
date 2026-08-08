@@ -1,6 +1,6 @@
 # PatchMesh Phase 1 Milestones: Observe and Replay
 
-> **Status:** M0 through M5 complete; M6-M7 planned. These milestones break the Phase 1
+> **Status:** M0 through M6 complete; M7 planned. These milestones break the Phase 1
 > roadmap scope into independently testable vertical slices. M1 provides the strict
 > workspace, protocol boundary, and in-memory collector; later runtime capabilities
 > are not implemented yet.
@@ -200,7 +200,7 @@ minimal event path.
 - No Phase 2 detector finding or policy decision is emitted or required to build the
   Phase 1 graph.
 
-### M6: Read-Only Daemon Services and CLI
+### M6: Read-Only Daemon Services and CLI (Complete)
 
 **Goal:** Make observed and projected state usable through stable public queries.
 
@@ -218,6 +218,8 @@ minimal event path.
   stale states, findings, or later-phase validity claims.
 
 **Exit evidence:**
+
+- [M6 completion evidence](evidence/PHASE_1_M6_EVIDENCE.md)
 
 - CLI integration tests exercise the public services against a fixture database.
 - Output and exit behavior are deterministic and documented.

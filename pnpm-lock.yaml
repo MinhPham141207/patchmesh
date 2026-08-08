@@ -18,6 +18,27 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  apps/cli:
+    dependencies:
+      '@patchmesh/daemon':
+        specifier: workspace:*
+        version: link:../daemon
+      '@patchmesh/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@patchmesh/query':
+        specifier: workspace:*
+        version: link:../../packages/query
+
+  apps/daemon:
+    dependencies:
+      '@patchmesh/query':
+        specifier: workspace:*
+        version: link:../../packages/query
+      '@patchmesh/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+
   packages/adapters:
     dependencies:
       '@patchmesh/observation':
@@ -50,6 +71,15 @@ importers:
       ajv-formats:
         specifier: ^3.0.1
         version: 3.0.1(ajv@8.20.0)
+
+  packages/query:
+    dependencies:
+      '@patchmesh/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@patchmesh/storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/storage:
     dependencies:

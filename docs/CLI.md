@@ -2,17 +2,18 @@
 
 ## 1. Status and Purpose
 
-> **Status:** Planned. M1 protocol and collector foundations exist, but no CLI command
-> is implemented or released.
+> **Status:** M6 Phase 1 commands are implemented: `status`, `agents`, `events`, and
+> `graph`. Later coordination and lifecycle commands remain unavailable.
 
-This document describes target CLI behavior. No command is available until its
-implementation, help output, and tests exist.
+This document describes the implemented Phase 1 read-only CLI and the planned later
+commands. The four Phase 1 commands are backed by the public query services and are
+covered by integration tests.
 
 Roadmap placement means that a command is scheduled for a phase; it does not mean the
 command is implemented. An unscheduled command requires an explicit roadmap update
 before implementation.
 
-The planned Phase 1 evidence workflow is:
+The Phase 1 evidence workflow is:
 
 ```bash
 patchmesh status
@@ -20,7 +21,7 @@ patchmesh events --follow
 patchmesh graph
 ```
 
-This is a target observation workflow, not a runnable quick start.
+This is a runnable observation workflow when an existing database is supplied.
 
 The eventual JSON protocol envelope requires `workspaceId`, `worktreeId`, nullable
 `agentId`, and nullable `taskId`; examples remain illustrative. Unavailable agent or
@@ -34,10 +35,10 @@ not mutation of the original event. See [Event Protocol V1](protocol/events.md) 
 
 | Command | Roadmap placement | Availability |
 | --- | --- | --- |
-| `status` | Phase 1 - Observe and Replay | Planned, not implemented |
-| `agents` | Phase 1 - Observe and Replay | Planned, not implemented |
-| `events` | Phase 1 - Observe and Replay | Planned, not implemented |
-| `graph` | Phase 1 - Observe and Replay | Planned, not implemented |
+| `status` | Phase 1 - Observe and Replay | Available, read-only |
+| `agents` | Phase 1 - Observe and Replay | Available, read-only |
+| `events` | Phase 1 - Observe and Replay | Available, read-only |
+| `graph` | Phase 1 - Observe and Replay | Available, read-only |
 | `overlaps` | Phase 2 - Deterministic Detection | Planned, not implemented |
 | `stale` | Phase 2 - Deterministic Detection | Planned, not implemented |
 | `explain` | Phase 2 - Deterministic Detection | Planned, not implemented |
@@ -65,6 +66,7 @@ patchmesh <command> [options]
 --no-color        Disable colored output
 --config <path>   Use a custom configuration file
 --project <path>  Use a repository other than the current directory
+--database <path> Use an existing SQLite event database
 ```
 
 ### Environment variables
@@ -210,7 +212,7 @@ patchmesh stop [options]
 
 ## `patchmesh status`
 
-**Roadmap placement:** Phase 1 - Observe and Replay. Planned, not implemented.
+**Roadmap placement:** Phase 1 - Observe and Replay. Available, read-only.
 
 Show the health and current state of PatchMesh.
 
@@ -231,18 +233,15 @@ patchmesh status [options]
 ```text
 PatchMesh status
 
-Daemon:          running
-Project:         /workspace/example
-Active agents:   3
-Running tasks:   2
-Paused tasks:    1
-Open overlaps:   1
-Possibly stale:  2
-Events recorded: 1,482
-Coverage:        degraded
-Coverage modes:  intercepted, verified
-Coverage gap:    opaque shell effects
-Unattributed:    3 events
+Health:            degraded
+Store:             open
+Replayable:        true
+Events recorded:   1,482
+Agents observed:   3
+Tasks observed:    2
+Null attribution:  3
+Coverage:          degraded
+Coverage gap:      opaque tool effects
 ```
 
 ---
@@ -315,9 +314,10 @@ q          Exit
 
 ## `patchmesh agents`
 
-**Roadmap placement:** Phase 1 - Observe and Replay. Planned, not implemented.
+**Roadmap placement:** Phase 1 - Observe and Replay. Available, read-only.
 
-List active and recent agents.
+List observed agents and their attributed task evidence. M6 does not infer agent
+lifecycle status.
 
 ### Usage
 
@@ -328,26 +328,23 @@ patchmesh agents [options]
 ### Options
 
 ```text
---active           Show only active agents
---runtime <name>   Filter by runtime
---task <id>        Filter by task
---status <status>  Filter by status
+--agent <id>       Filter by agent
+--task <id>        Filter by task attribution
 --json             Print machine-readable output
 ```
 
 ### Example
 
 ```bash
-patchmesh agents --active
+patchmesh agents --agent agent-a
 ```
 
 ### Example output
 
 ```text
-ID        RUNTIME       TASK                  STATUS
-agent-a   claude-code   Fix login timeout     running
-agent-b   claude-code   Add session refresh   running
-agent-c   claude-code   -                     waiting
+ID        TASKS                 EVENTS
+agent-a   task-login            12
+agent-b   -                     7
 ```
 
 `-` represents unavailable task attribution; JSON output uses `"taskId": null`.
@@ -472,7 +469,7 @@ Recommended check:
 
 ## `patchmesh graph`
 
-**Roadmap placement:** Phase 1 - Observe and Replay. Planned, not implemented.
+**Roadmap placement:** Phase 1 - Observe and Replay. Available, read-only.
 
 Inspect the current rebuildable work-graph projection. This command is read-only;
 the append-only event log remains the source of truth.
@@ -497,10 +494,8 @@ patchmesh graph [options]
 ```text
 WORK GRAPH
 
-Integration target: main@4f92c1a
 Coverage:           degraded
-Coverage evidence:  intercepted, verified
-Coverage gap:       opaque shell effects
+Coverage gap:       opaque tool effects
 
 agent:agent-b
   -> task:session-refresh
@@ -674,7 +669,7 @@ Recommended check:
 
 ## `patchmesh events`
 
-**Roadmap placement:** Phase 1 - Observe and Replay. Planned, not implemented.
+**Roadmap placement:** Phase 1 - Observe and Replay. Available, read-only.
 
 Inspect recorded normalized events.
 
@@ -693,6 +688,7 @@ patchmesh events [options]
 --since <duration>  Show recent events
 --until <time>      Set an ending timestamp
 --limit <number>    Limit returned events
+--cursor <event-id> Resume after an event cursor
 --follow            Continue streaming new events
 --raw               Show full normalized fields with secrets redacted
 --json              Print newline-delimited JSON

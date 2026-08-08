@@ -1,9 +1,10 @@
 # PatchMesh Architecture
 
-> **Status:** Planned target architecture. M1 through M5 currently implement the protocol
+> **Status:** Planned target architecture. M1 through M6 currently implement the protocol
 > boundary, in-memory collector, append-only SQLite event store, replay core, an
-> in-process MCP runtime boundary, effect observation, and rebuildable in-memory graph
-> projections; see [ROADMAP.md](ROADMAP.md) for phase status.
+> in-process MCP runtime boundary, effect observation, rebuildable in-memory graph
+> projections, and read-only query/CLI composition; see [ROADMAP.md](ROADMAP.md) for
+> phase status.
 
 ## 1. Purpose
 

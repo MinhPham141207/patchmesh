@@ -1,0 +1,23 @@
+{
+  "name": "@patchmesh/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "files": ["dist"],
+  "bin": {
+    "patchmesh": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@patchmesh/daemon": "workspace:*",
+    "@patchmesh/query": "workspace:*",
+    "@patchmesh/protocol": "workspace:*"
+  }
+}
