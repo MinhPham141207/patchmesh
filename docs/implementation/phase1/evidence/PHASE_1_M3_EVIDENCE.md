@@ -1,8 +1,10 @@
 # Phase 1 M3 Evidence: First Runtime Boundary
 
-**Status:** Implemented; final workspace verification recorded after M3 test completion
+**Status:** Verified
 
 **Verification date:** 2026-08-08
+
+**Base revision:** `5909bc8` (M3 implementation and evidence documentation before final verification update)
 
 ## Scope Verified
 
@@ -21,11 +23,15 @@ projection, detector, policy, decision, daemon, or CLI behavior.
 | --- | --- |
 | `corepack pnpm --filter @patchmesh/adapters test` | Passed: 8 adapter tests |
 | `corepack pnpm --filter @patchmesh/adapters typecheck` | Passed |
+| `corepack pnpm --filter @patchmesh/adapters build` | Passed |
 | `corepack pnpm --filter @patchmesh/protocol build` | Passed |
 | `corepack pnpm --filter @patchmesh/storage build` | Passed |
-
-The full workspace and Phase 0 verification commands are run and recorded by the
-M3 completion gate after this evidence file is created.
+| `corepack pnpm --recursive test` | Passed: 48 tests across protocol, collector, storage, and adapters |
+| `corepack pnpm --recursive typecheck` | Passed for all 4 workspace packages |
+| `corepack pnpm --recursive build` | Passed for all 4 workspace packages |
+| `node tools/phase0/validate.mjs` | `Phase 0 corpus valid` |
+| `node --test tools/phase0/*.test.mjs` | Passed: 47 tests |
+| `git diff --check` | Passed; no whitespace errors |
 
 ## Behavior Evidence
 
