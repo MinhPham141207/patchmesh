@@ -72,6 +72,8 @@ runtime observation, storage, projections, or CLI commands.
 
 **Goal:** Capture one runtime's activity and reproduce derived state without making coordination decisions that interrupt work.
 
+**M0 prerequisite:** Complete. See [`docs/PHASE_0_M0_EVIDENCE.md`](PHASE_0_M0_EVIDENCE.md).
+
 **Deliverables:**
 
 - TypeScript/pnpm modular-monolith workspace;
@@ -93,6 +95,8 @@ runtime observation, storage, projections, or CLI commands.
 - security fixtures persist no unredacted secrets;
 - bypassed or opaque operations reduce reported coverage rather than appearing fully observed;
 - p50 and p95 interception overhead are measured and recorded.
+
+**Implementation milestones:** [`docs/PHASE_1_MILESTONES.md`](PHASE_1_MILESTONES.md).
 
 ## Phase 2 — Deterministic Detection
 
