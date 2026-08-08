@@ -13,8 +13,10 @@ import type {
   McpProxyResult,
   McpToolCall,
   EventAppender,
+  ToolExecutionResult,
   ToolExecutor,
 } from "./types.js";
+import { McpProxyStorageError } from "./errors.js";
 
 function appendValidated(event: ProtocolEvent, eventStore: EventAppender): ProtocolEvent {
   const parsed = parseEvent(event);
@@ -87,6 +89,10 @@ function createToolCompletedEvent(
   };
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
 export class McpProxy {
   private readonly eventStore: EventAppender;
   private readonly createEventId: () => EventId;
@@ -104,23 +110,56 @@ export class McpProxy {
     executor: ToolExecutor<T>,
     signal?: AbortSignal,
   ): Promise<McpProxyResult<T>> {
-    const requestEvent = asToolRequested(appendValidated(
-      createToolRequestedEvent(call, context, this.createEventId(), this.now()),
-      this.eventStore,
-    ));
+    let requestEvent: ToolRequestedEvent;
+    try {
+      requestEvent = asToolRequested(appendValidated(
+        createToolRequestedEvent(call, context, this.createEventId(), this.now()),
+        this.eventStore,
+      ));
+    } catch (error) {
+      if (error instanceof ProtocolValidationError) throw error;
+      throw new McpProxyStorageError(
+        "MCP_REQUEST_PERSIST_FAILED",
+        "request",
+        null,
+        null,
+        { cause: error },
+      );
+    }
+
     const executionSignal = signal ?? new AbortController().signal;
-    const execution = await executor(executionSignal);
-    const completedEvent = appendValidated(
-      createToolCompletedEvent(
-        context,
+    let execution: ToolExecutionResult<T>;
+    try {
+      execution = await executor(executionSignal);
+    } catch (error) {
+      execution = executionSignal.aborted || isAbortError(error)
+        ? { outcome: "interrupted", exitCode: null }
+        : { outcome: "failed", error, exitCode: null };
+    }
+
+    let completedEvent: ProtocolEvent;
+    try {
+      completedEvent = appendValidated(
+        createToolCompletedEvent(
+          context,
+          requestEvent.eventId,
+          this.createEventId(),
+          this.now(),
+          execution.outcome,
+          execution.exitCode,
+        ),
+        this.eventStore,
+      );
+    } catch (error) {
+      if (error instanceof ProtocolValidationError) throw error;
+      throw new McpProxyStorageError(
+        "MCP_COMPLETION_PERSIST_FAILED",
+        "completion",
         requestEvent.eventId,
-        this.createEventId(),
-        this.now(),
         execution.outcome,
-        execution.exitCode,
-      ),
-      this.eventStore,
-    );
+        { cause: error },
+      );
+    }
 
     return {
       execution,

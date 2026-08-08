@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   McpProxy,
+  McpProxyStorageError,
+  type EventAppender,
   type McpCallContext,
   type McpToolCall,
 } from "../src/index.js";
@@ -45,19 +47,22 @@ const context: McpCallContext = {
   completionSourceSequence: 2,
 };
 
+function createProxy(eventStore: EventAppender, ids: EventId[] = [
+  "evt_00000000000000000000000000000001",
+  "evt_00000000000000000000000000000002",
+]): McpProxy {
+  return new McpProxy({
+    eventStore,
+    createEventId: () => ids.shift() ?? "evt_00000000000000000000000000000003",
+    now: () => "2026-08-08T00:00:00.000Z",
+  });
+}
+
 test("persists a request before a successful completion", async () => {
   await withTemporaryDatabase(async (databasePath) => {
     const store = SqliteEventStore.open(databasePath);
     try {
-      const ids: EventId[] = [
-        "evt_00000000000000000000000000000001",
-        "evt_00000000000000000000000000000002",
-      ];
-      const proxy = new McpProxy({
-        eventStore: store,
-        createEventId: () => ids.shift() ?? "evt_00000000000000000000000000000003",
-        now: () => "2026-08-08T00:00:00.000Z",
-      });
+      const proxy = createProxy(store);
 
       const executionOrder: string[] = [];
       const result = await proxy.execute(call, context, async (signal) => {
@@ -98,6 +103,126 @@ test("persists a request before a successful completion", async () => {
       assert.equal(completion.correlationId, "corr_00000000000000000000000000000001");
       assert.equal(request.sourceSequence, 1);
       assert.equal(completion.sourceSequence, 2);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("persists an explicit failed result without storing its error", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const proxy = createProxy(store);
+      const result = await proxy.execute(call, context, async () => ({
+        outcome: "failed",
+        error: new Error("secret failure detail"),
+        exitCode: 7,
+      }));
+
+      assert.equal(result.execution.outcome, "failed");
+      const events = store.read();
+      assert.equal(events[1]?.eventType, "tool.completed");
+      if (events[1]?.eventType !== "tool.completed") throw new Error("expected completion event");
+      assert.equal(events[1].payload.outcome, "failed");
+      assert.equal(events[1].payload.exitCode, 7);
+      assert.equal(JSON.stringify(events).includes("secret failure detail"), false);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("persists an interrupted result and propagates an aborted signal", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const controller = new AbortController();
+      controller.abort();
+      const result = await createProxy(store).execute(
+        call,
+        context,
+        async (signal) => {
+          assert.equal(signal.aborted, true);
+          return { outcome: "interrupted", reason: "cancelled", exitCode: null };
+        },
+        controller.signal,
+      );
+
+      assert.equal(result.execution.outcome, "interrupted");
+      const events = store.read();
+      assert.equal(events[1]?.eventType, "tool.completed");
+      if (events[1]?.eventType !== "tool.completed") throw new Error("expected completion event");
+      assert.equal(events[1].payload.outcome, "interrupted");
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("converts an unexpected executor throw into a failed result", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const result = await createProxy(store).execute(call, context, async () => {
+        throw new Error("secret thrown detail");
+      });
+
+      assert.equal(result.execution.outcome, "failed");
+      const events = store.read();
+      assert.equal(events[1]?.eventType, "tool.completed");
+      assert.equal(JSON.stringify(events).includes("secret thrown detail"), false);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("does not execute when request persistence fails", async () => {
+  let called = false;
+  const eventStore: EventAppender = {
+    append() {
+      throw new Error("request storage detail");
+    },
+  };
+
+  await assert.rejects(
+    () => createProxy(eventStore).execute(call, context, async () => {
+      called = true;
+      return { outcome: "succeeded", value: true, exitCode: 0 };
+    }),
+    (error: unknown) => error instanceof McpProxyStorageError && error.phase === "request",
+  );
+  assert.equal(called, false);
+});
+
+test("reports completion persistence failure after execution", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    let appendCount = 0;
+    const eventStore: EventAppender = {
+      append(input) {
+        appendCount += 1;
+        if (appendCount === 2) throw new Error("completion storage detail");
+        return store.append(input);
+      },
+    };
+
+    try {
+      await assert.rejects(
+        () => createProxy(eventStore).execute(call, context, async () => ({
+          outcome: "succeeded",
+          value: true,
+          exitCode: 0,
+        })),
+        (error: unknown) => {
+          if (!(error instanceof McpProxyStorageError)) return false;
+          assert.equal(error.phase, "completion");
+          assert.equal(error.requestEventId, "evt_00000000000000000000000000000001");
+          assert.equal(error.executionOutcome, "succeeded");
+          return true;
+        },
+      );
     } finally {
       store.close();
     }
