@@ -1,6 +1,6 @@
 # PatchMesh Phase 1 Milestones: Observe and Replay
 
-> **Status:** M0 through M4 complete; M5-M7 planned. These milestones break the Phase 1
+> **Status:** M0 through M5 complete; M6-M7 planned. These milestones break the Phase 1
 > roadmap scope into independently testable vertical slices. M1 provides the strict
 > workspace, protocol boundary, and in-memory collector; later runtime capabilities
 > are not implemented yet.
@@ -172,7 +172,7 @@ minimal event path.
 - Effect-observation tests cover a temporary repository, a separate worktree, a
   changed file, a failed process, and an opaque shell operation.
 
-### M5: Replayable Work-Graph Projections
+### M5: Replayable Work-Graph Projections (Complete)
 
 **Goal:** Build the live work graph as rebuildable derived state.
 
@@ -188,6 +188,8 @@ minimal event path.
   Phase 1 graph does not require detector findings or policy decisions.
 
 **Exit evidence:**
+
+- [M5 completion evidence](evidence/PHASE_1_M5_EVIDENCE.md)
 
 - Incremental processing and clean replay produce byte-equivalent graph snapshots.
 - Duplicate and valid out-of-order event variants converge to the same projection.

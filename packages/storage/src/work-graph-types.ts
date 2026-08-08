@@ -1,0 +1,117 @@
+import type {
+  AgentId,
+  AttributionCorrectedEvent,
+  CoverageId,
+  Dependency,
+  EventId,
+  LogicalResource,
+  NullableAgentId,
+  NullableTaskId,
+  ProtocolEvent,
+  ResourceVersion,
+  TaskId,
+  WorkProductId,
+} from "@patchmesh/protocol";
+import type { SourceSequenceGap } from "./replay.js";
+
+export type GraphNodeKind = "agent" | "task" | "resource" | "version";
+
+export type GraphEdgeKind =
+  | "performs"
+  | "reads"
+  | "changes"
+  | "depends_on"
+  | "references_version";
+
+export interface AgentNode {
+  readonly kind: "agent";
+  readonly nodeId: string;
+  readonly agentId: AgentId;
+  readonly evidenceEventIds: readonly EventId[];
+}
+
+export interface TaskNode {
+  readonly kind: "task";
+  readonly nodeId: string;
+  readonly taskId: TaskId;
+  readonly evidenceEventIds: readonly EventId[];
+  readonly completionEventIds: readonly EventId[];
+  readonly workProductIds: readonly WorkProductId[];
+}
+
+export interface ResourceNode {
+  readonly kind: "resource";
+  readonly nodeId: string;
+  readonly resource: LogicalResource;
+  readonly evidenceEventIds: readonly EventId[];
+}
+
+export interface VersionNode {
+  readonly kind: "version";
+  readonly nodeId: string;
+  readonly version: ResourceVersion;
+  readonly evidenceEventIds: readonly EventId[];
+}
+
+export type GraphNode = AgentNode | TaskNode | ResourceNode | VersionNode;
+
+export interface GraphEdge {
+  readonly edgeId: string;
+  readonly kind: GraphEdgeKind;
+  readonly fromNodeId: string | null;
+  readonly toNodeId: string;
+  readonly evidenceEventIds: readonly EventId[];
+  readonly attribution: {
+    readonly agentId: NullableAgentId;
+    readonly taskId: NullableTaskId;
+  };
+  readonly changeKind?: "created" | "modified" | "deleted" | "renamed";
+  readonly beforeVersionId?: string | null;
+  readonly afterVersionId?: string;
+  readonly dependency?: Dependency;
+}
+
+export type ProjectionCoverageMode = "intercepted" | "verified" | "inferred" | "unknown";
+
+export type ProjectionCoverageGapKind = "opaque" | "unverified" | "unattributed" | "missing_sequence";
+
+export interface ProjectionCoverageGap {
+  readonly kind: ProjectionCoverageGapKind;
+  readonly scope: string;
+  readonly reason: string;
+  readonly evidenceEventIds: readonly EventId[];
+}
+
+export interface ProjectionCoverage {
+  readonly coverageId: CoverageId;
+  readonly scope: string;
+  readonly modes: readonly ProjectionCoverageMode[];
+  readonly gaps: readonly ProjectionCoverageGap[];
+  readonly evidenceEventIds: readonly EventId[];
+  readonly presentation: "sufficient" | "degraded" | "unknown";
+}
+
+export interface WorkGraphSnapshot {
+  readonly nodes: readonly GraphNode[];
+  readonly edges: readonly GraphEdge[];
+  readonly coverage: readonly ProjectionCoverage[];
+}
+
+export interface WorkGraphReplayResult {
+  readonly orderedEvents: readonly ProtocolEvent[];
+  readonly sourceSequenceGaps: readonly SourceSequenceGap[];
+  readonly snapshot: WorkGraphSnapshot;
+}
+
+export interface AttributionOverride {
+  readonly eventId: EventId;
+  readonly correction: AttributionCorrectedEvent;
+}
+
+export interface WorkGraphState {
+  readonly eventsById: Map<EventId, ProtocolEvent>;
+  readonly correctionsByTarget: Map<EventId, AttributionOverride>;
+  readonly nodes: Map<string, GraphNode>;
+  readonly edges: Map<string, GraphEdge>;
+  readonly coverageInputs: readonly ProjectionCoverage[];
+}

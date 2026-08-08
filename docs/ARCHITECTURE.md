@@ -1,8 +1,9 @@
 # PatchMesh Architecture
 
-> **Status:** Planned target architecture. M1 through M4 currently implement the protocol
-> boundary, in-memory collector, append-only SQLite event store, replay core, and an
-> in-process MCP runtime boundary; see [ROADMAP.md](ROADMAP.md) for phase status.
+> **Status:** Planned target architecture. M1 through M5 currently implement the protocol
+> boundary, in-memory collector, append-only SQLite event store, replay core, an
+> in-process MCP runtime boundary, effect observation, and rebuildable in-memory graph
+> projections; see [ROADMAP.md](ROADMAP.md) for phase status.
 
 ## 1. Purpose
 
@@ -164,8 +165,8 @@ Events are append-only.
 ### 4.4 Event Store
 
 The event store is the source of truth. M2 implements the append-only SQLite event log
-and deterministic causal replay; graph tables and other derived projections remain
-planned for M5.
+and deterministic causal replay. M5 adds rebuildable in-memory graph projections; graph
+tables are not authoritative and are not required by the Phase 1 implementation.
 
 Suggested tables:
 
