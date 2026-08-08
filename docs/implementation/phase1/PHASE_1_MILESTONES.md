@@ -1,6 +1,6 @@
 # PatchMesh Phase 1 Milestones: Observe and Replay
 
-> **Status:** M0, M1, and M2 complete; M3-M7 planned. These milestones break the Phase 1
+> **Status:** M0, M1, M2, and M3 complete; M4-M7 planned. These milestones break the Phase 1
 > roadmap scope into independently testable vertical slices. M1 provides the strict
 > workspace, protocol boundary, and in-memory collector; later runtime capabilities
 > are not implemented yet.
@@ -116,7 +116,7 @@ minimal event path.
   success snapshot, while source-sequence gaps remain explicit degraded coverage.
 - Migration and repository tests pass against a temporary SQLite database.
 
-### M3: First Runtime Boundary
+### M3: First Runtime Boundary (Complete)
 
 **Goal:** Capture actual tool intent and outcome through one runtime integration.
 
@@ -130,6 +130,8 @@ minimal event path.
 - Connect the runtime boundary to the protocol validator and event store.
 
 **Exit evidence:**
+
+- [M3 completion evidence](evidence/PHASE_1_M3_EVIDENCE.md)
 
 - An integration-tested tool call produces persisted request and outcome events.
 - A failed or interrupted tool call is represented as an outcome, not inferred as a

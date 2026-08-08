@@ -11,7 +11,7 @@ import {
   type McpToolCall,
 } from "../src/index.js";
 import { SqliteEventStore } from "@patchmesh/storage";
-import type { EventId } from "@patchmesh/protocol";
+import { ProtocolValidationError, type EventId } from "@patchmesh/protocol";
 
 async function withTemporaryDatabase(run: (databasePath: string) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-m3-"));
@@ -227,4 +227,86 @@ test("reports completion persistence failure after execution", async () => {
       store.close();
     }
   });
+});
+
+test("preserves per-call attribution and runtime metadata", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const secondContext: McpCallContext = {
+        ...context,
+        source: {
+          kind: "adapter",
+          sourceId: "source_mcp_other",
+          instanceId: "22222222-2222-4222-8222-222222222222",
+        },
+        repositoryId: "repo_44444444-4444-4444-8444-444444444444",
+        workspaceId: "ws_55555555-5555-4555-8555-555555555555",
+        worktreeId: "wt_66666666-6666-4666-8666-666666666666",
+        agentId: "agent_agent-b",
+        taskId: "task_task-b",
+        correlationId: "corr_00000000000000000000000000000002",
+        causationId: "evt_00000000000000000000000000000009",
+        requestSourceSequence: 3,
+        completionSourceSequence: 4,
+      };
+      const proxy = createProxy(store, [
+        "evt_00000000000000000000000000000004",
+        "evt_00000000000000000000000000000005",
+        "evt_00000000000000000000000000000006",
+        "evt_00000000000000000000000000000007",
+      ]);
+
+      await proxy.execute(call, context, async () => ({ outcome: "succeeded", value: 1, exitCode: 0 }));
+      await proxy.execute(
+        { ...call, operation: "run_shell", toolName: "run_shell", opaque: true },
+        secondContext,
+        async () => ({ outcome: "succeeded", value: 2, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.equal(events.length, 4);
+      assert.equal(events[2]?.agentId, "agent_agent-b");
+      assert.equal(events[2]?.taskId, "task_task-b");
+      assert.equal(events[2]?.repositoryId, secondContext.repositoryId);
+      assert.equal(events[2]?.correlationId, secondContext.correlationId);
+      assert.equal(events[2]?.causationId, secondContext.causationId);
+      assert.equal(events[2]?.sourceSequence, 3);
+      assert.equal(events[3]?.sourceSequence, 4);
+      assert.equal(events[3]?.causationId, "evt_00000000000000000000000000000006");
+      assert.equal(events[2]?.eventType, "tool.requested");
+      if (events[2]?.eventType !== "tool.requested") throw new Error("expected second request event");
+      assert.equal(events[2].payload.opaque, true);
+      assert.deepEqual(events.map((event) => event.eventType), [
+        "tool.requested",
+        "tool.completed",
+        "tool.requested",
+        "tool.completed",
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("rejects malformed runtime input before appending or executing", async () => {
+  let appendCalled = false;
+  let executorCalled = false;
+  const eventStore: EventAppender = {
+    append() {
+      appendCalled = true;
+      throw new Error("append should not run");
+    },
+  };
+  const invalidCall = { ...call, toolName: "unknown_tool" } as unknown as McpToolCall;
+
+  await assert.rejects(
+    () => createProxy(eventStore).execute(invalidCall, context, async () => {
+      executorCalled = true;
+      return { outcome: "succeeded", value: true, exitCode: 0 };
+    }),
+    (error: unknown) => error instanceof ProtocolValidationError,
+  );
+  assert.equal(appendCalled, false);
+  assert.equal(executorCalled, false);
 });

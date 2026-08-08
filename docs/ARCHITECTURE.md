@@ -1,8 +1,8 @@
 # PatchMesh Architecture
 
-> **Status:** Planned target architecture. M1 and M2 currently implement the protocol
-> boundary, in-memory collector, append-only SQLite event store, and replay core; see
-> [ROADMAP.md](ROADMAP.md) for phase status.
+> **Status:** Planned target architecture. M1 through M3 currently implement the protocol
+> boundary, in-memory collector, append-only SQLite event store, replay core, and an
+> in-process MCP runtime boundary; see [ROADMAP.md](ROADMAP.md) for phase status.
 
 ## 1. Purpose
 
@@ -136,6 +136,11 @@ decision.delivery.changed
 M1 accepts and validates the nine observation inputs and represents the four
 projection-event shapes for protocol compatibility. M2 persists validated events as
 immutable canonical bytes and replays them without emitting projection facts.
+
+M3 adds the in-process MCP adapter boundary. It validates and stores `tool.requested`
+before injected execution and `tool.completed` afterward, preserving per-call source,
+attribution, correlation, causation, and source-sequence metadata. M3 does not add a
+transport, effect observer, detector, policy, or projection.
 
 Every stored event will follow [Event Protocol V1](protocol/events.md) and its
 versioned JSON Schema. The closed envelope includes explicit worktree identity,
