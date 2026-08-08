@@ -1,7 +1,7 @@
 # PatchMesh Event Protocol V1
 
 > **Status:** Phase 0 normative contract. M1 provides protocol validation and an
-> in-memory collector; durable event storage remains planned for M2.
+> in-memory collector; M2 adds durable append-only event storage and replay.
 
 ## Envelope
 

@@ -1,7 +1,7 @@
 # PatchMesh Roadmap
 
-> **Status:** Planned roadmap. M1 is implemented; the remaining Phase 1 and later
-> capabilities are not implemented.
+> **Status:** Planned roadmap. M1 and M2 are implemented; the remaining Phase 1 and
+> later capabilities are not implemented.
 
 ## Purpose
 
@@ -72,9 +72,11 @@ runtime observation, storage, projections, or CLI commands.
 
 **Goal:** Capture one runtime's activity and reproduce derived state without making coordination decisions that interrupt work.
 
-**M0 prerequisite:** Complete. See [`docs/PHASE_0_M0_EVIDENCE.md`](PHASE_0_M0_EVIDENCE.md).
+**M0 prerequisite:** Complete. See [`docs/implementation/phase0/PHASE_0_M0_EVIDENCE.md`](implementation/phase0/PHASE_0_M0_EVIDENCE.md).
 
-**M1 status:** Complete. See [`docs/PHASE_1_M1_EVIDENCE.md`](PHASE_1_M1_EVIDENCE.md).
+**M1 status:** Complete. See [`docs/implementation/phase1/evidence/PHASE_1_M1_EVIDENCE.md`](implementation/phase1/evidence/PHASE_1_M1_EVIDENCE.md).
+
+**M2 status:** Complete. See [`docs/implementation/phase1/evidence/PHASE_1_M2_EVIDENCE.md`](implementation/phase1/evidence/PHASE_1_M2_EVIDENCE.md).
 
 **Deliverables:**
 
@@ -98,7 +100,7 @@ runtime observation, storage, projections, or CLI commands.
 - bypassed or opaque operations reduce reported coverage rather than appearing fully observed;
 - p50 and p95 interception overhead are measured and recorded.
 
-**Implementation milestones:** [`docs/PHASE_1_MILESTONES.md`](PHASE_1_MILESTONES.md).
+**Implementation milestones:** [`docs/implementation/phase1/PHASE_1_MILESTONES.md`](implementation/phase1/PHASE_1_MILESTONES.md).
 
 ## Phase 2 — Deterministic Detection
 

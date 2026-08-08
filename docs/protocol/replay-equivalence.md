@@ -1,6 +1,7 @@
 # PatchMesh Replay and Projection-Equivalence Contract
 
-> **Status:** Phase 0 normative contract. Storage and projection are Phase 1 behavior.
+> **Status:** Phase 0 normative contract. M2 implements immutable event-log replay;
+> projection equivalence remains later Phase 1 behavior.
 
 Replay consumes the immutable event log and rebuilds derived state with all external
 side effects disabled. It never reruns tools, sends decisions, executes directives, or

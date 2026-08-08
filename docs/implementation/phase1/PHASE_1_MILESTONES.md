@@ -1,6 +1,6 @@
 # PatchMesh Phase 1 Milestones: Observe and Replay
 
-> **Status:** M0 and M1 complete; M2-M7 planned. These milestones break the Phase 1
+> **Status:** M0, M1, and M2 complete; M3-M7 planned. These milestones break the Phase 1
 > roadmap scope into independently testable vertical slices. M1 provides the strict
 > workspace, protocol boundary, and in-memory collector; later runtime capabilities
 > are not implemented yet.
@@ -52,7 +52,7 @@ This is a prerequisite gate, not a Phase 1 runtime milestone.
 
 **Exit evidence:**
 
-- [M0 completion evidence](PHASE_0_M0_EVIDENCE.md)
+- [M0 completion evidence](../phase0/PHASE_0_M0_EVIDENCE.md)
 
 - The Phase 0 corpus validates successfully.
 - Positive and negative fixtures produce their declared outcomes.
@@ -80,7 +80,7 @@ minimal event path.
 
 **Exit evidence:**
 
-- [M1 completion evidence](PHASE_1_M1_EVIDENCE.md)
+- [M1 completion evidence](evidence/PHASE_1_M1_EVIDENCE.md)
 
 - Valid events are accepted and malformed or unsupported events are rejected.
 - `agentId` and `taskId` are always present and may be `null`.
@@ -90,7 +90,7 @@ minimal event path.
   contract, and immutable attribution corrections validate their target event.
 - Strict type checking and protocol tests pass.
 
-### M2: Append-Only Event Store and Replay Core
+### M2: Append-Only Event Store and Replay Core (Complete)
 
 **Goal:** Make the normalized event stream durable and replayable.
 
@@ -104,6 +104,8 @@ minimal event path.
   Never repair causality using wall-clock order or synthesize missing events.
 
 **Exit evidence:**
+
+- [M2 completion evidence](evidence/PHASE_1_M2_EVIDENCE.md)
 
 - Events survive process restart and stored event bytes are never mutated.
 - An identical duplicate event is a no-op.

@@ -1,7 +1,8 @@
 # PatchMesh Architecture
 
-> **Status:** Planned target architecture. M1 currently implements only the protocol
-> boundary and in-memory collector; see [ROADMAP.md](ROADMAP.md) for phase status.
+> **Status:** Planned target architecture. M1 and M2 currently implement the protocol
+> boundary, in-memory collector, append-only SQLite event store, and replay core; see
+> [ROADMAP.md](ROADMAP.md) for phase status.
 
 ## 1. Purpose
 
@@ -133,7 +134,8 @@ decision.delivery.changed
 ```
 
 M1 accepts and validates the nine observation inputs and represents the four
-projection-event shapes for protocol compatibility. It does not emit projection facts.
+projection-event shapes for protocol compatibility. M2 persists validated events as
+immutable canonical bytes and replays them without emitting projection facts.
 
 Every stored event will follow [Event Protocol V1](protocol/events.md) and its
 versioned JSON Schema. The closed envelope includes explicit worktree identity,
@@ -149,9 +151,9 @@ Events are append-only.
 
 ### 4.4 Event Store
 
-The event store is the source of truth.
-
-Start with SQLite.
+The event store is the source of truth. M2 implements the append-only SQLite event log
+and deterministic causal replay; graph tables and other derived projections remain
+planned for M5.
 
 Suggested tables:
 

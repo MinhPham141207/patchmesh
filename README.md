@@ -5,10 +5,11 @@ detects when one agent's change may invalidate another agent's running or comple
 work, explains the dependency path, and requests the smallest reliable response
 before integration.
 
-> **Project status:** M1 is implemented and verified: the strict workspace, protocol
-> boundary, and in-memory collector are available. SQLite, runtime adapters, effect
-> observation, replay, projections, daemon services, CLI commands, and detection remain
-> planned. The implementation sequence is defined in the [roadmap](docs/ROADMAP.md).
+> **Project status:** M1 and M2 are implemented and verified: the strict workspace,
+> protocol boundary, in-memory collector, append-only SQLite event store, and
+> deterministic causal replay are available. Runtime adapters, effect observation,
+> projections, daemon services, CLI commands, and detection remain planned. The
+> implementation sequence is defined in the [roadmap](docs/ROADMAP.md).
 
 ## The problem
 
@@ -30,23 +31,24 @@ PatchMesh focuses on this question:
 
 > When has concurrent work stopped being independent?
 
-## Current M1 slice
+## Current M1-M2 slice
 
-M1 currently provides:
+The current implementation provides:
 
 - a strict TypeScript/pnpm workspace;
 - runtime-agnostic V1 event types and Phase 0 boundary validation;
 - an in-memory normalized-event collector;
-- a tested `tool.requested` and `tool.completed` round trip.
+- a tested `tool.requested` and `tool.completed` round trip;
+- append-only SQLite event storage with canonical digests and idempotent retries;
+- deterministic causal replay with bounded reference failures and source-gap reporting.
 
 ## Planned first working slice
 
-The first version targets two coding agents in separate Git worktrees and remains
-report-only. It will provide:
+The next implementation slices target two coding agents in separate Git worktrees and
+remain report-only. They will provide:
 
 - one MCP/runtime adapter;
 - pre-tool intent and post-tool effect events;
-- append-only SQLite storage and deterministic replay;
 - repository-, worktree-, task-, file-, symbol-, and version-aware graph state;
 - same-symbol overlap detection;
 - stale-read-before-write detection;
