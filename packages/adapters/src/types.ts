@@ -1,5 +1,10 @@
 import type { AppendResult } from "@patchmesh/storage";
 import type {
+  DerivedCoverage,
+  ObservationBoundary,
+  ObservationDiagnostic,
+} from "@patchmesh/observation";
+import type {
   CorrelationId,
   EventId,
   NullableAgentId,
@@ -24,6 +29,7 @@ export interface McpCallContext {
   readonly repositoryId: RepositoryId;
   readonly workspaceId: WorkspaceId;
   readonly worktreeId: WorktreeId;
+  readonly workspaceRoot?: string;
   readonly agentId: NullableAgentId;
   readonly taskId: NullableTaskId;
   readonly correlationId: CorrelationId;
@@ -47,10 +53,14 @@ export interface McpProxyOptions {
   readonly eventStore: EventAppender;
   readonly createEventId?: () => EventId;
   readonly now?: () => string;
+  readonly observer?: ObservationBoundary;
+  readonly createCorrelationId?: () => CorrelationId;
 }
 
 export interface McpProxyResult<T> {
   readonly execution: ToolExecutionResult<T>;
   readonly requestEventId: EventId;
   readonly completedEventId: EventId;
+  readonly coverage: DerivedCoverage | null;
+  readonly observationDiagnostics: readonly ObservationDiagnostic[];
 }

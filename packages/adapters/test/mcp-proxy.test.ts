@@ -10,6 +10,12 @@ import {
   type McpCallContext,
   type McpToolCall,
 } from "../src/index.js";
+import {
+  type ObservationBoundary,
+  type ObservationCapture,
+  type ObservedFileChange,
+  type ObservationSnapshot,
+} from "@patchmesh/observation";
 import { SqliteEventStore } from "@patchmesh/storage";
 import { ProtocolValidationError, type EventId } from "@patchmesh/protocol";
 
@@ -47,16 +53,254 @@ const context: McpCallContext = {
   completionSourceSequence: 2,
 };
 
+const observerSource = {
+  kind: "watcher" as const,
+  sourceId: "source_observation",
+  instanceId: "22222222-2222-4222-8222-222222222222",
+};
+
+function snapshot(files: ReadonlyMap<string, { readonly contentHash: string }>): ObservationSnapshot {
+  return {
+    repository: { commonDirectory: "C:/repo/.git", revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    worktree: { administrativeDirectory: "C:/repo/.git" },
+    files: new Map([...files].map(([path, state]) => [path, {
+      contentHash: state.contentHash,
+      gitBlob: null,
+      fileKind: "file" as const,
+    }])),
+  };
+}
+
+function capture(
+  current: ObservationSnapshot,
+  outOfBandChanges: readonly ObservedFileChange[] = [],
+): ObservationCapture {
+  return { snapshot: current, gaps: [], outOfBandChanges };
+}
+
+function changedObserver(options: {
+  readonly before?: ObservationCapture;
+  readonly after?: ObservationCapture;
+  readonly beforeError?: boolean;
+  readonly afterError?: boolean;
+} = {}): ObservationBoundary {
+  const before = options.before ?? capture(snapshot(new Map()));
+  const after = options.after ?? capture(snapshot(new Map([["changed.txt", { contentHash: "b".repeat(64) }]])));
+  return {
+    source: observerSource,
+    async captureBefore() {
+      if (options.beforeError) throw new Error("secret observer detail");
+      return before;
+    },
+    async captureAfter() {
+      if (options.afterError) throw new Error("secret observer detail");
+      return after;
+    },
+  };
+}
+
 function createProxy(eventStore: EventAppender, ids: EventId[] = [
   "evt_00000000000000000000000000000001",
   "evt_00000000000000000000000000000002",
-]): McpProxy {
+], options: { readonly observer?: ObservationBoundary; readonly createCorrelationId?: () => `corr_${string}` } = {}): McpProxy {
   return new McpProxy({
     eventStore,
     createEventId: () => ids.shift() ?? "evt_00000000000000000000000000000003",
     now: () => "2026-08-08T00:00:00.000Z",
+    ...options,
   });
 }
+
+test("persists verified effects and links them from completion", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const proxy = createProxy(store, [
+        "evt_00000000000000000000000000000001",
+        "evt_00000000000000000000000000000002",
+        "evt_00000000000000000000000000000003",
+      ], { observer: changedObserver() });
+      const result = await proxy.execute(
+        { ...call, operation: "edit_file", toolName: "edit_file" },
+        { ...context, workspaceRoot: tmpdir() },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.deepEqual(events.map((event) => event.eventType), [
+        "tool.requested",
+        "file.changed",
+        "tool.completed",
+      ]);
+      const effect = events[1];
+      const completion = events[2];
+      if (effect?.eventType !== "file.changed" || completion?.eventType !== "tool.completed") {
+        throw new Error("expected file effect and tool completion");
+      }
+      assert.deepEqual(completion.payload.effectEventIds, [effect.eventId]);
+      assert.equal(effect.causationId, events[0]?.eventId);
+      assert.deepEqual(result.coverage?.modes, ["intercepted", "verified"]);
+      assert.equal(result.coverage?.presentation, "sufficient");
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("persists post-call effects for a failed execution", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const result = await createProxy(store, [
+        "evt_00000000000000000000000000000004",
+        "evt_00000000000000000000000000000005",
+        "evt_00000000000000000000000000000006",
+      ], { observer: changedObserver() }).execute(
+        call,
+        { ...context, workspaceRoot: tmpdir() },
+        async () => ({ outcome: "failed", error: new Error("secret failure"), exitCode: 9 }),
+      );
+
+      assert.equal(result.execution.outcome, "failed");
+      const events = store.read();
+      assert.equal(events[1]?.eventType, "file.changed");
+      assert.equal(events[2]?.eventType, "tool.completed");
+      if (events[2]?.eventType !== "tool.completed") throw new Error("expected completion");
+      assert.equal(events[2].payload.outcome, "failed");
+      assert.deepEqual(events[2].payload.effectEventIds, ["evt_00000000000000000000000000000005"]);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("reports degraded coverage for opaque effects", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const result = await createProxy(store, [
+        "evt_00000000000000000000000000000007",
+        "evt_00000000000000000000000000000008",
+        "evt_00000000000000000000000000000009",
+      ], { observer: changedObserver() }).execute(
+        { ...call, toolName: "run_shell", operation: "run_shell", opaque: true },
+        { ...context, workspaceRoot: tmpdir() },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      assert.equal(result.coverage?.presentation, "degraded");
+      assert.equal(result.coverage?.gaps.some((gap) => gap.kind === "opaque"), true);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("keeps execution and completion persistence alive when observation fails", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    let executed = false;
+    try {
+      const result = await createProxy(store, [
+        "evt_00000000000000000000000000000010",
+        "evt_00000000000000000000000000000011",
+      ], { observer: changedObserver({ beforeError: true, afterError: true }) }).execute(
+        call,
+        { ...context, workspaceRoot: tmpdir() },
+        async () => {
+          executed = true;
+          return { outcome: "succeeded", value: true, exitCode: 0 };
+        },
+      );
+
+      assert.equal(executed, true);
+      assert.equal(result.coverage?.presentation, "degraded");
+      assert.deepEqual(store.read().map((event) => event.eventType), ["tool.requested", "tool.completed"]);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("does not claim verified coverage when effect persistence fails", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const eventStore: EventAppender = {
+        append(input) {
+          if (typeof input === "object" && input !== null && "eventType" in input && input.eventType === "file.changed") {
+            throw new Error("secret effect persistence detail");
+          }
+          return store.append(input);
+        },
+      };
+      const result = await createProxy(eventStore, [
+        "evt_00000000000000000000000000000012",
+        "evt_00000000000000000000000000000013",
+      ], { observer: changedObserver() }).execute(
+        call,
+        { ...context, workspaceRoot: tmpdir() },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.deepEqual(events.map((event) => event.eventType), ["tool.requested", "tool.completed"]);
+      if (events[1]?.eventType !== "tool.completed") throw new Error("expected completion");
+      assert.deepEqual(events[1].payload.effectEventIds, []);
+      assert.equal(result.coverage?.presentation, "degraded");
+      assert.equal(result.coverage?.modes.includes("unknown"), true);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("stores out-of-band effects without MCP attribution", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const outOfBandChange: ObservedFileChange = {
+        path: "external.txt",
+        before: null,
+        after: { contentHash: "c".repeat(64), gitBlob: null, fileKind: "file" },
+        changeKind: "created",
+        outOfBand: true,
+      };
+      const observer = changedObserver({
+        after: capture(snapshot(new Map()), [outOfBandChange]),
+      });
+      const result = await createProxy(store, [
+        "evt_00000000000000000000000000000014",
+        "evt_00000000000000000000000000000015",
+        "evt_00000000000000000000000000000016",
+      ], {
+        observer,
+        createCorrelationId: () => "corr_00000000000000000000000000000002",
+      }).execute(
+        call,
+        { ...context, workspaceRoot: tmpdir() },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.deepEqual(events.map((event) => event.eventType), [
+        "tool.requested",
+        "file.changed",
+        "tool.completed",
+      ]);
+      const outOfBand = events[1];
+      if (outOfBand?.eventType !== "file.changed") throw new Error("expected out-of-band effect");
+      assert.equal(outOfBand.agentId, null);
+      assert.equal(outOfBand.taskId, null);
+      assert.equal(outOfBand.correlationId, "corr_00000000000000000000000000000002");
+      assert.equal(outOfBand.source.kind, "watcher");
+      assert.equal(result.coverage?.presentation, "degraded");
+      assert.equal(result.coverage?.gaps.some((gap) => gap.kind === "unattributed"), true);
+    } finally {
+      store.close();
+    }
+  });
+});
 
 test("persists a request before a successful completion", async () => {
   await withTemporaryDatabase(async (databasePath) => {

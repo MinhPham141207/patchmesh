@@ -30,6 +30,6 @@ export function normalizeLogicalPath(input: string): string {
 
 export function fileResourceId(repositoryId: RepositoryId, locator: string): ResourceId {
   const path = normalizeLogicalPath(locator);
-  const digest = sha256(JSON.stringify([repositoryId, "file", path])).slice(0, 32);
+  const digest = sha256(JSON.stringify([repositoryId, "file", path]));
   return `res_${digest}`;
 }

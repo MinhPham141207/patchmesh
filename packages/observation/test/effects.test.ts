@@ -39,10 +39,9 @@ for (const invalid of [
 }
 
 test("derives a stable repository-scoped file resource ID", () => {
-  assert.equal(
-    fileResourceId("repo_11111111111111111111111111111111", "src/example.ts"),
-    fileResourceId("repo_11111111111111111111111111111111", "src/example.ts"),
-  );
+  const resourceId = fileResourceId("repo_11111111111111111111111111111111", "src/example.ts");
+  assert.equal(resourceId, fileResourceId("repo_11111111111111111111111111111111", "src/example.ts"));
+  assert.match(resourceId, /^res_[0-9a-f]{64}$/);
   assert.notEqual(
     fileResourceId("repo_11111111111111111111111111111111", "src/example.ts"),
     fileResourceId("repo_22222222222222222222222222222222", "src/example.ts"),

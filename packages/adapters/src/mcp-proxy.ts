@@ -3,10 +3,23 @@ import {
   parseEvent,
   ProtocolValidationError,
   type EventId,
+  type FileChangedEvent,
+  type LogicalResource,
   type ProtocolEvent,
+  type ResourceVersion,
   type ToolCompletedEvent,
   type ToolRequestedEvent,
 } from "@patchmesh/protocol";
+import {
+  deriveCoverage,
+  diffSnapshots,
+  fileResourceId,
+  normalizeLogicalPath,
+  type ObservationCapture,
+  type ObservationContext,
+  type ObservationGap,
+  type ObservedFileChange,
+} from "@patchmesh/observation";
 import type {
   McpCallContext,
   McpProxyOptions,
@@ -65,6 +78,7 @@ function createToolCompletedEvent(
   timestamp: string,
   outcome: ToolCompletedEvent["payload"]["outcome"],
   exitCode: number | null,
+  effectEventIds: readonly EventId[],
 ): ToolCompletedEvent {
   return {
     schemaVersion: 1,
@@ -84,7 +98,73 @@ function createToolCompletedEvent(
       requestEventId,
       outcome,
       exitCode,
-      effectEventIds: [],
+      effectEventIds,
+    },
+  };
+}
+
+function createResource(repositoryId: LogicalResource["repositoryId"], path: string): LogicalResource {
+  const locator = normalizeLogicalPath(path);
+  return {
+    resourceId: fileResourceId(repositoryId, locator),
+    repositoryId,
+    kind: "file",
+    locator,
+  };
+}
+
+function createVersion(
+  resourceId: LogicalResource["resourceId"],
+  context: McpCallContext,
+  state: ObservedFileChange["after"],
+  eventId: EventId,
+): ResourceVersion {
+  return {
+    resourceId,
+    domain: {
+      repositoryId: context.repositoryId,
+      workspaceId: context.workspaceId,
+      worktreeId: context.worktreeId,
+    },
+    kind: state === null ? "deleted" : "content_hash",
+    value: state?.contentHash ?? null,
+    evidenceEventIds: [eventId],
+  };
+}
+
+function createFileChangedEvent(
+  change: ObservedFileChange,
+  context: McpCallContext,
+  source: ProtocolEvent["source"],
+  causationId: EventId | null,
+  correlationId: ProtocolEvent["correlationId"],
+  agentId: ProtocolEvent["agentId"],
+  taskId: ProtocolEvent["taskId"],
+  eventId: EventId,
+  timestamp: string,
+): FileChangedEvent {
+  const resource = createResource(context.repositoryId, change.path);
+  return {
+    schemaVersion: 1,
+    eventId,
+    eventType: "file.changed",
+    source,
+    timestamp,
+    repositoryId: context.repositoryId,
+    workspaceId: context.workspaceId,
+    worktreeId: context.worktreeId,
+    agentId,
+    taskId,
+    correlationId,
+    causationId,
+    sourceSequence: null,
+    payload: {
+      resource,
+      beforeVersion: change.before === null
+        ? null
+        : createVersion(resource.resourceId, context, change.before, eventId),
+      afterVersion: createVersion(resource.resourceId, context, change.after, eventId),
+      changeKind: change.changeKind,
     },
   };
 }
@@ -97,11 +177,15 @@ export class McpProxy {
   private readonly eventStore: EventAppender;
   private readonly createEventId: () => EventId;
   private readonly now: () => string;
+  private readonly observer: McpProxyOptions["observer"];
+  private readonly createCorrelationId: () => ProtocolEvent["correlationId"];
 
   constructor(options: McpProxyOptions) {
     this.eventStore = options.eventStore;
     this.createEventId = options.createEventId ?? (() => `evt_${randomUUID()}` as EventId);
     this.now = options.now ?? (() => new Date().toISOString());
+    this.observer = options.observer;
+    this.createCorrelationId = options.createCorrelationId ?? (() => `corr_${randomUUID()}`);
   }
 
   async execute<T>(
@@ -128,6 +212,35 @@ export class McpProxy {
     }
 
     const executionSignal = signal ?? new AbortController().signal;
+    const observationGaps: ObservationGap[] = [];
+    let beforeCapture: ObservationCapture | null = null;
+    if (this.observer) {
+      if (context.workspaceRoot === undefined) {
+        observationGaps.push({
+          kind: "unverified",
+          scope: "workspace",
+          reason: "workspace root was not supplied for observation",
+        });
+      } else {
+        const observationContext: ObservationContext = {
+          workspaceRoot: context.workspaceRoot,
+          repositoryId: context.repositoryId,
+          workspaceId: context.workspaceId,
+          worktreeId: context.worktreeId,
+        };
+        try {
+          beforeCapture = await this.observer.captureBefore(observationContext);
+          observationGaps.push(...beforeCapture.gaps);
+        } catch {
+          observationGaps.push({
+            kind: "unverified",
+            scope: "before",
+            reason: "pre-execution observation failed",
+          });
+        }
+      }
+    }
+
     let execution: ToolExecutionResult<T>;
     try {
       execution = await executor(executionSignal);
@@ -135,6 +248,103 @@ export class McpProxy {
       execution = executionSignal.aborted || isAbortError(error)
         ? { outcome: "interrupted", exitCode: null }
         : { outcome: "failed", error, exitCode: null };
+    }
+
+    let afterCapture: ObservationCapture | null = null;
+    if (this.observer && context.workspaceRoot !== undefined) {
+      const observationContext: ObservationContext = {
+        workspaceRoot: context.workspaceRoot,
+        repositoryId: context.repositoryId,
+        workspaceId: context.workspaceId,
+        worktreeId: context.worktreeId,
+      };
+      try {
+        afterCapture = await this.observer.captureAfter(observationContext);
+        observationGaps.push(...afterCapture.gaps);
+      } catch {
+        observationGaps.push({
+          kind: "unverified",
+          scope: "after",
+          reason: "post-execution observation failed",
+        });
+      }
+    }
+
+    const effectEventIds: EventId[] = [];
+    const outOfBandEventIds: EventId[] = [];
+    if (this.observer) {
+      if (beforeCapture !== null && afterCapture !== null) {
+        const diff = diffSnapshots(beforeCapture.snapshot, afterCapture.snapshot, call.opaque);
+        observationGaps.push(...diff.gaps);
+        for (const change of diff.changes) {
+          const eventId = this.createEventId();
+          try {
+            appendValidated(
+              createFileChangedEvent(
+                change,
+                context,
+                this.observer.source,
+                requestEvent.eventId,
+                context.correlationId,
+                context.agentId,
+                context.taskId,
+                eventId,
+                this.now(),
+              ),
+              this.eventStore,
+            );
+            effectEventIds.push(eventId);
+          } catch {
+            observationGaps.push({
+              kind: "unverified",
+              scope: change.path,
+              reason: "effect event persistence failed",
+            });
+          }
+        }
+      } else if (context.workspaceRoot !== undefined) {
+        observationGaps.push({
+          kind: "unverified",
+          scope: "tool.effects",
+          reason: "effect comparison requires both observation boundaries",
+        });
+      }
+
+      const outOfBandChanges = [
+        ...(beforeCapture?.outOfBandChanges ?? []),
+        ...(afterCapture?.outOfBandChanges ?? []),
+      ];
+      for (const change of outOfBandChanges) {
+        observationGaps.push({
+          kind: "unattributed",
+          scope: change.path,
+          reason: "effect was observed outside the intercepted MCP call",
+        });
+        const eventId = this.createEventId();
+        try {
+          appendValidated(
+            createFileChangedEvent(
+              change,
+              context,
+              this.observer.source,
+              null,
+              this.createCorrelationId(),
+              null,
+              null,
+              eventId,
+              this.now(),
+            ),
+            this.eventStore,
+          );
+          outOfBandEventIds.push(eventId);
+        } catch {
+          observationGaps.push({
+            kind: "unverified",
+            scope: change.path,
+            reason: "out-of-band effect persistence failed",
+          });
+        }
+      }
     }
 
     let completedEvent: ProtocolEvent;
@@ -147,6 +357,7 @@ export class McpProxy {
           this.now(),
           execution.outcome,
           execution.exitCode,
+          effectEventIds,
         ),
         this.eventStore,
       );
@@ -161,10 +372,29 @@ export class McpProxy {
       );
     }
 
+    const evidenceEventIds = [
+      requestEvent.eventId,
+      ...effectEventIds,
+      ...outOfBandEventIds,
+      completedEvent.eventId,
+    ];
+    const coverage = this.observer === undefined
+      ? null
+      : deriveCoverage({
+          scope: `tool:${requestEvent.eventId}`,
+          modes: beforeCapture !== null && afterCapture !== null
+            ? ["intercepted", "verified"]
+            : ["intercepted", "unknown"],
+          gaps: observationGaps,
+          evidenceEventIds,
+        });
+
     return {
       execution,
       requestEventId: requestEvent.eventId,
       completedEventId: completedEvent.eventId,
+      coverage,
+      observationDiagnostics: observationGaps,
     };
   }
 }

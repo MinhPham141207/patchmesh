@@ -20,6 +20,9 @@ importers:
 
   packages/adapters:
     dependencies:
+      '@patchmesh/observation':
+        specifier: workspace:*
+        version: link:../observation
       '@patchmesh/protocol':
         specifier: workspace:*
         version: link:../protocol
