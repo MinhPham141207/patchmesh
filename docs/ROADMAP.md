@@ -1,6 +1,6 @@
 # PatchMesh Roadmap
 
-> **Status:** Planned roadmap. M1 through M3 are implemented; the remaining Phase 1 and
+> **Status:** Planned roadmap. M1 through M4 are implemented; the remaining Phase 1 and
 > later capabilities are not implemented.
 
 ## Purpose
@@ -79,6 +79,8 @@ runtime observation, storage, projections, or CLI commands.
 **M2 status:** Complete. See [`docs/implementation/phase1/evidence/PHASE_1_M2_EVIDENCE.md`](implementation/phase1/evidence/PHASE_1_M2_EVIDENCE.md).
 
 **M3 status:** Complete. See [`docs/implementation/phase1/evidence/PHASE_1_M3_EVIDENCE.md`](implementation/phase1/evidence/PHASE_1_M3_EVIDENCE.md).
+
+**M4 status:** Complete. See [`docs/implementation/phase1/evidence/PHASE_1_M4_EVIDENCE.md`](implementation/phase1/evidence/PHASE_1_M4_EVIDENCE.md).
 
 **Deliverables:**
 

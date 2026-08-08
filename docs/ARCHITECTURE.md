@@ -1,6 +1,6 @@
 # PatchMesh Architecture
 
-> **Status:** Planned target architecture. M1 through M3 currently implement the protocol
+> **Status:** Planned target architecture. M1 through M4 currently implement the protocol
 > boundary, in-memory collector, append-only SQLite event store, replay core, and an
 > in-process MCP runtime boundary; see [ROADMAP.md](ROADMAP.md) for phase status.
 
@@ -141,6 +141,13 @@ M3 adds the in-process MCP adapter boundary. It validates and stores `tool.reque
 before injected execution and `tool.completed` afterward, preserving per-call source,
 attribution, correlation, causation, and source-sequence metadata. M3 does not add a
 transport, effect observer, detector, policy, or projection.
+
+M4 adds the `@patchmesh/observation` boundary. It captures Git repository/worktree and
+revision metadata, filesystem state, content hashes, and normalized process outcomes
+around the MCP call. Verified file effects are stored as `file.changed` events and linked
+from `tool.completed.payload.effectEventIds`; derived coverage reports opaque, bypassed,
+unattributed, and unverified gaps without adding a coverage event. M4 does not add AST
+analysis, detectors, projections, policy, or enforcement.
 
 Every stored event will follow [Event Protocol V1](protocol/events.md) and its
 versioned JSON Schema. The closed envelope includes explicit worktree identity,

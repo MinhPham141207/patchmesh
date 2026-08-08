@@ -1,6 +1,6 @@
 # PatchMesh Phase 1 Milestones: Observe and Replay
 
-> **Status:** M0, M1, M2, and M3 complete; M4-M7 planned. These milestones break the Phase 1
+> **Status:** M0 through M4 complete; M5-M7 planned. These milestones break the Phase 1
 > roadmap scope into independently testable vertical slices. M1 provides the strict
 > workspace, protocol boundary, and in-memory collector; later runtime capabilities
 > are not implemented yet.
@@ -140,7 +140,7 @@ minimal event path.
 - The runtime boundary does not contain detector or coordination policy logic.
 - Gateway behavior remains `allow`.
 
-### M4: Effect Observation and Coverage
+### M4: Effect Observation and Coverage (Complete)
 
 **Goal:** Record what actually happened after a tool call and expose observation gaps.
 
@@ -157,6 +157,8 @@ minimal event path.
   path.
 
 **Exit evidence:**
+
+- [M4 completion evidence](evidence/PHASE_1_M4_EVIDENCE.md)
 
 - File changes, Git changes, content versions, and process outcomes are represented
   as normalized evidence.
