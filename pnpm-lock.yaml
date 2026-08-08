@@ -33,6 +33,12 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/observation:
+    dependencies:
+      '@patchmesh/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/protocol:
     dependencies:
       ajv:
