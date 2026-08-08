@@ -1,6 +1,6 @@
 # Phase 1 M4 Evidence: Effect Observation and Coverage
 
-**Status:** Verified pending workspace-wide final gate
+**Status:** Verified
 
 **Verification date:** 2026-08-08
 
@@ -31,10 +31,15 @@ and emits no findings, decisions, directives, detectors, projections, or AST fac
 | `corepack pnpm --filter @patchmesh/adapters test` | Passed: 14 adapter tests |
 | `corepack pnpm --filter @patchmesh/adapters typecheck` | Passed |
 | `corepack pnpm --filter @patchmesh/adapters build` | Passed |
+| `corepack pnpm --recursive test` | Passed: 70 workspace tests |
+| `corepack pnpm --recursive typecheck` | Passed for all 5 workspace packages |
+| `corepack pnpm --recursive build` | Passed for all 5 workspace packages |
+| `node tools/phase0/validate.mjs` | `Phase 0 corpus valid` |
+| `node --test tools/phase0/*.test.mjs` | Passed: 47 tests |
+| `git diff --check` | Passed; no whitespace errors |
 
-The workspace-wide tests, recursive typechecks/builds, Phase 0 validator and suite, and
-final `git diff --check` are the remaining completion-gate commands for this evidence
-record.
+The workspace test count includes 18 protocol, 3 collector, 19 storage, 16 observation,
+and 14 adapter tests.
 
 ## Behavior Evidence
 
@@ -78,9 +83,9 @@ record.
 - M4 does not provide sandboxing, kernel-level interception, transport handling, or
   enforcement behavior.
 
-## Final Gate
+## Final Gate Results
 
-The evidence is complete when these commands pass and their results are recorded:
+The final gate passed with these commands:
 
 ```bash
 corepack pnpm --recursive test
