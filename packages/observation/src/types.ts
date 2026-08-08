@@ -51,6 +51,7 @@ export interface ObservationDiagnostic extends ObservationGap {}
 
 export interface ObservedFileChange {
   readonly path: string;
+  readonly previousPath?: string;
   readonly before: ObservedFileState | null;
   readonly after: ObservedFileState | null;
   readonly changeKind: "created" | "modified" | "deleted" | "renamed";

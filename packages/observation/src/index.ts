@@ -1,4 +1,9 @@
 export type {
+  CoverageInput,
+  EffectDiff,
+} from "./effects.js";
+export { deriveCoverage, diffSnapshots } from "./effects.js";
+export type {
   DerivedCoverage,
   ObservationBoundary,
   ObservationCapture,
