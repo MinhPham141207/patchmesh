@@ -1,6 +1,6 @@
 # PatchMesh Phase 1 Milestones: Observe and Replay
 
-> **Status:** M0 through M6 complete; M7 planned. These milestones break the Phase 1
+> **Status:** M0 through M7 complete. These milestones break the Phase 1
 > roadmap scope into independently testable vertical slices. M1 provides the strict
 > workspace, protocol boundary, and in-memory collector; later runtime capabilities
 > are not implemented yet.
@@ -230,9 +230,12 @@ minimal event path.
 - The commands remain read-only and do not introduce unscheduled commands such as
   `init`, `start`, `watch`, `overlaps`, `stale`, or `explain`.
 
-### M7: Golden Slice, Resilience, and Performance Gate
+### M7: Golden Slice, Resilience, and Performance Gate (Complete)
 
 **Goal:** Verify the complete Phase 1 observation path and record exit evidence.
+
+**Exit evidence:** [M7 completion evidence](evidence/PHASE_1_M7_EVIDENCE.md), with raw
+benchmark observations in [PHASE_1_M7_BENCHMARKS.json](evidence/PHASE_1_M7_BENCHMARKS.json).
 
 **Scope:**
 

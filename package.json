@@ -5,7 +5,10 @@
   "scripts": {
     "build": "corepack pnpm --recursive build",
     "typecheck": "corepack pnpm --recursive typecheck",
-    "test": "corepack pnpm --recursive test"
+    "test": "corepack pnpm --recursive test",
+    "phase1:typecheck": "corepack pnpm build && tsc -p tools/phase1/tsconfig.json --noEmit",
+    "phase1:test": "corepack pnpm build && tsx --test \"tools/phase1/**/*.test.ts\"",
+    "phase1:benchmark": "corepack pnpm build && tsx tools/phase1/benchmark.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

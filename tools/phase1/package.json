@@ -1,0 +1,17 @@
+{
+  "name": "@patchmesh/phase1-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test \"*.test.ts\""
+  },
+  "dependencies": {
+    "@patchmesh/adapters": "workspace:*",
+    "@patchmesh/observation": "workspace:*",
+    "@patchmesh/protocol": "workspace:*",
+    "@patchmesh/storage": "workspace:*"
+  }
+}

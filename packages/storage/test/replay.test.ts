@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -11,6 +12,7 @@ import type {
   ToolRequestedEvent,
 } from "@patchmesh/protocol";
 import { SqliteEventStore, StorageError } from "../src/index.js";
+import { replayEvents } from "../src/replay.js";
 
 async function withTemporaryDatabase(run: (databasePath: string) => void | Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-m2-replay-"));
@@ -175,6 +177,44 @@ test("canonical and causally out-of-order input converge", () => withTemporaryDa
     }
   });
 }));
+
+test("replays a large independent corpus without quadratic ready-event scanning", { timeout: 5_000 }, () => {
+  const events: FileReadEvent[] = Array.from({ length: 20_000 }, (_, index) => {
+    const eventId = `evt_${index.toString(16).padStart(32, "0")}` as FileReadEvent["eventId"];
+    const resourceId = `res_${(index + 1).toString(16).padStart(64, "0")}`;
+    return {
+      ...request,
+      eventId,
+      eventType: "file.read",
+      correlationId: `corr_${index.toString(16).padStart(32, "0")}`,
+      sourceSequence: index,
+      payload: {
+        resource: {
+          resourceId,
+          repositoryId: request.repositoryId,
+          kind: "file",
+          locator: `src/replay-${index}.ts`,
+        },
+        version: {
+          resourceId,
+          domain: {
+            repositoryId: request.repositoryId,
+            workspaceId: request.workspaceId,
+            worktreeId: request.worktreeId,
+          },
+          kind: "content_hash",
+          value: `sha256-${index}`,
+          evidenceEventIds: [eventId],
+        },
+        access: "read",
+      },
+    };
+  });
+  const started = performance.now();
+  const replay = replayEvents(events);
+  assert.equal(replay.orderedEvents.length, events.length);
+  assert.ok(performance.now() - started < 4_000);
+});
 
 test("newly unblocked events participate in the global ready-event tie-break", () => withTemporaryDatabase((databasePath) => {
   const store = SqliteEventStore.open(databasePath);

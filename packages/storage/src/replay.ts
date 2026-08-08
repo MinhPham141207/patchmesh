@@ -38,6 +38,54 @@ function compareCodeUnits(left: string, right: string): number {
   return 0;
 }
 
+class MinHeap<T> {
+  private readonly values: T[] = [];
+
+  constructor(private readonly compare: (left: T, right: T) => number) {}
+
+  push(value: T): void {
+    this.values.push(value);
+    let index = this.values.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      const current = this.values[index];
+      const parentValue = this.values[parent];
+      if (current === undefined || parentValue === undefined || this.compare(current, parentValue) >= 0) break;
+      this.values[index] = parentValue;
+      this.values[parent] = current;
+      index = parent;
+    }
+  }
+
+  pop(): T | undefined {
+    const first = this.values[0];
+    const last = this.values.pop();
+    if (first === undefined || last === undefined) return first;
+    if (this.values.length === 0) return first;
+    this.values[0] = last;
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+      const current = this.values[index];
+      const leftValue = this.values[left];
+      const rightValue = this.values[right];
+      if (current === undefined) break;
+      if (leftValue !== undefined && this.compare(leftValue, current) < 0) smallest = left;
+      const smallestValue = this.values[smallest];
+      if (rightValue !== undefined && smallestValue !== undefined && this.compare(rightValue, smallestValue) < 0) smallest = right;
+      if (smallest === index) break;
+      const next = this.values[smallest];
+      if (next === undefined) break;
+      this.values[index] = next;
+      this.values[smallest] = current;
+      index = smallest;
+    }
+    return first;
+  }
+}
+
 function causalOrder(events: readonly ProtocolEvent[]): readonly ProtocolEvent[] {
   const eventsById = new Map<string, ProtocolEvent>();
   for (const event of events) {
@@ -50,20 +98,22 @@ function causalOrder(events: readonly ProtocolEvent[]): readonly ProtocolEvent[]
   }
 
   const pending = new Map(eventsById);
-  const resolved = new Set<string>();
+  const childrenByParent = new Map<string, ProtocolEvent[]>();
+  const ready = new MinHeap<ProtocolEvent>((left, right) => compareCodeUnits(left.eventId, right.eventId));
+  for (const event of events) {
+    if (event.causationId === null) {
+      ready.push(event);
+      continue;
+    }
+    const children = childrenByParent.get(event.causationId) ?? [];
+    children.push(event);
+    childrenByParent.set(event.causationId, children);
+  }
   const ordered: ProtocolEvent[] = [];
-  let passes = 0;
 
   while (pending.size > 0) {
-    passes += 1;
-    if (passes > events.length + 1) {
-      throw new StorageError("M2_REPLAY_CAUSALITY_UNRESOLVED", "causal replay exceeded its deterministic bound");
-    }
-
-    const ready = [...pending.values()]
-      .filter((event) => event.causationId === null || resolved.has(event.causationId));
-
-    if (ready.length === 0) {
+    const next = ready.pop();
+    if (next === undefined) {
       const missing = [...pending.values()].find(
         (event) => event.causationId !== null && !eventsById.has(event.causationId),
       );
@@ -76,14 +126,9 @@ function causalOrder(events: readonly ProtocolEvent[]): readonly ProtocolEvent[]
       throw new StorageError("M2_REPLAY_CAUSALITY_UNRESOLVED", "causal replay contains an unresolved dependency");
     }
 
-    const next = ready.reduce((selected, event) =>
-      selected === undefined || compareCodeUnits(event.eventId, selected.eventId) < 0
-        ? event
-        : selected, undefined as ProtocolEvent | undefined);
-    if (next === undefined) throw new StorageError("M2_REPLAY_CAUSALITY_UNRESOLVED", "causal replay made no progress");
     pending.delete(next.eventId);
-    resolved.add(next.eventId);
     ordered.push(next);
+    for (const child of childrenByParent.get(next.eventId) ?? []) ready.push(child);
   }
 
   return ordered;
