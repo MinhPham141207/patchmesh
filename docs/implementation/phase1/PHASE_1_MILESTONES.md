@@ -242,6 +242,8 @@ minimal event path.
   bypassed-operation coverage.
 - Measure and record p50 and p95 interception overhead using the Phase 0 benchmark
   definitions and reproducible environment metadata.
+- Propose an interception-overhead budget for Phase 2, including the measurement
+  environment and owner for accepting that budget.
 - Confirm the golden scenario remains observation and replay only. Exported-contract
   impact detection is Phase 2 work.
 
@@ -251,9 +253,9 @@ minimal event path.
 - Replay is deterministic and projection rebuilds are equivalent.
 - Security and degraded-observability fixtures pass.
 - Interception overhead results include warm-up, sample count, failures, raw
-  observations, environment metadata, and p50/p95 calculations. This is a
-  reproducible baseline gate; Phase 1 does not require a performance threshold that
-  Phase 0 did not define.
+  observations, environment metadata, p50/p95 calculations, and a proposed Phase 2
+  overhead budget. This remains a reproducible baseline gate; Phase 1 does not fail
+  solely on a performance threshold that Phase 0 did not define.
 - The observation-only golden slice produces no Phase 2 findings, decisions, or
   disruptive directives.
 - The implementation emits no Phase 2 detector findings or disruptive directives.

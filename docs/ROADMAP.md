@@ -104,13 +104,17 @@ runtime observation, storage, projections, or CLI commands.
 - missing task attribution is accepted and can later be corrected;
 - security fixtures persist no unredacted secrets;
 - bypassed or opaque operations reduce reported coverage rather than appearing fully observed;
-- p50 and p95 interception overhead are measured and recorded.
+- p50 and p95 interception overhead are measured and recorded;
+- a proposed Phase 2 interception-overhead budget is recorded for acceptance at the
+  Phase 2 M0 gate.
 
 **Implementation milestones:** [`docs/implementation/phase1/PHASE_1_MILESTONES.md`](implementation/phase1/PHASE_1_MILESTONES.md).
 
-## Phase 2 — Deterministic Detection
+## Phase 2 - Deterministic Detection
 
 **Goal:** Detect the first coordination risks in report-only mode.
+
+**Implementation milestones:** [`docs/implementation/phase2/PHASE_2_MILESTONES.md`](implementation/phase2/PHASE_2_MILESTONES.md).
 
 **Deliverables:**
 
@@ -119,20 +123,24 @@ runtime observation, storage, projections, or CLI commands.
 - exported-function or API-contract invalidation detector;
 - dependency paths with evidence and provenance;
 - `record`, `notify`, `request_recheck`, `mark_possibly_stale`, and `request_revalidation` policy actions;
+- immutable `finding.created` events with rebuildable finding views;
 - `patchmesh overlaps`, `stale`, and `explain <decision-id>` CLI commands.
 
 **Exit gates:**
 
 - a labeled scenario corpus reports precision and recall per detector;
-- accepted quality thresholds are recorded from measured baseline data;
+- numeric quality thresholds are defined per detector before the final corpus run, and
+  each detector meets its threshold or has an approved advisory-only exception;
 - every finding is reproducible from stored events;
 - irrelevant concurrent changes do not trigger disruptive directives;
 - all gateway directives remain `allow` or `allow_with_notice`;
 - users can dismiss findings and record whether a notification was useful.
 
-## Phase 3 — Targeted Revalidation
+## Phase 3 - Targeted Revalidation
 
 **Goal:** Turn detection into the cheapest reliable proof that work remains valid.
+
+**Implementation milestones:** [`docs/implementation/phase3/PHASE_3_MILESTONES.md`](implementation/phase3/PHASE_3_MILESTONES.md).
 
 **Deliverables:**
 
@@ -140,6 +148,8 @@ runtime observation, storage, projections, or CLI commands.
 - mappings from changed resources to targeted type checks, contract checks, and tests;
 - `completed -> possibly_stale -> revalidating -> valid | stale` transitions;
 - revalidation results stored as events and linked to their decisions;
+- gateway- or adapter-mediated check execution, plus ingestion of externally executed
+  typed results;
 - CLI views for validity history and recommended checks.
 
 **Exit gates:**
@@ -147,12 +157,16 @@ runtime observation, storage, projections, or CLI commands.
 - relevant checks are selected deterministically for every golden invalidation scenario;
 - validation results update task state reproducibly under replay;
 - targeted revalidation costs less than the documented broad-check baseline for the corpus;
+- the targeted-to-broad cost ratio meets an accepted threshold, or an explicit scoped
+  exception is approved;
 - confirmed stale work requires failed validation or explicit deterministic proof;
 - false-positive, override, rework-avoided, and time-to-detect metrics are recorded during dogfooding.
 
-## Phase 4 — Measured Enforcement
+## Phase 4 - Measured Enforcement
 
 **Goal:** Permit narrowly scoped, opt-in intervention only where measured evidence supports it.
+
+**Implementation milestones:** [`docs/implementation/phase4/PHASE_4_MILESTONES.md`](implementation/phase4/PHASE_4_MILESTONES.md).
 
 **Deliverables:**
 
@@ -161,6 +175,7 @@ runtime observation, storage, projections, or CLI commands.
 - per-operation fail-open/fail-closed policy;
 - decision acknowledgment, retry, expiry, override, and audit behavior;
 - crash and partial-execution reconciliation;
+- an approved authority decision record bound to the exact enforcement scope;
 - human or orchestrator approval for ambiguous intervention.
 
 **Exit gates:**
@@ -169,11 +184,15 @@ runtime observation, storage, projections, or CLI commands.
 - gateway restarts and partial execution reconcile without duplicate tool execution;
 - every intervention can be overridden and audited;
 - the accepted false-interruption rate and latency budget are documented and met;
-- semantic evidence alone cannot delay or reject an operation.
+- semantic evidence alone cannot delay or reject an operation;
+- enforcement activation requires the approved authority decision record and completed
+  Phase 4 M6 safety evidence; otherwise directives remain `allow` or `allow_with_notice`.
 
-## Phase 5 — Expansion
+## Phase 5 - Expansion
 
 **Goal:** Broaden compatibility only after the first slice demonstrates useful avoided rework.
+
+**Implementation milestones:** [`docs/implementation/phase5/PHASE_5_MILESTONES.md`](implementation/phase5/PHASE_5_MILESTONES.md).
 
 **Candidate work, ordered by measured need:**
 

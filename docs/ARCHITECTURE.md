@@ -107,8 +107,9 @@ reject
 ```
 
 The gateway does not select coordination policy. The MVP produces only `allow` and
-`allow_with_notice`; `delay` and `reject` remain disabled until Phase 4 exit evidence
-supports opt-in enforcement.
+`allow_with_notice`; `delay` and `reject` remain disabled until the Phase 4 M6 safety
+gate, including its approved authority decision and recovery evidence, supports opt-in
+enforcement.
 
 The gateway must not decide policy by itself. It enforces decisions from the core.
 
