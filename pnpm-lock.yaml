@@ -18,6 +18,15 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  packages/adapters:
+    dependencies:
+      '@patchmesh/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@patchmesh/storage':
+        specifier: workspace:*
+        version: link:../storage
+
   packages/collector:
     dependencies:
       '@patchmesh/protocol':
