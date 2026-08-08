@@ -1,6 +1,7 @@
 # PatchMesh Identity and Resource-Version Protocol
 
-> **Status:** Phase 0 normative contract. No runtime implementation exists yet.
+> **Status:** Phase 0 normative contract. M1 provides typed identity and envelope
+> validation; durable identity persistence remains planned.
 
 ## Authority and scope
 

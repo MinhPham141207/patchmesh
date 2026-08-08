@@ -2,8 +2,8 @@
 
 ## 1. Status and Purpose
 
-> **Status:** Planned. PatchMesh is documentation-first and has no released
-> implementation.
+> **Status:** Planned. M1 protocol and collector foundations exist, but no CLI command
+> is implemented or released.
 
 This document describes target CLI behavior. No command is available until its
 implementation, help output, and tests exist.
@@ -707,37 +707,22 @@ patchmesh events --agent agent-a --since 10m
 patchmesh events --type file.changed --follow
 ```
 
-### Common event types
+### Common V1 event types
 
 ```text
-agent.registered
-agent.disconnected
-
-task.assigned
-task.started
-task.blocked
-task.completed
-
 tool.requested
 tool.completed
-tool.failed
-
 file.read
-file.write_intended
 file.changed
-
 symbol.read
 symbol.changed
-
-test.started
-test.completed
-
+task.completed
 dependency.changed
-discovery.reported
-
+attribution.corrected
 finding.created
 decision.created
-decision.resolved
+validity.changed
+decision.delivery.changed
 ```
 
 ---

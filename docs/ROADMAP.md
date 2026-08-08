@@ -1,7 +1,7 @@
 # PatchMesh Roadmap
 
-> **Status:** Planned. PatchMesh is currently documentation-first and has no released
-> implementation.
+> **Status:** Planned roadmap. M1 is implemented; the remaining Phase 1 and later
+> capabilities are not implemented.
 
 ## Purpose
 
@@ -73,6 +73,8 @@ runtime observation, storage, projections, or CLI commands.
 **Goal:** Capture one runtime's activity and reproduce derived state without making coordination decisions that interrupt work.
 
 **M0 prerequisite:** Complete. See [`docs/PHASE_0_M0_EVIDENCE.md`](PHASE_0_M0_EVIDENCE.md).
+
+**M1 status:** Complete. See [`docs/PHASE_1_M1_EVIDENCE.md`](PHASE_1_M1_EVIDENCE.md).
 
 **Deliverables:**
 

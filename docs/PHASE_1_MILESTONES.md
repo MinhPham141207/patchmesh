@@ -1,8 +1,9 @@
 # PatchMesh Phase 1 Milestones: Observe and Replay
 
-> **Status:** M0 complete; M1-M7 planned. These milestones break the Phase 1 roadmap
-> scope into independently testable vertical slices. No released runtime
-> implementation exists yet.
+> **Status:** M0 and M1 complete; M2-M7 planned. These milestones break the Phase 1
+> roadmap scope into independently testable vertical slices. M1 provides the strict
+> workspace, protocol boundary, and in-memory collector; later runtime capabilities
+> are not implemented yet.
 
 ## Purpose
 
@@ -60,7 +61,7 @@ This is a prerequisite gate, not a Phase 1 runtime milestone.
 - Phase 0 evidence is recorded without introducing runtime, storage, adapter, daemon,
   or CLI implementation.
 
-### M1: Workspace and Protocol Round Trip
+### M1: Workspace and Protocol Round Trip (Complete)
 
 **Goal:** Establish the TypeScript/pnpm modular-monolith boundary and validate a
 minimal event path.
@@ -78,6 +79,8 @@ minimal event path.
   CLI packages.
 
 **Exit evidence:**
+
+- [M1 completion evidence](PHASE_1_M1_EVIDENCE.md)
 
 - Valid events are accepted and malformed or unsupported events are rejected.
 - `agentId` and `taskId` are always present and may be `null`.

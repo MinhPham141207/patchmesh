@@ -1,7 +1,7 @@
 # PatchMesh Architecture
 
-> **Status:** Planned target architecture. See [ROADMAP.md](ROADMAP.md) for what is
-> currently in scope and which phase gates have been met.
+> **Status:** Planned target architecture. M1 currently implements only the protocol
+> boundary and in-memory collector; see [ROADMAP.md](ROADMAP.md) for phase status.
 
 ## 1. Purpose
 
@@ -114,39 +114,33 @@ The gateway must not decide policy by itself. It enforces decisions from the cor
 
 The event collector normalizes all observed activity.
 
-Core event types include:
+The closed V1 event contract currently represented by the protocol includes:
 
 ```text
 tool.requested
 tool.completed
-tool.failed
-
 file.read
-file.write_intended
 file.changed
-
 symbol.read
 symbol.changed
-
-test.started
-test.completed
-
-task.started
-task.blocked
 task.completed
-
 dependency.changed
-discovery.reported
-
+attribution.corrected
+finding.created
 decision.created
-decision.resolved
+validity.changed
+decision.delivery.changed
 ```
 
-Every stored event follows [Event Protocol V1](protocol/events.md) and its versioned
-JSON Schema. The closed envelope includes explicit worktree identity, required
-nullable agent/task attribution, source-instance sequencing, correlation, causation,
-and one event-type-selected payload. Event ingestion is idempotent by event ID and
-canonical content digest; timestamp, source, and causal order remain distinct.
+M1 accepts and validates the nine observation inputs and represents the four
+projection-event shapes for protocol compatibility. It does not emit projection facts.
+
+Every stored event will follow [Event Protocol V1](protocol/events.md) and its
+versioned JSON Schema. The closed envelope includes explicit worktree identity,
+required nullable agent/task attribution, source-instance sequencing, correlation,
+causation, and one event-type-selected payload. M2 durable ingestion will be idempotent
+by event ID and canonical content digest; timestamp, source, and causal order remain
+distinct.
 
 The protocol is the source of truth for event field names and nullability. Later
 attribution is represented by a new event rather than mutation.

@@ -1,7 +1,7 @@
 # PatchMesh Vision
 
-> **Status:** Product vision and planned behavior. PatchMesh is currently at the
-> documentation-first concept stage; see [ROADMAP.md](ROADMAP.md) for delivery status.
+> **Status:** Product vision and planned behavior. The M1 workspace/protocol
+> foundation is implemented; see [ROADMAP.md](ROADMAP.md) for delivery status.
 
 ## Overview
 

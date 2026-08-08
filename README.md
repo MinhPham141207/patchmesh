@@ -5,9 +5,10 @@ detects when one agent's change may invalidate another agent's running or comple
 work, explains the dependency path, and requests the smallest reliable response
 before integration.
 
-> **Project status:** Documentation-first concept stage. There is no released
-> implementation yet. The initial implementation sequence is defined in the
-> [roadmap](docs/ROADMAP.md).
+> **Project status:** M1 is implemented and verified: the strict workspace, protocol
+> boundary, and in-memory collector are available. SQLite, runtime adapters, effect
+> observation, replay, projections, daemon services, CLI commands, and detection remain
+> planned. The implementation sequence is defined in the [roadmap](docs/ROADMAP.md).
 
 ## The problem
 
@@ -29,7 +30,16 @@ PatchMesh focuses on this question:
 
 > When has concurrent work stopped being independent?
 
-## First working slice
+## Current M1 slice
+
+M1 currently provides:
+
+- a strict TypeScript/pnpm workspace;
+- runtime-agnostic V1 event types and Phase 0 boundary validation;
+- an in-memory normalized-event collector;
+- a tested `tool.requested` and `tool.completed` round trip.
+
+## Planned first working slice
 
 The first version targets two coding agents in separate Git worktrees and remains
 report-only. It will provide:
