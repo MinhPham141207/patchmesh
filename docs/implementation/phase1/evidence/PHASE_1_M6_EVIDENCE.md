@@ -1,10 +1,14 @@
 # Phase 1 M6 Evidence: Read-Only Daemon Services and CLI
 
-**Status:** Verified
+**Status:** Historical verification snapshot
 
 **Verification date:** 2026-08-08
 
-**Base revision:** `65ee902` (M6 changes are uncommitted in the working tree at verification time)
+**Verification base revision:** `65ee902` (the M6 changes were uncommitted when this
+focused verification ran)
+
+**Subsequent Phase 1 completion revision:**
+`644a9e6f983bb7601e35e8f7ab3c1c26474b8adf` (`644a9e6`, M7 gate)
 
 ## Scope Implemented
 
@@ -57,6 +61,7 @@ does not provide network transport or cross-process subscription guarantees.
 
 ## Deferred Scope
 
-M7 golden-slice, resilience, and performance evidence; Phase 2 findings and policy;
-overlap, stale, explain, validity, enforcement, dashboard, lifecycle commands, and
-network daemon transport remain deferred.
+Phase 2 findings and policy; overlap, stale, explain, validity, enforcement, dashboard,
+lifecycle commands, and network daemon transport remain deferred. M7 subsequently
+provided golden-slice, resilience, and performance evidence at the recorded completion
+revision above.

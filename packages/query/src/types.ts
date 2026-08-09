@@ -1,12 +1,16 @@
 import type {
   AgentId,
+  DecisionId,
   EventId,
   EventType,
+  FindingType,
   ProtocolEvent,
   TaskId,
 } from "@patchmesh/protocol";
 import type {
   EventQuery,
+  DecisionView,
+  FindingView,
   GraphNode,
   ProjectionCoverage,
   ProjectionCoverageGap,
@@ -87,6 +91,22 @@ export interface GraphView {
   readonly coverageWarnings: readonly ProjectionCoverageGap[];
 }
 
+export interface FindingListQuery {
+  readonly findingType?: FindingType;
+  readonly status?: FindingView["status"];
+}
+
+export interface FindingsView {
+  readonly findings: readonly FindingView[];
+  readonly coverageWarnings: readonly ProjectionCoverageGap[];
+}
+
+export interface DecisionExplanation {
+  readonly decision: DecisionView;
+  readonly finding: FindingView | null;
+  readonly coverageWarnings: readonly ProjectionCoverageGap[];
+}
+
 export interface DaemonHealth {
   readonly health: StatusView["health"];
   readonly store: StatusView["store"];
@@ -110,6 +130,8 @@ export interface ReadServices {
   listAgents(filters?: AgentFilters): AgentsView;
   listEvents(query?: EventListQuery): EventPage;
   getGraph(filters?: GraphFilters): GraphView;
+  listFindings(query?: FindingListQuery): FindingsView;
+  explainDecision(decisionId: DecisionId): DecisionExplanation;
   followEvents(options: FollowOptions, signal?: AbortSignal): AsyncIterable<EventPage>;
 }
 

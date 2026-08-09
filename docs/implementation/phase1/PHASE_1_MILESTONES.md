@@ -1,9 +1,10 @@
 # PatchMesh Phase 1 Milestones: Observe and Replay
 
 > **Status:** M0 through M7 complete. These milestones break the Phase 1
-> roadmap scope into independently testable vertical slices. M1 provides the strict
-> workspace, protocol boundary, and in-memory collector; later runtime capabilities
-> are not implemented yet.
+> roadmap scope into independently testable vertical slices. Together they provide a
+> strict workspace and protocol boundary, durable replay, one MCP observation path,
+> conservative coverage, a rebuildable work graph, read-only queries, and golden-slice
+> evidence. Phase 2 detection and coordination capabilities remain deferred.
 
 ## Purpose
 

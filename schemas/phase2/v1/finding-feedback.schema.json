@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase2/v1/finding-feedback.schema.json",
+  "type": "object",
+  "properties": {
+    "feedbackId": { "type": "string", "pattern": "^feedback_[0-9a-f]{32}$" },
+    "findingId": { "type": "string", "pattern": "^finding_[0-9a-f]{32}$" },
+    "decisionId": {
+      "oneOf": [
+        { "type": "string", "pattern": "^decision_[0-9a-f]{32}$" },
+        { "type": "null" }
+      ]
+    },
+    "actor": { "$ref": "#/$defs/target" },
+    "disposition": {
+      "enum": ["dismissed", "acknowledged", "not_affected", "already_handled", "needs_more_information"]
+    },
+    "useful": { "oneOf": [{ "type": "boolean" }, { "type": "null" }] },
+    "reason": { "oneOf": [{ "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, { "type": "null" }] },
+    "evidenceEventIds": {
+      "type": "array",
+      "items": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "required": ["feedbackId", "findingId", "decisionId", "actor", "disposition", "useful", "reason", "evidenceEventIds"],
+  "additionalProperties": false,
+  "$defs": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "agentId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/agentId" },
+        "taskId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/taskId" }
+      },
+      "required": ["agentId", "taskId"],
+      "additionalProperties": false
+    }
+  }
+}

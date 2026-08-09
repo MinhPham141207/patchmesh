@@ -6,6 +6,7 @@ import type {
   DeliveryId,
   DependencyId,
   EventId,
+  FeedbackId,
   FindingId,
   LogicalResource,
   NullableAgentId,
@@ -35,6 +36,10 @@ export interface BaseEvent {
   readonly correlationId: CorrelationId;
   readonly causationId: EventId | null;
   readonly sourceSequence: number | null;
+}
+
+export interface BaseEventV2 extends Omit<BaseEvent, "schemaVersion"> {
+  readonly schemaVersion: 2;
 }
 
 export type ToolName = "read_file" | "edit_file" | "run_shell" | "run_test" | "git_commit";
@@ -124,6 +129,36 @@ export interface Finding {
 
 export interface FindingCreatedPayload {
   readonly finding: Finding;
+}
+
+/**
+ * An immutable response to a finding.  This deliberately records a response rather
+ * than mutating the finding so replay can reconstruct both its current status and
+ * the complete response history.
+ */
+export interface FindingFeedback {
+  readonly feedbackId: FeedbackId;
+  readonly findingId: FindingId;
+  readonly decisionId: DecisionId | null;
+  readonly actor: DecisionTarget;
+  readonly disposition: "dismissed" | "acknowledged" | "not_affected" | "already_handled" | "needs_more_information";
+  readonly useful: boolean | null;
+  readonly reason: string | null;
+  readonly evidenceEventIds: readonly EventId[];
+}
+
+export interface FindingFeedbackCreatedPayload {
+  readonly feedback: FindingFeedback;
+}
+
+/** Explicit proof that a write depends on a previously observed resource read. */
+export interface DependentWritePayload {
+  readonly write: {
+    readonly dependencyId: DependencyId;
+    readonly resourceId: ResourceId;
+    readonly dependsOnReadEventId: EventId;
+    readonly coverageId: CoverageId;
+  };
 }
 
 export interface DecisionTarget {
@@ -257,6 +292,16 @@ export interface FindingCreatedEvent extends BaseEvent {
   readonly payload: FindingCreatedPayload;
 }
 
+export interface FindingFeedbackCreatedEvent extends BaseEventV2 {
+  readonly eventType: "finding.feedback.created";
+  readonly payload: FindingFeedbackCreatedPayload;
+}
+
+export interface DependentWriteEvent extends BaseEventV2 {
+  readonly eventType: "write.dependent";
+  readonly payload: DependentWritePayload;
+}
+
 export interface DecisionCreatedEvent extends BaseEvent {
   readonly eventType: "decision.created";
   readonly payload: DecisionCreatedPayload;
@@ -285,6 +330,8 @@ export type Phase1InputEvent =
 
 export type ProjectionEvent =
   | FindingCreatedEvent
+  | FindingFeedbackCreatedEvent
+  | DependentWriteEvent
   | DecisionCreatedEvent
   | ValidityChangedEvent
   | DecisionDeliveryChangedEvent;

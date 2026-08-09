@@ -2,8 +2,12 @@ import type {
   AgentId,
   AttributionCorrectedEvent,
   CoverageId,
+  Decision,
   Dependency,
   EventId,
+  Finding,
+  FindingFeedback,
+  FindingId,
   LogicalResource,
   NullableAgentId,
   NullableTaskId,
@@ -91,10 +95,32 @@ export interface ProjectionCoverage {
   readonly presentation: "sufficient" | "degraded" | "unknown";
 }
 
+export interface FindingView {
+  readonly finding: Finding;
+  readonly feedback: readonly FeedbackView[];
+  readonly status: Finding["status"];
+  readonly eventIds: readonly EventId[];
+}
+
+/** An immutable feedback response together with the event that records it. */
+export interface FeedbackView {
+  readonly eventId: EventId;
+  readonly feedback: FindingFeedback;
+}
+
+export interface DecisionView {
+  readonly decision: Decision;
+  readonly deliveries: readonly Decision["deliveries"][number][];
+  readonly feedback: readonly FeedbackView[];
+  readonly eventIds: readonly EventId[];
+}
+
 export interface WorkGraphSnapshot {
   readonly nodes: readonly GraphNode[];
   readonly edges: readonly GraphEdge[];
   readonly coverage: readonly ProjectionCoverage[];
+  readonly findings: readonly FindingView[];
+  readonly decisions: readonly DecisionView[];
 }
 
 export interface WorkGraphReplayResult {
@@ -113,5 +139,7 @@ export interface WorkGraphState {
   readonly correctionsByTarget: Map<EventId, AttributionOverride>;
   readonly nodes: Map<string, GraphNode>;
   readonly edges: Map<string, GraphEdge>;
+  readonly findings: Map<FindingId, FindingView>;
+  readonly decisions: Map<string, DecisionView>;
   readonly coverageInputs: readonly ProjectionCoverage[];
 }

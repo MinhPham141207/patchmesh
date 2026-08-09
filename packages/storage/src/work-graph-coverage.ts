@@ -82,6 +82,11 @@ function toolCoverage(
   }
 
   evidenceEventIds.push(completion.eventId);
+  const observedReadEventIds = [...eventsById.values()]
+    .filter((event) => (event.eventType === "file.read" || event.eventType === "symbol.read")
+      && event.causationId === request.eventId)
+    .map((event) => event.eventId);
+  evidenceEventIds.push(...observedReadEventIds);
   for (const effectEventId of completion.payload.effectEventIds) {
     const effect = eventsById.get(effectEventId);
     if (effect === undefined || (effect.eventType !== "file.changed" && effect.eventType !== "symbol.changed")) {
@@ -89,12 +94,20 @@ function toolCoverage(
       continue;
     }
     evidenceEventIds.push(effect.eventId);
+    if (effect.source.kind === "watcher") {
+      gaps.push(gap(
+        "unverified",
+        `tool:${request.eventId}`,
+        "snapshot-observed effect origin cannot be proven solely from the intercepted operation",
+        [effect.eventId],
+      ));
+    }
   }
 
   if (request.payload.opaque) {
     gaps.push(gap("opaque", `tool:${request.eventId}`, "opaque operation effects are not prospectively enumerable", [request.eventId]));
     modes.push("unknown");
-  } else if (completion.payload.effectEventIds.length > 0 && gaps.length === 0) {
+  } else if ((completion.payload.effectEventIds.length > 0 || observedReadEventIds.length > 0) && gaps.length === 0) {
     modes.push("verified");
   } else if (completion.payload.effectEventIds.length === 0) {
     modes.push("unknown");

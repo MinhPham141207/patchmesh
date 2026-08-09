@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase2/v1/dependent-write.schema.json",
+  "type": "object",
+  "properties": {
+    "dependencyId": { "type": "string", "pattern": "^dep_[0-9a-f]{32}$" },
+    "resourceId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/resourceId" },
+    "dependsOnReadEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
+    "coverageId": { "type": "string", "pattern": "^coverage_[0-9a-f]{32}$" }
+  },
+  "required": ["dependencyId", "resourceId", "dependsOnReadEventId", "coverageId"],
+  "additionalProperties": false
+}

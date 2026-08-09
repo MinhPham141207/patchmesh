@@ -62,7 +62,7 @@ function base(
   taskId: TaskId | null,
   sequence: number | null,
   causationId: EventId | null = null,
-): Omit<ProtocolEvent, "eventType" | "payload"> {
+): Omit<ToolRequestedEvent, "eventType" | "payload"> {
   return {
     schemaVersion: 1,
     eventId: id,

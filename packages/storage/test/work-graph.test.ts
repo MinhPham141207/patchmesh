@@ -176,6 +176,11 @@ const linkedEffect: FileChangedEvent = {
   causationId: toolRequest.eventId,
 };
 
+const directlyObservedEffect: FileChangedEvent = {
+  ...linkedEffect,
+  source: toolRequest.source,
+};
+
 const toolCompletion: ToolCompletedEvent = {
   ...baseEvent("evt_00000000000000000000000000000020", toolRequest.correlationId),
   eventType: "tool.completed",
@@ -352,10 +357,31 @@ test("correction changes projected attribution but not the source event", () => 
   assert.equal(readEdge?.attribution.taskId, taskId);
 });
 
-test("derives verified coverage from persisted linked effects", () => {
-  const coverage = projectOrdered([toolRequest, linkedEffect, toolCompletion]).snapshot.coverage;
+test("derives verified coverage from directly observed linked effects", () => {
+  const coverage = projectOrdered([toolRequest, directlyObservedEffect, toolCompletion]).snapshot.coverage;
 
   assert.equal(coverage.some((value) => value.modes.includes("intercepted") && value.modes.includes("verified")), true);
+});
+
+test("derives verified coverage from an explicit read linked to a completed read-only call", () => {
+  const linkedRead: FileReadEvent = {
+    ...fileRead,
+    correlationId: toolRequest.correlationId,
+    causationId: toolRequest.eventId,
+  };
+  const coverage = projectOrdered([toolRequest, linkedRead, noEffectCompletion]).snapshot.coverage;
+
+  assert.equal(coverage.some((value) => value.presentation === "sufficient" && value.evidenceEventIds.includes(linkedRead.eventId)), true);
+});
+
+test("degrades snapshot-watcher effect coverage because origin is uncertain", () => {
+  const coverage = projectOrdered([toolRequest, linkedEffect, toolCompletion]).snapshot.coverage;
+
+  assert.equal(coverage.some((value) => value.presentation === "degraded"), true);
+  assert.equal(
+    coverage.some((value) => value.gaps.some((gap) => gap.reason.includes("effect origin cannot be proven"))),
+    true,
+  );
 });
 
 test("reports degraded coverage for opaque and unresolved effects", () => {
@@ -421,11 +447,11 @@ test("replay validation fails before a projection snapshot is returned", () => {
   );
 });
 
-test("projection event types are replay-compatible but produce no Phase 2 state", () => {
+test("projection event types expose rebuildable Phase 2 view containers", () => {
   const snapshot = projectOrdered(projectionEvents).snapshot;
 
   assert.deepEqual(snapshot.edges.filter((edge) => edge.kind === "changes"), []);
   assert.deepEqual(snapshot.coverage, []);
-  assert.equal(Object.hasOwn(snapshot, "findings"), false);
-  assert.equal(Object.hasOwn(snapshot, "decisions"), false);
+  assert.equal(snapshot.findings.length, 1);
+  assert.equal(snapshot.decisions.length, 1);
 });

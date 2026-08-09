@@ -1,17 +1,26 @@
 # Phase 1 M7 Evidence: Golden Slice, Resilience, and Performance Gate
 
-**Status:** Verified
+**Status:** Historical verification snapshot
 
 **Verification date:** 2026-08-08
 
-**Base revision:** `b01fa43a3e0d5e3d469bc51cab3b16ff3e4f10b8` (`b01fa43`)
+**Verification base revision:** `b01fa43a3e0d5e3d469bc51cab3b16ff3e4f10b8`
+(`b01fa43`)
+
+**Phase 1 completion revision:**
+`644a9e6f983bb7601e35e8f7ab3c1c26474b8adf` (`644a9e6`, M7 gate)
+
+The command results below apply to the recorded verification base. The completion
+revision records the completed Phase 1 milestone and is not presented as a rerun of
+that historical command set.
 
 ## Scope Implemented
 
 M7 adds a repository-level `tools/phase1` harness. It verifies the observation-only
 cross-worktree exported-contract stream, replay and projection equivalence, immutable
 attribution correction, restart recovery, duplicate and out-of-order behavior,
-redaction, failed/interrupted outcomes, and degraded coverage for opaque operations.
+redaction, failed/interrupted outcomes, and degraded coverage for opaque and
+snapshot-origin-uncertain operations.
 
 M7 remains report-only. The harness emits no Phase 2 findings, decisions, validity
 records, `delay`, `reject`, overlap, stale, or revalidation output.
@@ -104,10 +113,11 @@ measured sample, peak memory, throughput, digest, and failure field.
 
 ## Proposed Phase 2 Budget
 
-**Proposed acceptance budget:** p95 gateway interception overhead of 50 ms for noop
+**Proposed proxy-only baseline:** p95 gateway interception overhead of 50 ms for noop
 routing and deterministic file reads, and 100 ms for opaque shell operations, measured
 with the same Phase 0 workloads, sample counts, and environment metadata. This is a
-proposal for acceptance at the Phase 2 M0 gate, not a Phase 1 pass/fail threshold.
+proposal for review at the Phase 2 M0 gate, not a Phase 1 pass/fail threshold or a
+budget for complete filesystem interception.
 
 **Acceptance owner:** PatchMesh maintainers responsible for the Phase 2 M0 gate.
 
@@ -115,14 +125,17 @@ The interception benchmark uses a deterministic zero-file observation boundary t
 isolate gateway routing, event validation, and persistence overhead. Real Git,
 filesystem, content-hash, failed-process, interrupted-process, and opaque-operation
 observation is verified in `observation.test.ts`; its full filesystem scan cost is a
-known residual limitation of this baseline.
+known residual limitation of this baseline. Phase 2 M0 must add and accept a separate
+full-`NodeObservationBoundary` benchmark, including a representative workspace scan,
+before applying an end-to-end interception budget.
 
 ## Phase Boundary and Residual Limitations
 
 - Phase 1 remains observation-only and report-only. No detector, finding, policy,
   coordination decision, or disruptive directive was added.
 - The benchmark does not measure full `NodeObservationBoundary` scan cost per sample;
-  that cost is covered functionally, not included in the isolated interception budget.
+  that cost is covered functionally, not included in the proxy-only baseline, and must
+  be measured and accepted at Phase 2 M0.
 - The harness uses local temporary repositories and SQLite databases only. It does not
   provide network transport, cross-process subscriptions, or sandbox-level bypass
   prevention.

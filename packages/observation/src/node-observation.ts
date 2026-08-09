@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { execFile as execFileCallback } from "node:child_process";
-import { lstat, readFile, readlink, readdir } from "node:fs/promises";
+import { execFile as execFileCallback, spawn } from "node:child_process";
+import { readFile, readlink, readdir } from "node:fs/promises";
 import { resolve, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Source } from "@patchmesh/protocol";
@@ -65,17 +65,50 @@ async function captureGitMetadata(root: string): Promise<GitMetadata> {
   return { commonDirectory, administrativeDirectory, revision, gaps };
 }
 
+async function gitBlobHashes(root: string, paths: readonly string[]): Promise<ReadonlyMap<string, string> | null> {
+  if (paths.length === 0) return new Map();
+  if (paths.some((path) => path.includes("\n") || path.includes("\r"))) return null;
+
+  return new Promise((resolveHashes) => {
+    const child = spawn("git", ["hash-object", "--stdin-paths"], {
+      cwd: root,
+      stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.once("error", () => resolveHashes(null));
+    child.once("close", (code) => {
+      if (code !== 0) {
+        resolveHashes(null);
+        return;
+      }
+      const hashes = stdout.trim().split(/\r?\n/);
+      if (hashes.length !== paths.length || hashes.some((hash) => hash.length === 0)) {
+        resolveHashes(null);
+        return;
+      }
+      resolveHashes(new Map(paths.map((path, index) => [path, hashes[index]!])));
+    });
+    child.stdin.end(`${paths.join("\n")}\n`);
+  });
+}
+
 function toLogicalPath(root: string, absolutePath: string): string {
   const relativePath = relative(root, absolutePath).split(sep).join("/");
   return normalizeLogicalPath(relativePath);
 }
 
-async function captureFiles(root: string): Promise<{
+async function captureFiles(root: string, canReadGitBlobs: boolean): Promise<{
   readonly files: ReadonlyMap<string, ObservedFileState>;
   readonly gaps: readonly ObservationGap[];
 }> {
   const files = new Map<string, ObservedFileState>();
   const gaps: ObservationGap[] = [];
+  const regularFiles: Array<{ readonly absolutePath: string; readonly relativePath: string; readonly logicalPath: string }> = [];
 
   async function visit(directory: string): Promise<void> {
     let entries;
@@ -91,15 +124,7 @@ async function captureFiles(root: string): Promise<{
       const relativePath = relative(root, absolutePath).split(sep).join("/");
       if (relativePath === ".git" || relativePath.startsWith(".git/")) continue;
 
-      let stats;
-      try {
-        stats = await lstat(absolutePath);
-      } catch {
-        gaps.push(gap("unverified", "filesystem", "A workspace path could not be inspected"));
-        continue;
-      }
-
-      if (stats.isDirectory()) {
+      if (entry.isDirectory()) {
         await visit(absolutePath);
         continue;
       }
@@ -112,7 +137,7 @@ async function captureFiles(root: string): Promise<{
         continue;
       }
 
-      if (stats.isSymbolicLink()) {
+      if (entry.isSymbolicLink()) {
         try {
           const target = await readlink(absolutePath);
           files.set(logicalPath, {
@@ -126,25 +151,44 @@ async function captureFiles(root: string): Promise<{
         continue;
       }
 
-      if (!stats.isFile()) {
+      if (!entry.isFile()) {
         gaps.push(gap("unverified", logicalPath, "A workspace entry has an unsupported file type"));
         continue;
       }
-
-      try {
-        const gitBlob = await gitValue(root, "hash-object", "--", relativePath);
-        files.set(logicalPath, {
-          contentHash: sha256(await readFile(absolutePath)),
-          gitBlob,
-          fileKind: "file",
-        });
-      } catch {
-        gaps.push(gap("unverified", logicalPath, "A file content hash could not be computed"));
-      }
+      regularFiles.push({ absolutePath, relativePath, logicalPath });
     }
   }
 
   await visit(root);
+  const blobHashes = canReadGitBlobs ? await gitBlobHashes(root, regularFiles.map((file) => file.relativePath)) : null;
+  const fallbackBlobs = canReadGitBlobs && blobHashes === null
+    ? await Promise.all(regularFiles.map((file) => gitValue(root, "hash-object", "--", file.relativePath)))
+    : null;
+  const concurrency = 32;
+  let nextFile = 0;
+  const fileStates: Array<ObservedFileState | null> = Array.from({ length: regularFiles.length }, () => null);
+  const workers = Array.from({ length: Math.min(concurrency, regularFiles.length) }, async () => {
+    while (nextFile < regularFiles.length) {
+      const index = nextFile++;
+      const file = regularFiles[index]!;
+      try {
+        fileStates[index] = {
+          contentHash: sha256(await readFile(file.absolutePath)),
+          gitBlob: blobHashes?.get(file.relativePath) ?? fallbackBlobs?.[index] ?? null,
+          fileKind: "file",
+        };
+      } catch {
+        // Preserve traversal order when publishing gaps below.
+      }
+    }
+  });
+  await Promise.all(workers);
+  for (let index = 0; index < regularFiles.length; index += 1) {
+    const file = regularFiles[index]!;
+    const state = fileStates[index];
+    if (state) files.set(file.logicalPath, state);
+    else gaps.push(gap("unverified", file.logicalPath, "A file content hash could not be computed"));
+  }
   return { files, gaps };
 }
 
@@ -156,19 +200,17 @@ export class NodeObservationBoundary implements ObservationBoundary {
   }
 
   async captureBefore(context: ObservationContext): Promise<ObservationCapture> {
-    return this.capture(context);
+    return this.capture(context, false);
   }
 
   async captureAfter(context: ObservationContext): Promise<ObservationCapture> {
-    return this.capture(context);
+    return this.capture(context, true);
   }
 
-  private async capture(context: ObservationContext): Promise<ObservationCapture> {
+  private async capture(context: ObservationContext, afterExecution: boolean): Promise<ObservationCapture> {
     const root = resolve(context.workspaceRoot);
-    const [git, files] = await Promise.all([
-      captureGitMetadata(root),
-      captureFiles(root),
-    ]);
+    const git = await captureGitMetadata(root);
+    const files = await captureFiles(root, git.commonDirectory !== null && git.administrativeDirectory !== null);
     const snapshot: ObservationSnapshot = {
       repository: {
         commonDirectory: git.commonDirectory,
@@ -181,7 +223,17 @@ export class NodeObservationBoundary implements ObservationBoundary {
     };
     return {
       snapshot,
-      gaps: [...git.gaps, ...files.gaps],
+      gaps: [
+        ...git.gaps,
+        ...files.gaps,
+        ...(afterExecution
+          ? [gap(
+              "unverified",
+              "tool.effects",
+              "snapshot observation verifies final state but cannot prove each effect originated from the intercepted operation",
+            )]
+          : []),
+      ],
       outOfBandChanges: [],
     };
   }

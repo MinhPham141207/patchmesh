@@ -1,4 +1,11 @@
-import type { AgentsView, EventPage, GraphView, StatusView } from "@patchmesh/query";
+import type {
+  AgentsView,
+  DecisionExplanation,
+  EventPage,
+  FindingsView,
+  GraphView,
+  StatusView,
+} from "@patchmesh/query";
 
 export function renderStatus(status: StatusView, json: boolean): string {
   if (json) return `${JSON.stringify(status)}\n`;
@@ -38,5 +45,37 @@ export function renderGraph(view: GraphView, json: boolean): string {
   for (const edge of view.snapshot.edges) lines.push(`${edge.fromNodeId ?? "unattributed"}\t->\t${edge.toNodeId}\t${edge.kind}`);
   for (const gap of view.coverageWarnings) lines.push(`Coverage gap: ${gap.kind} ${gap.scope}`);
   if (view.snapshot.nodes.length === 0) lines.push("No graph nodes");
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderFindings(view: FindingsView, json: boolean): string {
+  if (json) return `${JSON.stringify(view)}\n`;
+  const lines = ["FINDING\tTYPE\tSTATUS\tCONFIDENCE"];
+  for (const entry of view.findings) {
+    lines.push(`${entry.finding.findingId}\t${entry.finding.findingType}\t${entry.status}\t${entry.finding.confidence}`);
+  }
+  for (const gap of view.coverageWarnings) lines.push(`Coverage gap: ${gap.kind} ${gap.scope}`);
+  if (view.findings.length === 0) lines.push("No findings");
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderDecisionExplanation(view: DecisionExplanation, json: boolean): string {
+  if (json) return `${JSON.stringify(view)}\n`;
+  const { decision } = view;
+  const lines = [
+    "DECISION EXPLANATION",
+    `Decision: ${decision.decision.decisionId}`,
+    `Finding: ${decision.decision.findingId}`,
+    `Action: ${decision.decision.coordinationAction}`,
+    `Directive: ${decision.decision.gatewayDirective}`,
+    `State: ${decision.decision.state}`,
+    `Finding status: ${view.finding?.status ?? "unavailable"}`,
+    `Evidence: ${decision.decision.evidenceEventIds.join(",")}`,
+  ];
+  for (const delivery of decision.deliveries) lines.push(`Delivery: ${delivery.deliveryId} ${delivery.state}`);
+  for (const feedback of decision.feedback) {
+    lines.push(`Feedback: ${feedback.eventId} ${feedback.feedback.feedbackId} ${feedback.feedback.disposition}`);
+  }
+  for (const gap of view.coverageWarnings) lines.push(`Coverage gap: ${gap.kind} ${gap.scope}`);
   return `${lines.join("\n")}\n`;
 }

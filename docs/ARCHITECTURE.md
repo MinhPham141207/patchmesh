@@ -1,10 +1,10 @@
 # PatchMesh Architecture
 
-> **Status:** Planned target architecture. M1 through M6 currently implement the protocol
+> **Status:** Planned target architecture. M1 through M7 currently implement the protocol
 > boundary, in-memory collector, append-only SQLite event store, replay core, an
 > in-process MCP runtime boundary, effect observation, rebuildable in-memory graph
-> projections, and read-only query/CLI composition; see [ROADMAP.md](ROADMAP.md) for
-> phase status.
+> projections, read-only query/CLI composition, and golden-slice resilience and
+> performance evidence; see [ROADMAP.md](ROADMAP.md) for phase status.
 
 ## 1. Purpose
 
@@ -147,10 +147,12 @@ transport, effect observer, detector, policy, or projection.
 
 M4 adds the `@patchmesh/observation` boundary. It captures Git repository/worktree and
 revision metadata, filesystem state, content hashes, and normalized process outcomes
-around the MCP call. Verified file effects are stored as `file.changed` events and linked
-from `tool.completed.payload.effectEventIds`; derived coverage reports opaque, bypassed,
-unattributed, and unverified gaps without adding a coverage event. M4 does not add AST
-analysis, detectors, projections, policy, or enforcement.
+around the MCP call. Snapshot-observed file effects are stored as `file.changed` events
+and linked from `tool.completed.payload.effectEventIds`; because a before/after snapshot
+cannot prove that each effect originated in the intercepted operation, derived coverage
+records an explicit unverified gap. Coverage also reports opaque, bypassed, and
+unattributed gaps without adding a coverage event. M4 does not add AST analysis,
+detectors, projections, policy, or enforcement.
 
 Every stored event will follow [Event Protocol V1](protocol/events.md) and its
 versioned JSON Schema. The closed envelope includes explicit worktree identity,

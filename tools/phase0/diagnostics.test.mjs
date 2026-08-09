@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalDigest, canonicalize } from './lib/canonical-json.mjs';
 import { EXIT_CONTRACT_INVALID, EXIT_OK, EXIT_TOOL_FAILURE, diagnostic, formatDiagnostics, sortDiagnostics } from './lib/diagnostics.mjs';
 import { findSecretDiagnostics } from './lib/secrets.mjs';
+import { loadPhase0Corpus, validateOneScenario } from './validate.mjs';
 
 async function runMain(args) {
   return new Promise((resolve, reject) => {
@@ -79,4 +80,24 @@ test('null canonical events return exit code 1 with a sanitized schema diagnosti
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('malformed expected collections return contract diagnostics without throwing', async () => {
+  const corpus = await loadPhase0Corpus(new URL('../..', import.meta.url));
+  const source = corpus.positiveScenarios.find(({ manifest }) => manifest.scenarioId === 'scenario_relevant_exported_contract');
+  if (!source) throw new Error('expected relevant exported-contract scenario');
+  const malformed = {
+    ...source,
+    expected: { ...source.expected, findings: null },
+  };
+
+  let diagnostics;
+  assert.doesNotThrow(() => {
+    diagnostics = validateOneScenario(malformed, corpus.registry);
+  });
+  assert.ok(diagnostics.some((item) =>
+    item.code === 'PHASE0_SCHEMA_INVALID' &&
+    item.path.endsWith('/expected-findings.json') &&
+    item.message === 'expected findings must be an array',
+  ));
 });

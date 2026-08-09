@@ -39,9 +39,23 @@ function expectedBundleSecrets(expected, basePath) {
   for (const [name, value] of Object.entries(expected)) diagnostics.push(...findSecretDiagnostics(value, `${basePath}/expected-${name}.json`));
   return diagnostics;
 }
+function isExpectedBundle(expected) {
+  return expected !== null && typeof expected === 'object' && !Array.isArray(expected) &&
+    expected.graph !== null && typeof expected.graph === 'object' && !Array.isArray(expected.graph) &&
+    ['findings', 'decisions', 'validity', 'coverage'].every((name) => Array.isArray(expected[name]));
+}
 function expectedBundleSchemas(expected, basePath, registry) {
+  if (expected === null || typeof expected !== 'object' || Array.isArray(expected)) {
+    return [diagnostic('PHASE0_SCHEMA_INVALID', basePath, '', 'expected projection bundle must be a non-null object')];
+  }
   const diagnostics = [...validateInstance(schemaId('graph'), expected.graph, registry, `${basePath}/expected-graph.json`)];
-  for (const [name, schema] of [['findings', 'finding'], ['decisions', 'decision'], ['validity', 'task-validity'], ['coverage', 'coverage']]) for (const [index, value] of expected[name].entries()) diagnostics.push(...validateInstance(schemaId(schema), value, registry, `${basePath}/expected-${name}.json#/${index}`));
+  for (const [name, schema] of [['findings', 'finding'], ['decisions', 'decision'], ['validity', 'task-validity'], ['coverage', 'coverage']]) {
+    if (!Array.isArray(expected[name])) {
+      diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', `${basePath}/expected-${name}.json`, '', `expected ${name} must be an array`));
+      continue;
+    }
+    for (const [index, value] of expected[name].entries()) diagnostics.push(...validateInstance(schemaId(schema), value, registry, `${basePath}/expected-${name}.json#/${index}`));
+  }
   return diagnostics;
 }
 function expectedSchemas(scenario, registry) {
@@ -66,7 +80,7 @@ function eventSchemas(scenario, registry) {
   return { diagnostics, validEvents };
 }
 function expectedEventCopies(scenario) {
-  if (!scenario.expected) return [];
+  if (!isExpectedBundle(scenario.expected)) return [];
   const diagnostics = []; const findings = new Map(scenario.expected.findings.map((value) => [value.findingId, value])); const decisions = new Map(scenario.expected.decisions.map((value) => [value.decisionId, value])); const validity = new Map(scenario.expected.validity.map((value) => [value.validityId, value]));
   for (const { value: event } of scenario.events) {
     if (event.eventType === 'finding.created') { const expected = findings.get(event.payload.finding.findingId); if (!expected || canonicalDigest(expected) !== canonicalDigest(event.payload.finding)) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', scenario.directory, `/events/${event.eventId}/payload/finding`, 'finding event differs from expected record')); }
@@ -79,12 +93,12 @@ function expectedEventCopies(scenario) {
 }
 function variants(scenario, registry) {
   const diagnostics = []; const canonical = canonicalEventSet(scenario.events.map(({ value }) => value)); diagnostics.push(...canonical.diagnostics);
-  for (const variant of scenario.variants) { diagnostics.push(...expectedBundleSchemas(variant.expected, `${scenario.directory}/${variant.name}`, registry)); diagnostics.push(...expectedBundleSecrets(variant.expected, `${scenario.directory}/${variant.name}`)); if (variant.equivalentTo !== 'canonical') { diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', scenario.directory, `/variants/${variant.name}/equivalentTo`, 'only canonical equivalence target is defined')); continue; } const candidate = canonicalEventSet(variant.events.map(({ value }) => value)); diagnostics.push(...candidate.diagnostics); if (candidate.canonical !== canonical.canonical) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', scenario.directory, `/variants/${variant.name}/equivalentTo`, 'variant event set differs from canonical')); const bundle = canonicalize(canonicalSnapshot({ graph: scenario.expected?.graph, findings: scenario.expected?.findings, decisions: scenario.expected?.decisions, validity: scenario.expected?.validity, coverage: scenario.expected?.coverage })); const variantBundle = canonicalize(canonicalSnapshot({ graph: variant.expected.graph, findings: variant.expected.findings, decisions: variant.expected.decisions, validity: variant.expected.validity, coverage: variant.expected.coverage })); if (variantBundle !== bundle) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', scenario.directory, `/variants/${variant.name}/equivalentTo`, 'variant expected snapshot differs from canonical')); }
+  for (const variant of scenario.variants) { diagnostics.push(...expectedBundleSchemas(variant.expected, `${scenario.directory}/${variant.name}`, registry)); diagnostics.push(...expectedBundleSecrets(variant.expected, `${scenario.directory}/${variant.name}`)); if (variant.equivalentTo !== 'canonical') { diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', scenario.directory, `/variants/${variant.name}/equivalentTo`, 'only canonical equivalence target is defined')); continue; } const candidate = canonicalEventSet(variant.events.map(({ value }) => value)); diagnostics.push(...candidate.diagnostics); if (candidate.canonical !== canonical.canonical) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', scenario.directory, `/variants/${variant.name}/equivalentTo`, 'variant event set differs from canonical')); if (!isExpectedBundle(scenario.expected) || !isExpectedBundle(variant.expected)) continue; const bundle = canonicalize(canonicalSnapshot({ graph: scenario.expected.graph, findings: scenario.expected.findings, decisions: scenario.expected.decisions, validity: scenario.expected.validity, coverage: scenario.expected.coverage })); const variantBundle = canonicalize(canonicalSnapshot({ graph: variant.expected.graph, findings: variant.expected.findings, decisions: variant.expected.decisions, validity: variant.expected.validity, coverage: variant.expected.coverage })); if (variantBundle !== bundle) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', scenario.directory, `/variants/${variant.name}/equivalentTo`, 'variant expected snapshot differs from canonical')); }
   return diagnostics;
 }
 export function validateOneScenario(scenario, registry) {
-  const eventSchemaResult = eventSchemas(scenario, registry); const schemaSafeScenario = eventSchemaResult.validEvents.length === scenario.events.length ? scenario : { ...scenario, events: eventSchemaResult.validEvents };
-  return sortDiagnostics([...validateInstance(schemaId('scenario-manifest'), scenario.manifest, registry, `${scenario.directory}/manifest.json`), ...validateManifestSemantics(scenario.manifest, `${scenario.directory}/manifest.json`), ...machineSecrets(scenario), ...eventSchemaResult.diagnostics, ...expectedSchemas(scenario, registry), ...expectedEventCopies(schemaSafeScenario), ...validateScenarioDomain(schemaSafeScenario), ...variants(schemaSafeScenario, registry)]);
+  const eventSchemaResult = eventSchemas(scenario, registry); const schemaSafeScenario = eventSchemaResult.validEvents.length === scenario.events.length ? scenario : { ...scenario, events: eventSchemaResult.validEvents }; const expectedSafeScenario = isExpectedBundle(schemaSafeScenario.expected) ? schemaSafeScenario : { ...schemaSafeScenario, expected: null };
+  return sortDiagnostics([...validateInstance(schemaId('scenario-manifest'), scenario.manifest, registry, `${scenario.directory}/manifest.json`), ...validateManifestSemantics(scenario.manifest, `${scenario.directory}/manifest.json`), ...machineSecrets(scenario), ...eventSchemaResult.diagnostics, ...expectedSchemas(scenario, registry), ...expectedEventCopies(expectedSafeScenario), ...validateScenarioDomain(expectedSafeScenario), ...variants(expectedSafeScenario, registry)]);
 }
 export async function validatePhase0Corpus(corpus) {
   const diagnostics = [...validateSchemaDocuments(corpus.registry)];

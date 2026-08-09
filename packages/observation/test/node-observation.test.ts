@@ -34,6 +34,7 @@ async function createRepository(): Promise<string> {
   await git(directory, "config", "user.name", "PatchMesh Tests");
   mkdirSync(join(directory, "src"));
   writeFileSync(join(directory, "src", "example.txt"), "before\n");
+  writeFileSync(join(directory, "src", "second.txt"), "second\n");
   await git(directory, "add", ".");
   await git(directory, "commit", "-m", "initial");
   return directory;
@@ -54,7 +55,9 @@ test("captures Git identity and changing file content", async () => {
     assert.ok(before.snapshot.repository.commonDirectory);
     assert.ok(before.snapshot.repository.revision);
     assert.ok(before.snapshot.worktree.administrativeDirectory);
+    assert.equal(before.gaps.some((gap) => gap.scope === "tool.effects"), false);
     assert.match(beforeFile?.gitBlob ?? "", /^[0-9a-f]{40}$/);
+    assert.match(before.snapshot.files.get("src/second.txt")?.gitBlob ?? "", /^[0-9a-f]{40}$/);
     assert.equal(
       beforeFile?.contentHash,
       createHash("sha256").update("before\n").digest("hex"),
@@ -68,6 +71,14 @@ test("captures Git identity and changing file content", async () => {
     assert.equal(readFileSync(join(directory, "untracked.txt"), "utf8"), "new\n");
     assert.ok(after.snapshot.files.has("untracked.txt"));
     assert.deepEqual(after.outOfBandChanges, []);
+    assert.equal(
+      after.gaps.some((gap) =>
+        gap.kind === "unverified" &&
+        gap.scope === "tool.effects" &&
+        gap.reason.includes("cannot prove each effect originated"),
+      ),
+      true,
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

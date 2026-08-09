@@ -29,14 +29,21 @@ prerequisites.
 
 - Confirm measured enforcement is opt-in, bounded, auditable, recoverable, and
   overridable.
-- Confirm the first vertical slice demonstrates useful avoided rework.
+- Before approving a candidate, define its measured admission metric, numeric
+  threshold, baseline, measurement window, owner, approver, and any bounded exception
+  rule. A qualitative claim of useful avoided rework is not sufficient.
+- Confirm the first vertical slice meets its accepted avoided-rework threshold or has
+  an approved, time-bounded exception with a named owner.
 - Record the user, compatibility, security, and performance evidence that justifies
   any Phase 5 candidate.
 
 **Exit evidence:**
 
 - Phase 4 safety and authority metrics are documented.
-- Candidate selection criteria and unresolved risks are explicit.
+- Candidate selection criteria, numeric admission thresholds, baselines, and unresolved
+  risks are explicit before candidate evidence is collected.
+- The first vertical slice meets its accepted avoided-rework threshold, or the record
+  contains a scoped exception with a reason, owner, approver, and expiry.
 - No expansion candidate is treated as committed before its design is approved.
 
 ### M1: Second Runtime Adapter and Capability Parity (Conditional)
@@ -87,15 +94,24 @@ granting semantic analysis authority.
 - Store the immutable semantic input, analyzer/model/version identity, configuration,
   normalized output or content-addressed output digest, and provenance needed to replay
   the declared scope.
+- Define two distinct modes: canonical event replay reuses the immutable recorded
+  normalized output and never calls a model; a separately labeled reproduction audit
+  may re-run the declared analyzer/model when it is available.
+- Define a deterministic mismatch policy for reproduction audits: record the exact
+  compared identities and digests, classify mismatch severity, retain the original
+  output as historical evidence, and prohibit automatic substitution. Any allowed
+  normalization or tolerance must be explicit, versioned, and testable.
 - Emit advisory findings for duplicate investigations or architectural conflicts.
 - Require deterministic corroboration or human review before any policy action.
 - Measure usefulness, calibration, dismissal, and false-positive behavior.
 
 **Exit evidence:**
 
-- Semantic outputs are replayable for their declared scope: replay uses the stored
-  input and analyzer/model metadata, and any output mismatch is recorded rather than
-  silently treated as equivalent.
+- Canonical replay is deterministic because it uses the stored normalized output;
+  reproduction audits never silently treat a mismatch as equivalent.
+- Reproduction-audit mismatch rate, usefulness, calibration, dismissal, and
+  false-positive thresholds are defined before the corpus run. A threshold exception
+  names the candidate, scope, reason, owner, approver, and expiry.
 - Low-confidence findings record only; they do not pause, reject, or mark work stale.
 - Users can dismiss findings and record usefulness.
 - No semantic output alone changes gateway authority.
@@ -107,17 +123,26 @@ repository and execution host.
 
 **Scope:**
 
-- Define repository, workspace, worktree, remote execution, integration-target, and
-  transport identity boundaries.
-- Preserve event ordering, causal links, redaction, and replay across boundaries.
-- Define disconnected, delayed, duplicate, and partially observed remote behavior.
-- Keep local-first operation and explicit degraded coverage where connectivity fails.
+- Deliver two independently gated sub-slices rather than one combined expansion:
+
+  - **M4a local multi-repository:** define repository, workspace, worktree, and
+    integration-target identity boundaries; preserve causal links, redaction, and
+    replay across local repositories.
+  - **M4b remote execution:** after M4a, define transport identity, authentication,
+    ordering, disconnection, delay, duplication, and partial-observation behavior.
+
+- For M4b, define the coverage, latency, recovery, and credential-handling metrics and
+  numeric acceptance thresholds before the remote corpus run. Keep local-first
+  operation and explicit degraded coverage where connectivity fails.
 
 **Exit evidence:**
 
-- Cross-repository and remote golden scenarios replay deterministically.
-- Identity collisions and cross-boundary attribution are rejected or corrected safely.
-- Security review covers transport, credentials, redaction, and least privilege.
+- M4a cross-repository golden scenarios replay deterministically, and identity
+  collisions and cross-boundary attribution are rejected or corrected safely.
+- M4b remote golden scenarios meet the predeclared coverage, latency, recovery, and
+  ordering thresholds, or have an approved scoped exception.
+- M4b security review covers transport, credentials, redaction, least privilege, and
+  disconnect recovery.
 - Remote failure cannot be reported as complete observation or enforcement.
 
 ### M5: Dashboard and Organization-Level Policy (Conditional)
@@ -128,6 +153,8 @@ behavior are stable.
 **Scope:**
 
 - Define dashboard views over public services rather than internal tables.
+- Define a versioned public API/query contract, compatibility policy, and stable error
+  model before the dashboard or organization controls consume it.
 - Expose coverage, findings, validity, decisions, overrides, and measured metrics.
 - Add organization-level policy configuration with scoped ownership and audit history.
 - Preserve per-repository and per-operation authority boundaries.
@@ -135,6 +162,8 @@ behavior are stable.
 **Exit evidence:**
 
 - Dashboard data matches deterministic CLI/API queries under replay.
+- API versions, field compatibility, authorization failures, and pagination/order
+  semantics have contract tests; dashboard views consume only that public contract.
 - Policy changes are validated, versioned, auditable, and reversible.
 - Access control and redaction fixtures pass.
 - UI or organization controls do not introduce unmeasured enforcement.
@@ -147,7 +176,8 @@ behavior are stable.
 
 - Compare candidate benefits, compatibility coverage, operational cost, security
   risk, and maintenance burden.
-- Record acceptance, deferral, or rejection for each candidate.
+- Record acceptance, deferral, or rejection for each candidate against its predeclared
+  admission metric, threshold, baseline, and exception rule.
 - Update the roadmap explicitly when sequencing or scope changes.
 - Require a separate design and implementation plan for accepted candidates.
 

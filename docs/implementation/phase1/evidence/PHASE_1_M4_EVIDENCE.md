@@ -15,11 +15,13 @@ one tool call. Snapshot differences become normalized `file.changed` events. The
 stores those effects before `tool.completed` and links successfully stored effect IDs in
 the completion payload.
 
-Coverage is derived in the proxy result and is not persisted as a new event. Normal
-intercepted calls can report `intercepted` and `verified`; opaque calls retain observed
-actual effects but add a degraded `opaque` gap. Observer failures, effect persistence
-failures, and out-of-band changes produce explicit degraded gaps. M4 remains report-only
-and emits no findings, decisions, directives, detectors, projections, or AST facts.
+Coverage is derived in the proxy result and is not persisted as a new event. Directly
+observed effects can report `intercepted` and `verified`; snapshot-observed effects retain
+their links but add an explicit unverified origin gap because the snapshot cannot establish
+that each change came from the intercepted operation. Opaque calls retain observed actual
+effects but add a degraded `opaque` gap. Observer failures, effect persistence failures,
+and out-of-band changes produce explicit degraded gaps. M4 remains report-only and emits
+no findings, decisions, directives, detectors, projections, or AST facts.
 
 ## Focused Commands and Results
 
@@ -53,6 +55,9 @@ and 14 adapter tests.
   shared Git common directory and distinct administrative directories.
 - Successful and failed executions persist post-call effects, and completion records
   only effect IDs that were actually stored.
+- A snapshot-derived effect link is evidence of observed post-state, not proof of effect
+  origin; it therefore carries explicit unverified coverage rather than a sufficient
+  coverage claim.
 - Opaque operations report an explicit degraded `opaque` coverage gap rather than
   claiming prospective effect enumeration.
 - Observer failures do not prevent executor invocation or completion persistence.

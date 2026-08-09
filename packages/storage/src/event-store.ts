@@ -46,9 +46,15 @@ function parseStoredEvent(row: StoredRow): ProtocolEvent {
   try {
     const input: unknown = JSON.parse(new TextDecoder().decode(storedBytes(row.canonical_event)));
     const result = parseEvent(input);
-    if (result.value === null) throw new Error("stored event failed protocol validation");
+    if (result.value === null) {
+      throw new StorageError("STORAGE_CORRUPT_EVENT", "stored event failed protocol validation", {
+        eventId: row.event_id,
+        diagnostics: JSON.stringify(result.diagnostics),
+      });
+    }
     return result.value;
-  } catch {
+  } catch (error) {
+    if (error instanceof StorageError) throw error;
     throw new StorageError("STORAGE_CORRUPT_EVENT", "stored event cannot be reconstructed", {
       eventId: row.event_id,
     });

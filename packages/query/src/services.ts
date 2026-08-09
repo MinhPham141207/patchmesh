@@ -12,8 +12,11 @@ import {
   type AgentFilters,
   type AgentView,
   type AgentsView,
+  type DecisionExplanation,
   type EventListQuery,
   type EventPage,
+  type FindingListQuery,
+  type FindingsView,
   type FollowOptions,
   type GraphFilters,
   type GraphView,
@@ -33,6 +36,8 @@ const eventTypes: readonly EventType[] = [
   "dependency.changed",
   "attribution.corrected",
   "finding.created",
+  "finding.feedback.created",
+  "write.dependent",
   "decision.created",
   "validity.changed",
   "decision.delivery.changed",
@@ -61,6 +66,26 @@ function readEvents(options: ReadServiceOptions): readonly ProtocolEvent[] {
   } catch (error) {
     throw new ReadServiceError("unavailable", errorCategory(error));
   }
+}
+
+function withCorrectedAttribution(events: readonly ProtocolEvent[]): readonly ProtocolEvent[] {
+  const corrections = new Map<ProtocolEvent["eventId"], {
+    readonly agentId: ProtocolEvent["agentId"];
+    readonly taskId: ProtocolEvent["taskId"];
+  }>();
+  for (const event of events) {
+    if (event.eventType !== "attribution.corrected") continue;
+    corrections.set(event.payload.targetEventId, {
+      agentId: event.payload.attributedAgentId,
+      taskId: event.payload.attributedTaskId,
+    });
+  }
+  return events.map((event) => {
+    const correction = corrections.get(event.eventId);
+    return correction === undefined
+      ? event
+      : { ...event, agentId: correction.agentId, taskId: correction.taskId };
+  });
 }
 
 function aggregateCoverage(events: readonly ProtocolEvent[]): StatusView["coverage"] {
@@ -132,10 +157,22 @@ function filterGraph(snapshot: GraphView["snapshot"], filters: GraphFilters): Gr
   const nodeIds = new Set<string>(selected);
   for (const edge of edges) if (edge.fromNodeId !== null) nodeIds.add(edge.fromNodeId);
   for (const edge of edges) nodeIds.add(edge.toNodeId);
+  const findings = snapshot.findings.filter((view) => (
+    (filters.resourceId === undefined || view.finding.subjectResourceId === filters.resourceId)
+    && (filters.taskId === undefined || view.finding.affectedTaskId === filters.taskId)
+  ));
+  const findingIds = new Set(findings.map((view) => view.finding.findingId));
+  const decisions = snapshot.decisions.filter((view) => (
+    findingIds.has(view.decision.findingId)
+    || (filters.agentId !== undefined && view.decision.target.agentId === filters.agentId)
+    || (filters.taskId !== undefined && view.decision.target.taskId === filters.taskId)
+  ));
   return {
     nodes: snapshot.nodes.filter((node) => nodeIds.has(node.nodeId)),
     edges,
     coverage: snapshot.coverage,
+    findings,
+    decisions,
   };
 }
 
@@ -145,13 +182,16 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
     try {
       const events = readEvents(options);
       const replay = projectWorkGraph(events);
+      const attributedEvents = withCorrectedAttribution(events);
       const eventTypeCounts = emptyEventTypeCounts();
       const agentIds = new Set<AgentId>();
       const taskIds = new Set<TaskId>();
       let nullAttributionEventCount = 0;
-      for (const event of events) {
-        eventTypeCounts[event.eventType] += 1;
-        if (event.agentId === null || event.taskId === null) nullAttributionEventCount += 1;
+      for (const event of attributedEvents) {
+        eventTypeCounts[event.eventType] = (eventTypeCounts[event.eventType] ?? 0) + 1;
+        if (event.eventType !== "attribution.corrected" && (event.agentId === null || event.taskId === null)) {
+          nullAttributionEventCount += 1;
+        }
         if (event.agentId !== null) agentIds.add(event.agentId);
         if (event.taskId !== null) taskIds.add(event.taskId);
       }
@@ -184,8 +224,9 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
 
   const listAgents = (filters: AgentFilters = {}): { readonly agents: readonly AgentView[] } => {
     const events = readEvents(options);
+    const attributedEvents = withCorrectedAttribution(events);
     const byAgent = new Map<AgentId, ProtocolEvent[]>();
-    for (const event of events) {
+    for (const event of attributedEvents) {
       if (event.agentId === null || (filters.agentId !== undefined && event.agentId !== filters.agentId)) continue;
       if (filters.taskId !== undefined && event.taskId !== filters.taskId) continue;
       const current = byAgent.get(event.agentId) ?? [];
@@ -218,6 +259,29 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
       snapshot: filtered,
       filters,
       coverageWarnings: filtered.coverage.flatMap((coverage) => coverage.gaps),
+    };
+  };
+
+  const listFindings = (query: FindingListQuery = {}): FindingsView => {
+    const snapshot = projectWorkGraph(readEvents(options)).snapshot;
+    const findings = snapshot.findings.filter((view) => (
+      (query.findingType === undefined || view.finding.findingType === query.findingType)
+      && (query.status === undefined || view.status === query.status)
+    ));
+    return {
+      findings,
+      coverageWarnings: snapshot.coverage.flatMap((coverage) => coverage.gaps),
+    };
+  };
+
+  const explainDecision = (decisionId: import("@patchmesh/protocol").DecisionId): DecisionExplanation => {
+    const snapshot = projectWorkGraph(readEvents(options)).snapshot;
+    const decision = snapshot.decisions.find((view) => view.decision.decisionId === decisionId);
+    if (decision === undefined) throw new ReadServiceError("cursor", "decision was not found");
+    return {
+      decision,
+      finding: snapshot.findings.find((view) => view.finding.findingId === decision.decision.findingId) ?? null,
+      coverageWarnings: snapshot.coverage.flatMap((coverage) => coverage.gaps),
     };
   };
 
@@ -275,6 +339,8 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
     listAgents,
     listEvents,
     getGraph,
+    listFindings,
+    explainDecision,
     followEvents,
   };
 }

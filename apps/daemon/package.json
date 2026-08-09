@@ -19,6 +19,8 @@
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
+    "@patchmesh/core": "workspace:*",
+    "@patchmesh/protocol": "workspace:*",
     "@patchmesh/query": "workspace:*",
     "@patchmesh/storage": "workspace:*"
   }

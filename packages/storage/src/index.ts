@@ -11,6 +11,8 @@ export { SqliteEventStore } from "./event-store.js";
 export { WorkGraphProjector, projectWorkGraph } from "./work-graph.js";
 export type {
   AgentNode,
+  DecisionView,
+  FindingView,
   GraphEdge,
   GraphEdgeKind,
   GraphNode,

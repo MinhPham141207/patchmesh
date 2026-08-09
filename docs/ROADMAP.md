@@ -122,12 +122,15 @@ runtime observation, storage, projections, or CLI commands.
 
 **Deliverables:**
 
+- a bounded deterministic evidence pipeline for observed file reads, source-derived
+  symbol and exported-contract changes, known consumers, and dependency paths;
 - same-symbol overlap detector;
 - stale-read-before-write detector;
 - exported-function or API-contract invalidation detector;
 - dependency paths with evidence and provenance;
 - `record`, `notify`, `request_recheck`, `mark_possibly_stale`, and `request_revalidation` policy actions;
-- immutable `finding.created` events with rebuildable finding views;
+- immutable findings, decisions, delivery state, dismissal, and notification-usefulness
+  feedback with rebuildable views and versioned protocol compatibility;
 - `patchmesh overlaps`, `stale`, and `explain <decision-id>` CLI commands.
 
 **Exit gates:**
@@ -136,6 +139,10 @@ runtime observation, storage, projections, or CLI commands.
 - numeric quality thresholds are defined per detector before the final corpus run, and
   each detector meets its threshold or has an approved advisory-only exception;
 - every finding is reproducible from stored events;
+- decision creation, delivery, dismissal, and usefulness feedback replay
+  deterministically under duplicate and valid out-of-order inputs;
+- unsupported or incomplete resource evidence reports degraded coverage rather than
+  guessed symbol, consumer, or dependency facts;
 - irrelevant concurrent changes do not trigger disruptive directives;
 - all gateway directives remain `allow` or `allow_with_notice`;
 - users can dismiss findings and record whether a notification was useful.
@@ -149,8 +156,12 @@ runtime observation, storage, projections, or CLI commands.
 **Deliverables:**
 
 - task validity records containing base revision, work product, observed dependencies, validation results, coverage, and integration target;
-- mappings from changed resources to targeted type checks, contract checks, and tests;
-- `completed -> possibly_stale -> revalidating -> valid | stale` transitions;
+- mappings from supported deterministic evidence to targeted type checks, contract
+  checks, and tests;
+- separate execution state, validity state, and validation outcome, with
+  `unassessed -> valid`, `unassessed | valid -> possibly_stale`,
+  `possibly_stale -> revalidating`, and
+  `revalidating -> valid | stale | possibly_stale` validity transitions;
 - revalidation results stored as events and linked to their decisions;
 - gateway- or adapter-mediated check execution, plus ingestion of externally executed
   typed results;
@@ -174,27 +185,34 @@ runtime observation, storage, projections, or CLI commands.
 
 **Deliverables:**
 
-- fenced claims or equivalent atomic arbitration for enforceable resources;
+- versioned claim lifecycle facts plus fenced, transactional atomic arbitration for
+  enforceable resources and integration targets;
 - `delay` and `reject` gateway directives behind explicit configuration;
 - per-operation fail-open/fail-closed policy;
 - decision acknowledgment, retry, expiry, override, and audit behavior;
 - crash and partial-execution reconciliation;
-- an approved authority decision record bound to the exact enforcement scope;
+- an approved authority decision record bound to the exact enforcement scope and
+  validated configuration digest, with superseding re-approval for material changes;
 - human or orchestrator approval for ambiguous intervention.
 
 **Exit gates:**
 
 - simultaneous pre-check races have deterministic scenario coverage;
+- concurrent gateways cannot obtain two current fencing tokens for the same
+  enforceable scope;
 - gateway restarts and partial execution reconcile without duplicate tool execution;
 - every intervention can be overridden and audited;
 - the accepted false-interruption rate and latency budget are documented and met;
 - semantic evidence alone cannot delay or reject an operation;
-- enforcement activation requires the approved authority decision record and completed
-  Phase 4 M6 safety evidence; otherwise directives remain `allow` or `allow_with_notice`.
+- enforcement activation requires every Phase 4 M6 exit gate and corpus to pass, plus
+  the approved non-expired authority record, exact validated configuration digest, and
+  completed reconciliation and safety evidence; otherwise directives remain `allow`
+  or `allow_with_notice`.
 
 ## Phase 5 - Expansion
 
-**Goal:** Broaden compatibility only after the first slice demonstrates useful avoided rework.
+**Goal:** Broaden compatibility only after the first slice meets a predeclared,
+measured avoided-rework admission threshold.
 
 **Implementation milestones:** [`docs/implementation/phase5/PHASE_5_MILESTONES.md`](implementation/phase5/PHASE_5_MILESTONES.md).
 
@@ -203,11 +221,13 @@ runtime observation, storage, projections, or CLI commands.
 1. a second runtime adapter and adapter-capability parity reporting;
 2. schema, migration, import, and test-impact analyzers;
 3. semantic duplicate-investigation or architectural-conflict findings;
-4. multi-repository and remote execution models;
+4. staged local multi-repository, then remote execution models;
 5. dashboard and organization-level policy controls.
 
-Each candidate requires its own design and measured justification. Semantic findings
-remain advisory until independently corroborated.
+Each candidate requires its own design, predeclared numeric admission threshold,
+baseline, measurement window, approver, and measured justification. Semantic findings
+remain advisory until independently corroborated; canonical replay uses recorded
+semantic outputs, while any model reproduction audit reports mismatches explicitly.
 
 ## Metrics
 
@@ -221,6 +241,7 @@ Track at least:
 - estimated rework and unnecessary restarts avoided;
 - duplicate, lost, and out-of-order event rates;
 - replay determinism and projection rebuild equivalence;
+- semantic reproduction-audit mismatch rate and declared tolerance exceptions;
 - p50 and p95 interception latency plus CPU, memory, and storage growth;
 - secret-redaction failures.
 

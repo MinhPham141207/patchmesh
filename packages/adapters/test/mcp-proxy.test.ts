@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
@@ -8,16 +8,18 @@ import {
   McpProxyStorageError,
   type EventAppender,
   type McpCallContext,
+  type McpProxyOptions,
   type McpToolCall,
 } from "../src/index.js";
 import {
+  fileResourceId,
   type ObservationBoundary,
   type ObservationCapture,
   type ObservedFileChange,
   type ObservationSnapshot,
 } from "@patchmesh/observation";
-import { SqliteEventStore } from "@patchmesh/storage";
-import { ProtocolValidationError, type EventId } from "@patchmesh/protocol";
+import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
+import { ProtocolValidationError, validateEventSet, type EventId } from "@patchmesh/protocol";
 
 async function withTemporaryDatabase(run: (databasePath: string) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-m3-"));
@@ -102,7 +104,7 @@ function changedObserver(options: {
 function createProxy(eventStore: EventAppender, ids: EventId[] = [
   "evt_00000000000000000000000000000001",
   "evt_00000000000000000000000000000002",
-], options: { readonly observer?: ObservationBoundary; readonly createCorrelationId?: () => `corr_${string}` } = {}): McpProxy {
+], options: Pick<McpProxyOptions, "observer" | "createCorrelationId" | "phase2SourceAnalysis"> = {}): McpProxy {
   return new McpProxy({
     eventStore,
     createEventId: () => ids.shift() ?? "evt_00000000000000000000000000000003",
@@ -145,6 +147,148 @@ test("persists verified effects and links them from completion", async () => {
       store.close();
     }
   });
+});
+
+test("derives persisted symbol changes from an observed TypeScript source file", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-"));
+  const databasePath = join(directory, "events.sqlite");
+  const sourceDirectory = join(directory, "src");
+  try {
+    mkdirSync(sourceDirectory);
+    writeFileSync(join(sourceDirectory, "api.ts"), "export function api(): void {}\n", "utf8");
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const observer = changedObserver({
+        after: capture(snapshot(new Map([["src/api.ts", { contentHash: "b".repeat(64) }]]))),
+      });
+      const result = await createProxy(store, [
+        "evt_00000000000000000000000000000020",
+        "evt_00000000000000000000000000000021",
+        "evt_00000000000000000000000000000022",
+        "evt_00000000000000000000000000000023",
+      ], {
+        observer,
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: "main",
+        },
+      }).execute(
+        { ...call, toolName: "edit_file", operation: "edit src/api.ts" },
+        { ...context, workspaceRoot: directory },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.deepEqual(events.map((event) => event.eventType), [
+        "tool.requested", "file.changed", "symbol.changed", "tool.completed",
+      ]);
+      assert.deepEqual(result.analysisDiagnostics, []);
+      assert.equal(projectWorkGraph(events).snapshot.nodes.some((node) => node.kind === "resource" && node.resource.kind === "symbol"), true);
+      const completion = events[3];
+      if (completion?.eventType !== "tool.completed") throw new Error("expected tool completion");
+      assert.deepEqual(completion.payload.effectEventIds, [events[1]?.eventId, events[2]?.eventId]);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("derives a persisted dependency from real changed local TypeScript sources", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-"));
+  const databasePath = join(directory, "events.sqlite");
+  const sourceDirectory = join(directory, "src");
+  try {
+    mkdirSync(sourceDirectory);
+    writeFileSync(join(sourceDirectory, "api.ts"), "export interface Account { id: string }\n", "utf8");
+    writeFileSync(join(sourceDirectory, "consumer.ts"), 'import { Account } from "./api";\nfunction consume(value: Account) {}\n', "utf8");
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const observer = changedObserver({
+        after: capture(snapshot(new Map([
+          ["src/api.ts", { contentHash: "a".repeat(64) }],
+          ["src/consumer.ts", { contentHash: "b".repeat(64) }],
+        ]))),
+      });
+      const result = await createProxy(store, [
+        "evt_00000000000000000000000000000030",
+        "evt_00000000000000000000000000000031",
+        "evt_00000000000000000000000000000032",
+        "evt_00000000000000000000000000000033",
+        "evt_00000000000000000000000000000034",
+        "evt_00000000000000000000000000000035",
+        "evt_00000000000000000000000000000036",
+      ], {
+        observer,
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: "main",
+        },
+      }).execute(
+        { ...call, toolName: "edit_file", operation: "edit src" },
+        { ...context, workspaceRoot: directory },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.deepEqual(events.map((event) => event.eventType), [
+        "tool.requested", "file.changed", "symbol.changed", "file.changed", "symbol.changed", "dependency.changed", "tool.completed",
+      ]);
+      const dependency = events[5];
+      if (dependency?.eventType !== "dependency.changed") throw new Error("expected a resolved dependency event");
+      assert.equal(dependency.payload.dependency.dependentResourceId, events[3]?.eventType === "file.changed" ? events[3].payload.resource.resourceId : null);
+      assert.equal(dependency.causationId, "evt_00000000000000000000000000000033");
+      assert.deepEqual(result.analysisDiagnostics, []);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("marks unsupported observed source as degraded without inventing symbols", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-"));
+  const databasePath = join(directory, "events.sqlite");
+  try {
+    writeFileSync(join(directory, "notes.txt"), "not TypeScript", "utf8");
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const observer = changedObserver({
+        after: capture(snapshot(new Map([["notes.txt", { contentHash: "c".repeat(64) }]]))),
+      });
+      const result = await createProxy(store, [
+        "evt_00000000000000000000000000000024",
+        "evt_00000000000000000000000000000025",
+        "evt_00000000000000000000000000000026",
+      ], {
+        observer,
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: "main",
+        },
+      }).execute(
+        { ...call, toolName: "edit_file", operation: "edit notes.txt" },
+        { ...context, workspaceRoot: directory },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      assert.deepEqual(store.read().map((event) => event.eventType), ["tool.requested", "file.changed", "tool.completed"]);
+      assert.equal(result.coverage?.presentation, "degraded");
+      assert.deepEqual(result.analysisDiagnostics, [{ path: "notes.txt", reason: "unsupported_language" }]);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("persists post-call effects for a failed execution", async () => {
@@ -302,6 +446,53 @@ test("stores out-of-band effects without MCP attribution", async () => {
   });
 });
 
+test("uses schema-valid default IDs and redacts operations before persistence", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const outOfBandChange: ObservedFileChange = {
+        path: "external.txt",
+        before: null,
+        after: { contentHash: "d".repeat(64), gitBlob: null, fileKind: "file" },
+        changeKind: "created",
+        outOfBand: true,
+      };
+      const proxy = new McpProxy({
+        eventStore: store,
+        now: () => "2026-08-08T00:00:00.000Z",
+        observer: changedObserver({
+          after: capture(snapshot(new Map()), [outOfBandChange]),
+        }),
+      });
+
+      await proxy.execute(
+        {
+          ...call,
+          operation: "Authorization: Bearer synthetic-secret",
+          toolName: "run_shell",
+          opaque: true,
+        },
+        { ...context, workspaceRoot: tmpdir() },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.equal(events.length, 3);
+      for (const event of events) assert.match(event.eventId, /^evt_[0-9a-f]{32}$/u);
+      const request = events[0];
+      const outOfBand = events[1];
+      if (request?.eventType !== "tool.requested" || outOfBand?.eventType !== "file.changed") {
+        throw new Error("expected request and out-of-band effect");
+      }
+      assert.equal(request.payload.operation.includes("synthetic-secret"), false);
+      assert.match(request.payload.operation, /<redacted>/u);
+      assert.match(outOfBand.correlationId, /^corr_[0-9a-f]{32}$/u);
+    } finally {
+      store.close();
+    }
+  });
+});
+
 test("persists a request before a successful completion", async () => {
   await withTemporaryDatabase(async (databasePath) => {
     const store = SqliteEventStore.open(databasePath);
@@ -347,6 +538,132 @@ test("persists a request before a successful completion", async () => {
       assert.equal(completion.correlationId, "corr_00000000000000000000000000000001");
       assert.equal(request.sourceSequence, 1);
       assert.equal(completion.sourceSequence, 2);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("persists a file read only from explicit runtime resource and version metadata", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const resourceId = `res_${"a".repeat(64)}`;
+      const result = await createProxy(store, [
+        "evt_00000000000000000000000000000030",
+        "evt_00000000000000000000000000000031",
+        "evt_00000000000000000000000000000032",
+      ]).execute(
+        {
+          ...call,
+          targetResourceId: resourceId,
+          observedRead: {
+            resource: { resourceId, repositoryId: context.repositoryId, kind: "file", locator: "src/api.ts" },
+            version: { kind: "content_hash", value: "a".repeat(64) },
+          },
+        },
+        context,
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.deepEqual(events.map((event) => event.eventType), ["tool.requested", "file.read", "tool.completed"]);
+      assert.deepEqual(result.readEventIds, ["evt_00000000000000000000000000000031"]);
+      const read = events[1];
+      if (read?.eventType !== "file.read") throw new Error("expected file read event");
+      assert.equal(read.payload.version.value, "a".repeat(64));
+      assert.equal(read.causationId, events[0]?.eventId);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("persists a dependent write only when its declared resource was intercepted", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const readResourceId = `res_${"a".repeat(64)}`;
+      const changedResourceId = fileResourceId(context.repositoryId, "changed.txt");
+      store.append({
+        schemaVersion: 1,
+        eventId: "evt_00000000000000000000000000000034",
+        eventType: "dependency.changed",
+        source: context.source,
+        timestamp: "2026-08-08T00:00:00.000Z",
+        repositoryId: context.repositoryId,
+        workspaceId: context.workspaceId,
+        worktreeId: context.worktreeId,
+        agentId: null,
+        taskId: "task_44444444-4444-4444-8444-444444444444",
+        correlationId: "corr_00000000000000000000000000000034",
+        causationId: null,
+        sourceSequence: null,
+        payload: {
+          dependency: {
+            dependencyId: `dep_${"b".repeat(32)}`,
+            dependentResourceId: changedResourceId,
+            dependencyResourceId: readResourceId,
+            dependentVersion: {
+              resourceId: changedResourceId,
+              domain: { repositoryId: context.repositoryId, workspaceId: context.workspaceId, worktreeId: context.worktreeId },
+              kind: "content_hash",
+              value: "b".repeat(64),
+              evidenceEventIds: ["evt_00000000000000000000000000000034"],
+            },
+            dependencyVersion: {
+              resourceId: readResourceId,
+              domain: { repositoryId: context.repositoryId, workspaceId: context.workspaceId, worktreeId: context.worktreeId },
+              kind: "content_hash",
+              value: "a".repeat(64),
+              evidenceEventIds: ["evt_00000000000000000000000000000034"],
+            },
+            observations: [{
+              kind: "dynamically_observed",
+              producer: { sourceId: context.source.sourceId, version: "1" },
+              rule: null,
+              evidenceEventIds: ["evt_00000000000000000000000000000034"],
+            }],
+            evidenceEventIds: ["evt_00000000000000000000000000000034"],
+          },
+        },
+      });
+      await createProxy(store, [
+        "evt_00000000000000000000000000000035",
+        "evt_00000000000000000000000000000036",
+        "evt_00000000000000000000000000000037",
+        "evt_00000000000000000000000000000038",
+        "evt_00000000000000000000000000000039",
+      ], { observer: changedObserver() }).execute(
+        {
+          ...call,
+          toolName: "edit_file",
+          operation: "edit changed.txt",
+          observedRead: {
+            resource: { resourceId: readResourceId, repositoryId: context.repositoryId, kind: "file", locator: "src/input.ts" },
+            version: { kind: "content_hash", value: "a".repeat(64) },
+          },
+          dependentWrite: {
+            dependencyId: `dep_${"b".repeat(32)}`,
+            resourceId: changedResourceId,
+            dependsOnReadEventId: "evt_00000000000000000000000000000036",
+          },
+        },
+        { ...context, taskId: "task_44444444-4444-4444-8444-444444444444", workspaceRoot: tmpdir() },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      const events = store.read();
+      assert.deepEqual(events.map((event) => event.eventType), [
+        "dependency.changed", "tool.requested", "file.read", "file.changed", "tool.completed", "write.dependent",
+      ]);
+      const dependentWrite = events[5];
+      if (dependentWrite?.eventType !== "write.dependent") throw new Error("expected dependent write event");
+      assert.equal(dependentWrite.causationId, events[3]?.eventId);
+      assert.equal(dependentWrite.payload.write.dependsOnReadEventId, events[2]?.eventId);
+      assert.equal(dependentWrite.payload.write.resourceId, changedResourceId);
+      assert.match(dependentWrite.payload.write.coverageId, /^coverage_/);
+      assert.deepEqual(validateEventSet(events), []);
     } finally {
       store.close();
     }

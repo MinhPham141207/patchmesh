@@ -1,16 +1,17 @@
-# PatchMesh Event Protocol V1
+# PatchMesh Event Protocol V1 and Phase 2 V2 Extensions
 
-> **Status:** Phase 0 normative contract. M1 provides protocol validation and an
-> in-memory collector; M2 adds durable append-only event storage and replay.
+> **Status:** V1 is the Phase 0 normative contract. Phase 2 adds two backward-
+> compatible schema-version-2 event types; V1 readers continue to replay V1 streams.
 
 ## Envelope
 
 Every event contains the closed envelope defined by
 [`event-envelope.schema.json`](../../schemas/phase0/v1/event-envelope.schema.json):
-exactly schema version `1`, stable event ID, event type, source kind/producer/instance,
+a supported schema version, stable event ID, event type, source kind/producer/instance,
 UTC timestamp, repository/workspace/worktree IDs, nullable agent/task attribution,
 correlation ID, nullable causation ID, nullable source sequence, and one selected
-payload. Unknown versions are rejected as `PHASE0_SCHEMA_UNSUPPORTED`.
+payload. V1 events use schema version `1`; the Phase 2 extension uses version `2`.
+Unknown versions are rejected as `PHASE0_SCHEMA_UNSUPPORTED`.
 
 Source sequence is ordered only within `(source.kind, source.sourceId,
 source.instanceId)`. Gaps are degraded coverage, not invented events or causal edges.
@@ -34,3 +35,19 @@ Observation types are `tool.requested`, `tool.completed`, `file.read`, `file.cha
 `attribution.corrected`. Projection facts are `finding.created`, `decision.created`,
 `validity.changed`, and `decision.delivery.changed`. The event type-to-payload map is
 closed in the envelope validator.
+
+## Phase 2 V2 event types
+
+[`schemas/phase2/v1/event-envelope.schema.json`](../../schemas/phase2/v1/event-envelope.schema.json)
+adds the following immutable extension events without changing V1 payloads:
+
+- `finding.feedback.created` records a feedback ID, finding and optional decision
+  reference, actor, disposition, usefulness, reason, and evidence references.
+- `write.dependent` records that a task write depends on a previously observed read,
+  a durable dependency edge, its causally linked changed resource, and a coverage ID.
+
+V2 references are validated when replaying an event set. Feedback must reference a
+finding (and, when supplied, its decision) in the same domain and correlation.
+Dependent writes require a task-attributed read, matching durable dependency, and
+matching changed-resource causation. Producers must leave evidence degraded rather
+than emit an unresolved V2 reference.

@@ -115,8 +115,11 @@ test("real MCP observation persists actual Git file effects and links completion
         }
         assert.equal(effect.payload.resource.locator, "src/contracts.ts");
         assert.deepEqual(completion.payload.effectEventIds, [effect.eventId]);
-        assert.equal(result.coverage?.presentation, "sufficient");
+        assert.equal(result.coverage?.presentation, "degraded");
         assert.ok(result.coverage?.modes.includes("verified"));
+        assert.ok(result.observationDiagnostics.some(
+          (gap) => gap.kind === "unverified" && gap.scope === "tool.effects",
+        ));
         assertNoPhase2Output(events);
       } finally {
         store.close();

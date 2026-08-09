@@ -1,6 +1,6 @@
 # PatchMesh Phase 2 Milestones: Deterministic Detection
 
-> **Status:** Planned. Phase 2 depends on the completed Phase 1 observe-and-replay
+> **Status:** In progress. Phase 2 depends on the completed Phase 1 observe-and-replay
 > gates. These milestones decompose deterministic findings and report-only policy into
 > independently testable vertical slices.
 
@@ -12,9 +12,22 @@ continue. Every finding must be explainable, reproducible from stored events, an
 explicit about supporting coverage.
 
 Phase 2 remains report-only. Coordination actions may include `record`, `notify`,
-`request_recheck`, and `mark_possibly_stale`, but gateway directives remain `allow` or
-`allow_with_notice`. Phase 2 does not pause, reject, redirect, or automatically
-revalidate work.
+`request_recheck`, `mark_possibly_stale`, and `request_revalidation`, but gateway
+directives remain `allow` or `allow_with_notice`. A request for revalidation is a
+durable recommendation; Phase 2 does not execute checks, pause, reject, redirect, or
+automatically revalidate work.
+
+## Implementation Status
+
+| Milestone | Current evidence | Status |
+| --- | --- | --- |
+| M1 contracts | Immutable V2 feedback; replayed finding/decision/delivery/feedback views; deterministic feedback/delivery writes; replay-time V2 reference checks | Partial — append-time out-of-order buffering and a complete compatibility audit remain |
+| M2 evidence | TypeScript/JavaScript source facts, symbol events, resolver-confirmed dependency events, degraded unsupported/opaque handling | Partial — analyzer facts are not durably replayed across adapter restarts |
+| M3 overlap | Deterministic same-symbol detector plus conservative durable replay/runtime append path | Partial — broader labeled corpus and integration-target cases remain |
+| M4 stale read | Explicit `write.dependent` capture, durable-reference guard, replay reconstruction, and report-only daemon path | Partial — integration-target provenance, corrected-attribution cases, and labeled corpus acceptance remain |
+| M5 contracts | Resolver-confirmed dependency facts plus a replay/daemon path for explicitly deleted contracts | Partial — durable signature compatibility classification and complete contract history are not yet captured |
+| M6 report-only | Policy, explanation, append-only feedback CLI, and daemon delivery/feedback writers | Partial — delivery command UX and full CLI scenario coverage remain |
+| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; explicit engineering thresholds and evaluator | Partial — synthetic engineering gate passes; field-reviewed corpus and calibration remain required |
 
 ## Milestone Order
 
@@ -47,9 +60,10 @@ This is a prerequisite gate, not a detector milestone.
 - Security and degraded-observability fixtures pass.
 - The Phase 1 boundary remains report-only and replayable.
 
-### M1: Finding Contracts and Persistence (Planned)
+### M1: Finding, Decision, and Feedback Contracts (Planned)
 
-**Goal:** Establish one deterministic, replayable interface for detector findings.
+**Goal:** Establish deterministic, replayable contracts for findings, policy output,
+delivery, and user feedback.
 
 **Scope:**
 
@@ -57,7 +71,17 @@ This is a prerequisite gate, not a detector milestone.
   affected agents/tasks, confidence, evidence, and coverage.
 - Persist each finding as an immutable `finding.created` event. Finding projections
   and reports are rebuildable views; they are never authoritative over the event log.
+- Persist every policy result as an immutable `decision.created` event and every
+  delivery change as `decision.delivery.changed`; decision views are rebuildable and
+  never authoritative over the event log.
+- Define a versioned, backward-compatible protocol extension for immutable finding
+  feedback. It must record a stable feedback ID, finding and optional decision
+  reference, actor, disposition, usefulness, reason, and source evidence. Existing V1
+  readers must remain able to replay V1 event streams without interpreting the new
+  feedback event.
 - Define deduplication, supersession, and replay behavior for repeated graph inputs.
+- Define the command/API surface for dismissing a finding and recording notification
+  usefulness. Acknowledgment alone is not dismissal or usefulness feedback.
 - Keep detector packages independent of any runtime adapter and keep policy separate
   from detection.
 
@@ -67,8 +91,44 @@ This is a prerequisite gate, not a detector milestone.
 - Identical replay produces byte-equivalent findings.
 - Every finding identifies its causal evidence and observation coverage.
 - Duplicate and valid out-of-order input variants converge deterministically.
+- Decision creation, delivery state, dismissal, and usefulness feedback converge under
+  duplicate and valid out-of-order inputs, with a stable replayed history.
 
-### M2: Same-Symbol Overlap (Planned)
+### M2: Deterministic Evidence Production (Planned)
+
+**Goal:** Produce the production evidence required by the Phase 2 detectors rather
+than relying on synthetic fixture events.
+
+**Scope:**
+
+- Add a bounded, deterministic evidence pipeline for supported languages and tool
+  operations. It must emit `file.read` only when the adapter or gateway can identify
+  the read resource and observed version; file-level access must not invent a
+  symbol-level read.
+- Derive `symbol.changed`, exported-contract versions, and known consumer/import
+  relationships from versioned source analysis and observed file changes. Record the
+  parser/analyzer version, configuration, source event IDs, integration target, and
+  coverage with every derived fact.
+- Accept `symbol.read` only from a symbol-scoped runtime observation or explicit
+  structured tool metadata. If an operation supplies only a file read, retain it as a
+  file read and report the missing symbol coverage.
+- Emit `dependency.changed` facts for supported exported-contract and consumer paths.
+  Unsupported languages, opaque artifacts, ambiguous parses, and unavailable reads
+  must produce degraded coverage rather than guessed dependencies.
+- Keep analyzers fact-producing and side-effect free. This milestone emits no finding,
+  decision, or gateway directive.
+
+**Exit evidence:**
+
+- Temporary-repository integration tests produce file-read, symbol-change,
+  exported-contract, consumer, and dependency facts from real supported source files.
+- Facts are stable across incremental processing, clean replay, duplicates, and valid
+  out-of-order source events.
+- File-only reads, opaque operations, unsupported languages, and parse failures are
+  explicitly degraded and cannot masquerade as symbol or dependency evidence.
+- Analyzer metadata and source-event provenance make every detector input auditable.
+
+### M3: Same-Symbol Overlap (Planned)
 
 **Goal:** Detect concurrent changes to the same symbol without treating all shared
 access as a conflict.
@@ -90,7 +150,7 @@ access as a conflict.
 - Replay and projection rebuild produce the same finding set.
 - No detector emits a gateway directive or coordination action directly.
 
-### M3: Stale Read Before Write (Planned)
+### M4: Stale Read Before Write (Planned)
 
 **Goal:** Detect a write based on a resource version that changed after it was read.
 
@@ -110,7 +170,7 @@ access as a conflict.
 - Coverage gaps reduce confidence or suppress a finding according to the contract.
 - Detector results remain observation-only.
 
-### M4: Exported Contract Invalidation (Planned)
+### M5: Exported Contract Invalidation (Planned)
 
 **Goal:** Detect when a candidate exported-function or API-contract change affects a
 known consumer.
@@ -132,16 +192,20 @@ known consumer.
   confidence, and coverage.
 - Semantic inference alone cannot produce a high-authority finding.
 
-### M5: Report-Only Policy and CLI Explanation (Planned)
+### M6: Report-Only Policy, Delivery, Feedback, and CLI Explanation (Planned)
 
 **Goal:** Convert findings into targeted, non-disruptive coordination output.
 
 **Scope:**
 
-- Map findings to `record`, `notify`, `request_recheck`, or
-  `mark_possibly_stale` according to confidence and task state.
+- Map findings to `record`, `notify`, `request_recheck`, `mark_possibly_stale`, or
+  `request_revalidation` according to confidence and task state. The last action is a
+  request only; targeted execution remains Phase 3 work.
 - Produce targeted explanations containing what changed, who changed it, why the
   target is affected, evidence, and the expected next action.
+- Persist policy decisions, notification deliveries, dismissal, and usefulness
+  feedback through the M1 contracts. Show the current decision state and immutable
+  response history without mutating earlier events.
 - Add `patchmesh overlaps`, `patchmesh stale`, and `patchmesh explain <decision-id>`
   through public services rather than direct table queries.
 - Support deterministic human and JSON output with redaction and coverage warnings.
@@ -152,10 +216,11 @@ known consumer.
   state.
 - All Phase 2 gateway directives are `allow` or `allow_with_notice`.
 - CLI integration tests cover filters, JSON output, missing attribution, degraded
-  coverage, dismissal, and explanation details.
+  coverage, decision delivery, dismissal, usefulness feedback, and explanation
+  details.
 - Findings cannot silently pause, reject, or redirect an agent.
 
-### M6: Detector Quality and Phase Exit Gate (Planned)
+### M7: Detector Quality and Phase Exit Gate (Planned)
 
 **Goal:** Measure detector quality before broadening authority or scope.
 
@@ -167,6 +232,15 @@ known consumer.
 - Verify irrelevant concurrent changes do not create disruptive output.
 - Define numeric acceptance thresholds per detector before the final corpus run, and
   record unresolved coverage limitations.
+
+The checked-in synthetic engineering corpus under `tools/phase2/` uses the following
+unchanged provisional engineering thresholds: precision >= 0.95, recall >= 0.90,
+Brier score <= 0.10, and false-positive rate <= 0.02. Its evaluator reports one
+true positive, four true negatives, zero false positives, and zero false negatives
+for each detector. This result is explicitly `synthetic_engineering` and
+`advisoryOnly`; it is not field validation and cannot authorize broader detector
+authority. Reviewed production feedback must be added as a holdout corpus before
+the final M7 exit decision.
 
 **Exit evidence:**
 
@@ -183,23 +257,25 @@ known consumer.
 
 ```text
 M0 Phase 1 exit gate
-  -> M1 Finding contracts and persistence
+  -> M1 Finding, decision, and feedback contracts
+  -> M2 Deterministic evidence production
 
-M1
-  -> M2 Same-symbol overlap
-  -> M3 Stale read before write
-  -> M4 Exported contract invalidation
+M1 + M2
+  -> M3 Same-symbol overlap
+  -> M4 Stale read before write
+  -> M5 Exported contract invalidation
 
-M2 or M3 or M4 (at least one stable detector)
-  -> M5 Report-only policy and CLI
+M3 or M4 or M5 (at least one stable detector)
+  -> M6 Report-only policy, delivery, feedback, and CLI
 
-M2 + M3 + M4 + M5
-  -> M6 Detector quality and exit evidence
+M3 + M4 + M5 + M6
+  -> M7 Detector quality and exit evidence
 ```
 
-M2-M4 depend on M1 and the Phase 1 graph and may proceed independently. M5 depends on
-at least one stable detector and the Phase 1 public query services. M6 depends on all
-detectors, policy, and the shared exit evidence.
+M2 depends on M1 and the Phase 1 graph. M3-M5 depend on M1, M2, and their respective
+evidence classes; they may proceed independently. M6 depends on at least one stable
+detector and the Phase 1 public query services. M7 depends on all detectors, policy,
+delivery, feedback, and the shared exit evidence.
 
 ## Explicitly Deferred
 

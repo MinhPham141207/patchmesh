@@ -43,8 +43,8 @@ milestone.
 
 ### M1: Task Validity Model and Events (Planned)
 
-**Goal:** Represent the evidence needed to decide whether a completed task remains
-valid.
+**Goal:** Represent the evidence needed to decide whether a work product remains
+valid after task execution has completed.
 
 **Scope:**
 
@@ -52,8 +52,12 @@ valid.
   validation results, coverage, and integration target.
 - Define immutable `validity.changed` events and state-transition invariants.
 - Preserve task attribution correction and candidate-version identity.
-- Distinguish unknown, possibly stale, revalidating, valid, stale, failed, and
-  interrupted validation outcomes where the protocol requires them.
+- Keep execution state separate from validity state. Validity states are exactly
+  `unassessed`, `valid`, `possibly_stale`, `revalidating`, and `stale`; execution
+  completion neither implies nor transitions validity.
+- Represent `started`, `passed`, `failed`, `inconclusive`, and `interrupted` as
+  validation outcomes with their command, target, and result evidence. They are not
+  validity states.
 
 **Exit evidence:**
 
@@ -61,6 +65,7 @@ valid.
 - Invalid transitions fail deterministically without partial success.
 - Incremental processing and replay produce equivalent validity state.
 - Original events remain immutable when attribution or validity changes.
+- Fixtures distinguish execution completion, validity state, and validation outcome.
 
 ### M2: Dependency-to-Check Mapping (Planned)
 
@@ -68,8 +73,10 @@ valid.
 
 **Scope:**
 
-- Map changed files, symbols, exported contracts, schemas, imports, and test
-  relationships to type checks, contract checks, and tests.
+- Map the supported Phase 2 evidence classes—files, symbols, exported contracts, and
+  explicit dependency paths—to type checks, contract checks, and tests. Schema,
+  migration, import, and test-impact analyzers remain Phase 5 work unless Phase 2 has
+  already persisted an explicit deterministic dependency fact for the resource.
 - Include the dependency path and mapping provenance in each recommendation.
 - Represent missing or inferred mappings as coverage limitations.
 - Keep analyzers focused on facts and recommendations; they do not decide policy.
@@ -88,12 +95,19 @@ valid.
 
 **Scope:**
 
-- Implement `completed -> possibly_stale -> revalidating -> valid | stale` with
-  explicit guards and correction behavior.
+- Implement only the normative validity transitions: `unassessed -> valid` after a
+  successful current-target validation; `unassessed | valid -> possibly_stale` after
+  evidence-backed dependency impact; `possibly_stale -> revalidating` for a named
+  work product, command, and target; and `revalidating -> valid | stale |
+  possibly_stale` for successful, failed/deterministic, or
+  inconclusive/interrupted/superseded validation results.
+- Keep `completed`, `failed`, and `cancelled` as execution state. A completed work
+  product may be unassessed, valid, possibly stale, revalidating, or stale.
 - Require a failed targeted check or explicit deterministic proof before `stale`.
 - Preserve prior validity history and link transitions to source findings and events.
 - Handle duplicate, out-of-order, failed, interrupted, and superseded validation
-  results without inventing success.
+  results without inventing success. Results against obsolete targets remain evidence
+  and cannot transition current validity.
 
 **Exit evidence:**
 
@@ -143,8 +157,10 @@ results from an external executor, and connect them to validity decisions.
 
 **Exit evidence:**
 
-- CLI integration tests cover valid, possibly stale, revalidating, stale, failed, and
-  unknown states.
+- CLI integration tests cover `unassessed`, `valid`, `possibly_stale`,
+  `revalidating`, and `stale` validity states, plus completed/failed/cancelled
+  execution and passed/failed/inconclusive/interrupted validation outcomes as
+  separate fields.
 - Every displayed recommendation has a source dependency path and confidence.
 - Output remains stable under replay and clean projection rebuild.
 
@@ -185,8 +201,8 @@ M0 Phase 2 exit gate
   -> M6 Targeted proof and exit evidence
 ```
 
-M2 depends on M1 and Phase 2 dependency evidence. M3 depends on M1 and M2. M4 and
-M5 depend on M3. M6 depends on all preceding milestones.
+M2 depends on M1 and supported Phase 2 evidence production. M3 depends on M1 and M2.
+M4 and M5 depend on M3. M6 depends on all preceding milestones.
 
 ## Explicitly Deferred
 

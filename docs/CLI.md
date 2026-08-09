@@ -2,8 +2,9 @@
 
 ## 1. Status and Purpose
 
-> **Status:** M6 Phase 1 commands are implemented: `status`, `agents`, `events`, and
-> `graph`. Later coordination and lifecycle commands remain unavailable.
+> **Status:** Phase 1 read commands (`status`, `agents`, `events`, and `graph`) and
+> Phase 2 report-only commands (`overlaps`, `stale`, `explain`, and immutable
+> `feedback`) are implemented. Lifecycle and enforcement commands remain unavailable.
 
 This document describes the implemented Phase 1 read-only CLI and the planned later
 commands. The four Phase 1 commands are backed by the public query services and are
@@ -39,9 +40,10 @@ not mutation of the original event. See [Event Protocol V1](protocol/events.md) 
 | `agents` | Phase 1 - Observe and Replay | Available, read-only |
 | `events` | Phase 1 - Observe and Replay | Available, read-only |
 | `graph` | Phase 1 - Observe and Replay | Available, read-only |
-| `overlaps` | Phase 2 - Deterministic Detection | Planned, not implemented |
-| `stale` | Phase 2 - Deterministic Detection | Planned, not implemented |
-| `explain` | Phase 2 - Deterministic Detection | Planned, not implemented |
+| `overlaps` | Phase 2 - Deterministic Detection | Available, read-only, report-only |
+| `stale` | Phase 2 - Deterministic Detection | Available, read-only, report-only |
+| `explain` | Phase 2 - Deterministic Detection | Available, read-only, report-only |
+| `feedback` | Phase 2 - Deterministic Detection | Available, append-only, report-only |
 | `init`, `start`, `stop` | Unscheduled support designs | Not available |
 | `follow`, `inspect`, `doctor` | Unscheduled support designs | Not available |
 | `watch` | Deferred dashboard design | Not available |
@@ -508,9 +510,10 @@ agent:agent-b
 
 ## `patchmesh overlaps`
 
-**Roadmap placement:** Phase 2 - Deterministic Detection. Planned, not implemented.
+**Roadmap placement:** Phase 2 - Deterministic Detection. Available, read-only and report-only.
 
-Show active and historical overlap findings.
+Show persisted same-symbol-overlap findings. Output includes deterministic coverage
+warnings when evidence is degraded.
 
 ### Usage
 
@@ -521,13 +524,10 @@ patchmesh overlaps [options]
 ### Options
 
 ```text
---active                   Show unresolved overlaps only
---agent <id>               Filter by agent
---type <type>              Filter by overlap type
---min-confidence <level>   Use low, medium, or high
---severity <level>         Filter by severity
 --json                     Print machine-readable output
 ```
+
+Additional filtering is not yet available through the CLI.
 
 ### Phase 2 deterministic finding types
 
@@ -543,7 +543,7 @@ Phase 5 and are not emitted by the report-only MVP.
 ### Example
 
 ```bash
-patchmesh overlaps --active
+patchmesh overlaps
 ```
 
 ### Example output
@@ -573,9 +573,10 @@ Recommendation:
 
 ## `patchmesh stale`
 
-**Roadmap placement:** Phase 2 - Deterministic Detection. Planned, not implemented.
+**Roadmap placement:** Phase 2 - Deterministic Detection. Available, read-only and report-only.
 
-Show running or completed work that may no longer be valid.
+Show persisted stale-read-before-write findings. This does not confirm Phase 3
+validity state or execute a revalidation.
 
 ### Usage
 
@@ -586,9 +587,6 @@ patchmesh stale [options]
 ### Options
 
 ```text
---agent <id>       Filter by agent
---task <id>        Filter by task
---possible         Show possibly stale work only
 --json             Print machine-readable output
 ```
 
@@ -606,11 +604,11 @@ available in the Phase 2 target.
 
 ## `patchmesh explain`
 
-**Roadmap placement:** Phase 2 - Deterministic Detection. Planned, not implemented.
+**Roadmap placement:** Phase 2 - Deterministic Detection. Available, read-only and report-only.
 
-Explain a PatchMesh decision.
-
-Every disruptive decision must be explainable.
+Explain a persisted report-only PatchMesh decision, including its finding, deliveries,
+immutable feedback-event history, and coverage warnings. Phase 2 never emits a
+disruptive gateway directive.
 
 ### Usage
 
@@ -621,8 +619,6 @@ patchmesh explain <decision-id> [options]
 ### Options
 
 ```text
---events    Include supporting event history
---graph     Include the relevant dependency path
 --json      Print machine-readable output
 ```
 
@@ -661,6 +657,50 @@ Coverage:
 
 Recommended check:
   Recheck the implementation and rerun login tests against the candidate change.
+```
+
+---
+
+## `patchmesh feedback`
+
+**Roadmap placement:** Phase 2 - Deterministic Detection. Available, append-only and report-only.
+
+Record an immutable response to a persisted finding. This never changes the original
+finding or decision, and a dismissal is separate from usefulness feedback.
+
+### Usage
+
+```bash
+patchmesh feedback <finding-id> --disposition <value> [--decision <decision-id>] \
+  [--useful true|false] [--reason <text>] [--agent <agent-id>] [--task <task-id>] [--json]
+```
+
+`--disposition` is required and accepts `dismissed`, `acknowledged`,
+`not_affected`, `already_handled`, or `needs_more_information`. The command derives
+the response’s causal provenance from the stored finding and rejects a supplied
+decision that does not belong to that finding.
+
+### Example
+
+```bash
+patchmesh feedback finding_123 --disposition dismissed --useful true \
+  --reason "Already handled in my branch" --agent agent_a --task task_a
+```
+
+---
+
+## `patchmesh delivery`
+
+**Roadmap placement:** Phase 2 - Deterministic Detection. Available, append-only and report-only.
+
+Record an immutable delivery-state transition for a persisted decision. The command
+derives the target and causal provenance from that decision; it cannot change the
+decision, its policy action, or its gateway directive.
+
+### Usage
+
+```bash
+patchmesh delivery <decision-id> --state <pending|delivered|acknowledged|failed> [--json]
 ```
 
 ---

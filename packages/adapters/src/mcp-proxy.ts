@@ -1,9 +1,23 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { extname, isAbsolute, relative, resolve } from "node:path";
+import {
+  deriveDependencyChangedEvents,
+  deriveEvidenceFacts,
+  deriveSymbolChangedEvents,
+  resolveLocalContractDependencies,
+  type DerivedEvidenceFacts,
+  type SourceAnalysisInput,
+  type SymbolEventContext,
+} from "@patchmesh/analyzers";
 import {
   parseEvent,
   ProtocolValidationError,
+  type CoverageId,
+  type DependentWriteEvent,
   type EventId,
   type FileChangedEvent,
+  type FileReadEvent,
   type LogicalResource,
   type ProtocolEvent,
   type ResourceVersion,
@@ -15,6 +29,7 @@ import {
   diffSnapshots,
   fileResourceId,
   normalizeLogicalPath,
+  sanitizeDiagnostic,
   type ObservationCapture,
   type ObservationContext,
   type ObservationGap,
@@ -31,10 +46,20 @@ import type {
 } from "./types.js";
 import { McpProxyStorageError } from "./errors.js";
 
+interface DerivedSourceAnalysis {
+  readonly facts: DerivedEvidenceFacts;
+  readonly context: SymbolEventContext;
+  readonly symbolEventIds: readonly EventId[];
+}
+
 function appendValidated(event: ProtocolEvent, eventStore: EventAppender): ProtocolEvent {
   const parsed = parseEvent(event);
   if (parsed.value === null) throw new ProtocolValidationError(parsed.diagnostics);
   return eventStore.append(parsed.value).event;
+}
+
+function randomHexId(): string {
+  return randomUUID().replaceAll("-", "");
 }
 
 function asToolRequested(event: ProtocolEvent): ToolRequestedEvent {
@@ -64,7 +89,7 @@ function createToolRequestedEvent(
     sourceSequence: context.requestSourceSequence,
     payload: {
       toolName: call.toolName,
-      operation: call.operation,
+      operation: sanitizeDiagnostic(call.operation),
       targetResourceId: call.targetResourceId,
       opaque: call.opaque,
     },
@@ -169,6 +194,82 @@ function createFileChangedEvent(
   };
 }
 
+function createFileReadEvent(
+  call: McpToolCall,
+  context: McpCallContext,
+  requestEventId: EventId,
+  eventId: EventId,
+  timestamp: string,
+): FileReadEvent | null {
+  if (call.observedRead === undefined) return null;
+  const { resource, version } = call.observedRead;
+  return {
+    schemaVersion: 1,
+    eventId,
+    eventType: "file.read",
+    source: context.source,
+    timestamp,
+    repositoryId: context.repositoryId,
+    workspaceId: context.workspaceId,
+    worktreeId: context.worktreeId,
+    agentId: context.agentId,
+    taskId: context.taskId,
+    correlationId: context.correlationId,
+    causationId: requestEventId,
+    sourceSequence: null,
+    payload: {
+      resource,
+      version: {
+        resourceId: resource.resourceId,
+        domain: {
+          repositoryId: context.repositoryId,
+          workspaceId: context.workspaceId,
+          worktreeId: context.worktreeId,
+        },
+        kind: version.kind,
+        value: version.value,
+        evidenceEventIds: [eventId],
+      },
+      access: "read",
+    },
+  };
+}
+
+function createDependentWriteEvent(
+  call: McpToolCall,
+  context: McpCallContext,
+  changedEvent: FileChangedEvent,
+  coverageId: CoverageId,
+  eventId: EventId,
+  timestamp: string,
+): DependentWriteEvent | null {
+  const dependentWrite = call.dependentWrite;
+  if (dependentWrite === undefined || context.taskId === null) return null;
+  return {
+    schemaVersion: 2,
+    eventId,
+    eventType: "write.dependent",
+    source: context.source,
+    timestamp,
+    repositoryId: context.repositoryId,
+    workspaceId: context.workspaceId,
+    worktreeId: context.worktreeId,
+    agentId: context.agentId,
+    taskId: context.taskId,
+    correlationId: context.correlationId,
+    causationId: changedEvent.eventId,
+    sourceSequence: null,
+    payload: {
+      write: {
+        dependencyId: dependentWrite.dependencyId,
+        resourceId: dependentWrite.resourceId,
+        dependsOnReadEventId: dependentWrite.dependsOnReadEventId,
+        coverageId,
+      },
+    },
+  };
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -179,13 +280,91 @@ export class McpProxy {
   private readonly now: () => string;
   private readonly observer: McpProxyOptions["observer"];
   private readonly createCorrelationId: () => ProtocolEvent["correlationId"];
+  private readonly phase2SourceAnalysis: McpProxyOptions["phase2SourceAnalysis"];
 
   constructor(options: McpProxyOptions) {
     this.eventStore = options.eventStore;
-    this.createEventId = options.createEventId ?? (() => `evt_${randomUUID()}` as EventId);
+    this.createEventId = options.createEventId ?? (() => `evt_${randomHexId()}` as EventId);
     this.now = options.now ?? (() => new Date().toISOString());
     this.observer = options.observer;
-    this.createCorrelationId = options.createCorrelationId ?? (() => `corr_${randomUUID()}`);
+    this.createCorrelationId = options.createCorrelationId ?? (() => `corr_${randomHexId()}`);
+    this.phase2SourceAnalysis = options.phase2SourceAnalysis;
+  }
+
+  private async deriveChangedSourceEvents(
+    event: FileChangedEvent,
+    workspaceRoot: string | undefined,
+  ): Promise<DerivedSourceAnalysis | string | null> {
+    const options = this.phase2SourceAnalysis;
+    if (options === undefined) return null;
+    if (workspaceRoot === undefined) return "workspace root was not supplied for source analysis";
+    if (event.payload.afterVersion.value === null) return "deleted resources cannot be source-analyzed";
+    const root = resolve(workspaceRoot);
+    const filePath = resolve(root, event.payload.resource.locator);
+    const relativePath = relative(root, filePath);
+    if (relativePath.startsWith("..") || isAbsolute(relativePath)) return "observed resource is outside the workspace root";
+    let content: string;
+    try {
+      content = await readFile(filePath, "utf8");
+    } catch {
+      return "changed source could not be read";
+    }
+    const extension = extname(filePath).toLowerCase();
+    const language: SourceAnalysisInput["language"] = extension === ".ts" || extension === ".tsx"
+      ? "typescript"
+      : extension === ".js" || extension === ".jsx" || extension === ".mjs" || extension === ".cjs"
+        ? "javascript"
+        : "unsupported";
+    const facts = deriveEvidenceFacts({
+      resource: event.payload.resource,
+      version: event.payload.afterVersion,
+      content,
+      language,
+      sourceEventIds: [event.eventId],
+      analyzer: options.analyzer,
+      configuration: options.configuration,
+      integrationTarget: options.integrationTarget,
+    });
+    if (facts.source.coverage.status === "degraded") return facts.source.coverage.reason;
+    const symbolContext: SymbolEventContext = {
+      repositoryId: event.repositoryId,
+      workspaceId: event.workspaceId,
+      worktreeId: event.worktreeId,
+      agentId: event.agentId,
+      taskId: event.taskId,
+      correlationId: event.correlationId,
+      source: options.source,
+      timestamp: this.now(),
+      sourceSequenceStart: null,
+    };
+    const symbolEvents = deriveSymbolChangedEvents(
+      facts,
+      facts.symbols.map(() => this.createEventId()),
+      symbolContext,
+    );
+    try {
+      for (const symbolEvent of symbolEvents) appendValidated(symbolEvent, this.eventStore);
+    } catch {
+      return "derived symbol event persistence failed";
+    }
+    return { facts, context: symbolContext, symbolEventIds: symbolEvents.map((symbolEvent) => symbolEvent.eventId) };
+  }
+
+  private persistResolvedDependencies(analyses: readonly DerivedSourceAnalysis[]): string | null {
+    const dependencies = resolveLocalContractDependencies(analyses.map((analysis) => analysis.facts));
+    try {
+      for (const dependency of dependencies) {
+        const sourceEventId = dependency.consumer.sourceFacts.sourceEventIds[0];
+        const analysis = analyses.find((candidate) => candidate.facts.source.sourceEventIds[0] === sourceEventId);
+        if (analysis === undefined) return "resolved dependency is missing its consumer source context";
+        const event = deriveDependencyChangedEvents([dependency], [this.createEventId()], analysis.context)[0];
+        if (event === undefined) return "resolver did not produce a dependency event";
+        appendValidated(event, this.eventStore);
+      }
+    } catch {
+      return "derived dependency event persistence failed";
+    }
+    return null;
   }
 
   async execute<T>(
@@ -213,6 +392,22 @@ export class McpProxy {
 
     const executionSignal = signal ?? new AbortController().signal;
     const observationGaps: ObservationGap[] = [];
+    const readEventIds: EventId[] = [];
+    const readEvent = call.observedRead === undefined
+      ? null
+      : createFileReadEvent(call, context, requestEvent.eventId, this.createEventId(), this.now());
+    if (readEvent !== null) {
+      try {
+        appendValidated(readEvent, this.eventStore);
+        readEventIds.push(readEvent.eventId);
+      } catch {
+        observationGaps.push({
+          kind: "unverified",
+          scope: readEvent.payload.resource.locator,
+          reason: "explicit read metadata could not be persisted",
+        });
+      }
+    }
     let beforeCapture: ObservationCapture | null = null;
     if (this.observer) {
       if (context.workspaceRoot === undefined) {
@@ -272,6 +467,9 @@ export class McpProxy {
 
     const effectEventIds: EventId[] = [];
     const outOfBandEventIds: EventId[] = [];
+    const analysisDiagnostics: Array<{ readonly path: string; readonly reason: string }> = [];
+    const sourceAnalyses: DerivedSourceAnalysis[] = [];
+    const interceptedChanges: FileChangedEvent[] = [];
     if (this.observer) {
       if (beforeCapture !== null && afterCapture !== null) {
         const diff = diffSnapshots(beforeCapture.snapshot, afterCapture.snapshot, call.opaque);
@@ -279,7 +477,7 @@ export class McpProxy {
         for (const change of diff.changes) {
           const eventId = this.createEventId();
           try {
-            appendValidated(
+            const persisted = appendValidated(
               createFileChangedEvent(
                 change,
                 context,
@@ -294,6 +492,16 @@ export class McpProxy {
               this.eventStore,
             );
             effectEventIds.push(eventId);
+            const changedEvent = persisted as FileChangedEvent;
+            interceptedChanges.push(changedEvent);
+            const analysis = await this.deriveChangedSourceEvents(changedEvent, context.workspaceRoot);
+            if (typeof analysis === "string") {
+              analysisDiagnostics.push({ path: change.path, reason: analysis });
+              observationGaps.push({ kind: "unverified", scope: `source:${change.path}`, reason: analysis });
+            } else if (analysis !== null) {
+              sourceAnalyses.push(analysis);
+              effectEventIds.push(...analysis.symbolEventIds);
+            }
           } catch {
             observationGaps.push({
               kind: "unverified",
@@ -322,8 +530,8 @@ export class McpProxy {
         });
         const eventId = this.createEventId();
         try {
-          appendValidated(
-            createFileChangedEvent(
+            const persisted = appendValidated(
+              createFileChangedEvent(
               change,
               context,
               this.observer.source,
@@ -334,9 +542,16 @@ export class McpProxy {
               eventId,
               this.now(),
             ),
-            this.eventStore,
-          );
-          outOfBandEventIds.push(eventId);
+              this.eventStore,
+            );
+            outOfBandEventIds.push(eventId);
+            const analysis = await this.deriveChangedSourceEvents(persisted as FileChangedEvent, context.workspaceRoot);
+            if (typeof analysis === "string") {
+              analysisDiagnostics.push({ path: change.path, reason: analysis });
+              observationGaps.push({ kind: "unverified", scope: `source:${change.path}`, reason: analysis });
+            } else if (analysis !== null) {
+              sourceAnalyses.push(analysis);
+            }
         } catch {
           observationGaps.push({
             kind: "unverified",
@@ -345,6 +560,41 @@ export class McpProxy {
           });
         }
       }
+    }
+
+    const dependencyReason = this.persistResolvedDependencies(sourceAnalyses);
+    if (dependencyReason !== null) {
+      analysisDiagnostics.push({ path: "dependencies", reason: dependencyReason });
+      observationGaps.push({ kind: "unverified", scope: "source:dependencies", reason: dependencyReason });
+    }
+
+    const dependentWriteChange = call.dependentWrite === undefined
+      ? null
+      : interceptedChanges.find((event) => event.payload.resource.resourceId === call.dependentWrite?.resourceId) ?? null;
+    const hasDependentWriteDependency = call.dependentWrite !== undefined
+      && this.eventStore.read?.().some((event) => event.eventType === "dependency.changed"
+        && event.payload.dependency.dependencyId === call.dependentWrite?.dependencyId
+        && event.payload.dependency.dependentResourceId === call.dependentWrite?.resourceId) === true;
+    if (call.dependentWrite !== undefined && dependentWriteChange === null) {
+      observationGaps.push({
+        kind: "unverified",
+        scope: "write.dependent",
+        reason: "dependent write metadata did not match an intercepted changed resource",
+      });
+    }
+    if (call.dependentWrite !== undefined && context.taskId === null) {
+      observationGaps.push({
+        kind: "unverified",
+        scope: "write.dependent",
+        reason: "dependent write metadata requires task attribution",
+      });
+    }
+    if (call.dependentWrite !== undefined && !hasDependentWriteDependency) {
+      observationGaps.push({
+        kind: "unverified",
+        scope: "write.dependent",
+        reason: "dependent write metadata did not reference a durable matching dependency",
+      });
     }
 
     let completedEvent: ProtocolEvent;
@@ -374,6 +624,7 @@ export class McpProxy {
 
     const evidenceEventIds = [
       requestEvent.eventId,
+      ...readEventIds,
       ...effectEventIds,
       ...outOfBandEventIds,
       completedEvent.eventId,
@@ -389,12 +640,39 @@ export class McpProxy {
           evidenceEventIds,
         });
 
+    if (coverage !== null && dependentWriteChange !== null && hasDependentWriteDependency) {
+      const dependentWriteEvent = createDependentWriteEvent(
+        call,
+        context,
+        dependentWriteChange,
+        coverage.coverageId,
+        this.createEventId(),
+        this.now(),
+      );
+      if (dependentWriteEvent !== null) {
+        try {
+          appendValidated(dependentWriteEvent, this.eventStore);
+        } catch (error) {
+          if (error instanceof ProtocolValidationError) throw error;
+          throw new McpProxyStorageError(
+            "MCP_DEPENDENT_WRITE_PERSIST_FAILED",
+            "dependent-write",
+            requestEvent.eventId,
+            execution.outcome,
+            { cause: error },
+          );
+        }
+      }
+    }
+
     return {
       execution,
       requestEventId: requestEvent.eventId,
       completedEventId: completedEvent.eventId,
+      readEventIds,
       coverage,
       observationDiagnostics: observationGaps,
+      analysisDiagnostics,
     };
   }
 }

@@ -29,7 +29,11 @@ milestone enables enforcement implicitly through scaffolding.
 - Record the authority level and operation classes proposed for opt-in enforcement.
 - Create an authority decision record naming the approver, exact operation and resource
   classes, confidence requirements, fail-open/fail-closed policy, expiry, rollback,
-  and emergency override rules.
+  emergency override rules, and a stable authority-record ID and version.
+- Treat the M0 record as authority for a proposed scope only. The exact validated
+  configuration digest is bound in M5; a changed digest, policy, operation class, or
+  resource class requires an explicit superseding record and re-approval before it can
+  authorize activation.
 
 **Exit evidence:**
 
@@ -38,6 +42,8 @@ milestone enables enforcement implicitly through scaffolding.
   scenarios.
 - The authority decision record is approved and versioned; no directive is enabled by
   this gate alone.
+- The record identifies the configuration fields that require supersession and
+  re-approval when changed.
 - Report-only behavior remains the default.
 
 ### M1: Enforceable Resource Arbitration (Planned)
@@ -46,17 +52,30 @@ milestone enables enforcement implicitly through scaffolding.
 
 **Scope:**
 
-- Define fenced claims or an equivalent atomic arbitration mechanism for selected
-  resources and integration targets.
-- Bind ownership, expiry, revision, and evidence to immutable events.
-- Handle claim acquisition, renewal, release, expiration, and conflicting attempts.
+- Define a versioned, backward-compatible claim protocol for selected resource and
+  integration-target scopes. It must represent immutable acquisition, renewal,
+  release, expiration, and rejection facts while preserving replay of earlier event
+  versions.
+- Implement the live arbitration path with one transactional compare-and-set or
+  equivalent atomic primitive. A successful acquisition receives a monotonically
+  increasing fencing token scoped to the enforceable resource and integration target;
+  the gateway rejects a stale token before tool execution begins.
+- Bind ownership, lease expiry, fencing token, revision, authority-record ID, and
+  evidence to immutable facts. Define one authoritative lease clock and do not use
+  wall-clock timestamps to resolve concurrent acquisition order.
+- Handle claim acquisition, renewal, release, expiration, stale-owner rejection, and
+  conflicting attempts. A replay tie-break may rebuild state, but it must never be
+  mistaken for the live atomic arbitration decision.
 - Keep claims out of resources that lack the required deterministic identity.
 
 **Exit evidence:**
 
 - Simultaneous pre-check races resolve deterministically.
+- Concurrent gateway integration tests prove that at most one current fencing token is
+  granted before an enforceable operation begins.
 - Duplicate and out-of-order claim events converge under replay.
-- Expired or crashed claims do not grant silent ownership.
+- Expired or crashed claims do not grant silent ownership, and a stale holder cannot
+  renew, release, or execute using an older token.
 - Unenforceable resources continue through the report-only path.
 
 ### M2: Opt-In Delay and Reject Directives (Planned)
@@ -72,6 +91,9 @@ policy without enabling enforcement before the final safety gate.
 - Keep all directives disabled unless the user or orchestrator opts in.
 - M2 is implementation-only: configuration and tests cannot activate `delay` or
   `reject` before M6 completes.
+- Bind every candidate directive to the authority-record ID and validated
+  configuration digest. A missing, expired, superseded, or out-of-scope record falls
+  back to `allow` or `allow_with_notice`.
 - Return the evidence, expected next action, and override path with every directive.
 
 **Exit evidence:**
@@ -88,7 +110,8 @@ policy without enabling enforcement before the final safety gate.
 
 **Scope:**
 
-- Record decision acknowledgment, retry, expiry, override, and audit events.
+- Define a versioned, backward-compatible decision-lifecycle extension for immutable
+  acknowledgment, retry, expiry, override, and audit events.
 - Preserve decision-to-finding-to-event evidence links.
 - Handle disconnected runtimes, duplicate deliveries, stale decisions, and rejected
   acknowledgments.
@@ -109,7 +132,9 @@ policy without enabling enforcement before the final safety gate.
 
 - Reconcile gateway restarts, agent crashes, process interruption, and partial tool
   execution.
-- Distinguish an operation that did not start from one whose effect is unknown.
+- Define immutable reconciliation outcomes for `not_started`, `effect_unknown`, and
+  `effect_verified`, with evidence requirements for each. `effect_unknown` is never
+  eligible for automatic retry or a completed-enforcement claim.
 - Verify actual effects through filesystem, Git, process, and content evidence.
 - Prevent duplicate tool execution when the original outcome is uncertain.
 
@@ -132,12 +157,16 @@ policy without enabling enforcement before the final safety gate.
 - Measure interruption cost, false-interruption rate, and enforcement latency.
 - Bind the validated configuration to the approved authority decision record and reject
   activation when the record is missing, expired, or out of scope.
+- Require any material configuration or policy change to create a superseding authority
+  record with fresh approval; a prior approval cannot authorize a changed digest.
 
 **Exit evidence:**
 
 - Ambiguous intervention requests require the configured approver.
 - Emergency override is tested, audited, and bounded.
 - Policy changes cannot retroactively alter stored decisions.
+- Configuration-digest changes invalidate the prior activation binding until the
+  superseding authority record is approved.
 - Security and redaction fixtures pass for enforcement diagnostics.
 
 ### M6: Enforcement Safety and Phase Exit Gate (Planned)
@@ -158,8 +187,10 @@ report-only behavior.
 - Every Phase 4 roadmap exit gate has passing tests or recorded measurements.
 - Gateway restarts and partial execution reconcile without duplicate execution.
 - Every intervention is overridable and auditable.
-- Activation requires the approved authority decision record plus completed M4 and M5
-  evidence. Until then, the gateway may emit only `allow` or `allow_with_notice`.
+- `delay` and `reject` activate only after every M6 exit gate and the complete labeled
+  M6 corpus pass, with the approved, non-expired authority record and exact validated
+  configuration digest plus completed M4 and M5 evidence. Until then, the gateway may
+  emit only `allow` or `allow_with_notice`.
 - The accepted false-interruption rate and latency budget are documented and met.
 - Semantic evidence alone never delays or rejects an operation.
 

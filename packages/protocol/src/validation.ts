@@ -5,6 +5,10 @@ import { default as addFormats } from "ajv-formats";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import type {
   AttributionCorrectedEvent,
+  DecisionCreatedEvent,
+  DependentWriteEvent,
+  DependencyChangedEvent,
+  FindingFeedbackCreatedEvent,
   ProtocolEvent,
   ToolCompletedEvent,
 } from "./events.js";
@@ -14,7 +18,7 @@ import {
   type ValidationResult,
 } from "./diagnostics.js";
 
-const schemaNames = [
+const phase0SchemaNames = [
   "identities",
   "event-payloads",
   "event-envelope",
@@ -25,25 +29,29 @@ const schemaNames = [
   "task-validity",
 ] as const;
 
-const schemaDirectory = new URL("../../../schemas/phase0/v1/", import.meta.url);
+const phase0SchemaDirectory = new URL("../../../schemas/phase0/v1/", import.meta.url);
+const phase2SchemaDirectory = new URL("../../../schemas/phase2/v1/", import.meta.url);
 
-function readSchema(name: (typeof schemaNames)[number]): Record<string, unknown> {
-  const path = fileURLToPath(new URL(`${name}.schema.json`, schemaDirectory));
+function readSchema(directory: URL, name: string): Record<string, unknown> {
+  const path = fileURLToPath(new URL(`${name}.schema.json`, directory));
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
 }
 
-function createValidator(): ValidateFunction {
+function createValidators(): { readonly phase0: ValidateFunction; readonly phase2: ValidateFunction } {
   const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
   const registerFormats = addFormats as unknown as (instance: Ajv2020) => Ajv2020;
   registerFormats(ajv);
-  for (const name of schemaNames) ajv.addSchema(readSchema(name));
-  return ajv.getSchema("https://patchmesh.dev/schemas/phase0/v1/event-envelope.schema.json") ??
-    (() => {
-      throw new Error("event envelope schema was not registered");
-    })();
+  for (const name of phase0SchemaNames) ajv.addSchema(readSchema(phase0SchemaDirectory, name));
+  ajv.addSchema(readSchema(phase2SchemaDirectory, "finding-feedback"));
+  ajv.addSchema(readSchema(phase2SchemaDirectory, "dependent-write"));
+  ajv.addSchema(readSchema(phase2SchemaDirectory, "event-envelope"));
+  const phase0 = ajv.getSchema("https://patchmesh.dev/schemas/phase0/v1/event-envelope.schema.json");
+  const phase2 = ajv.getSchema("https://patchmesh.dev/schemas/phase2/v1/event-envelope.schema.json");
+  if (!phase0 || !phase2) throw new Error("event envelope schema was not registered");
+  return { phase0, phase2 };
 }
 
-const validateEnvelope = createValidator();
+const validators = createValidators();
 
 function diagnostic(code: string, path: string, message: string): ValidationDiagnostic {
   return { code, path, message };
@@ -83,9 +91,10 @@ export function parseEvent(input: unknown): ValidationResult<ProtocolEvent> {
   if (!isRecord(input)) {
     return { value: null, diagnostics: [diagnostic("PHASE0_SCHEMA_INVALID", "/", "event must be an object")] };
   }
-  if (Object.hasOwn(input, "schemaVersion") && input.schemaVersion !== 1) {
+  if (Object.hasOwn(input, "schemaVersion") && input.schemaVersion !== 1 && input.schemaVersion !== 2) {
     return { value: null, diagnostics: [diagnostic("PHASE0_SCHEMA_UNSUPPORTED", "/schemaVersion", "schema version is unsupported")] };
   }
+  const validateEnvelope = input.schemaVersion === 2 ? validators.phase2 : validators.phase0;
   if (!validateEnvelope(input)) {
     return { value: null, diagnostics: sortDiagnostics((validateEnvelope.errors ?? []).map(ajvDiagnostic)) };
   }
@@ -168,6 +177,102 @@ function validateResourcePayload(event: ProtocolEvent, diagnostics: ValidationDi
   }
 }
 
+function validateFindingFeedback(
+  event: FindingFeedbackCreatedEvent,
+  eventsById: ReadonlyMap<EventId, ProtocolEvent>,
+  diagnostics: ValidationDiagnostic[],
+): void {
+  const feedback = event.payload.feedback;
+  const finding = [...eventsById.values()].find((candidate) =>
+    candidate.eventType === "finding.created" && candidate.payload.finding.findingId === feedback.findingId);
+
+  if (finding === undefined) {
+    diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `/events/${event.eventId}/payload/feedback/findingId`, "feedback finding is absent"));
+  } else if (!sameDomain(event, finding) || event.correlationId !== finding.correlationId) {
+    diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/feedback/findingId`, "feedback finding crosses repository, domain, or correlation"));
+  }
+
+  if (feedback.decisionId !== null) {
+    const decision = [...eventsById.values()].find((candidate): candidate is DecisionCreatedEvent =>
+      candidate.eventType === "decision.created" && candidate.payload.decision.decisionId === feedback.decisionId);
+    if (decision === undefined) {
+      diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `/events/${event.eventId}/payload/feedback/decisionId`, "feedback decision is absent"));
+    } else {
+      if (decision.payload.decision.findingId !== feedback.findingId) {
+        diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/feedback/decisionId`, "feedback decision does not belong to its finding"));
+      }
+      if (!sameDomain(event, decision) || event.correlationId !== decision.correlationId) {
+        diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/feedback/decisionId`, "feedback decision crosses repository, domain, or correlation"));
+      }
+    }
+  }
+
+  if (event.agentId !== feedback.actor.agentId || event.taskId !== feedback.actor.taskId) {
+    diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/feedback/actor`, "feedback actor must match envelope attribution"));
+  }
+
+  for (const evidenceEventId of feedback.evidenceEventIds) {
+    const evidence = eventsById.get(evidenceEventId);
+    if (evidence === undefined) {
+      diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `/events/${event.eventId}/payload/feedback/evidenceEventIds`, "feedback evidence event is absent"));
+    } else if (!sameDomain(event, evidence) || event.correlationId !== evidence.correlationId) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/feedback/evidenceEventIds`, "feedback evidence crosses repository, domain, or correlation"));
+    }
+  }
+}
+
+function validateDependentWrite(
+  event: DependentWriteEvent,
+  eventsById: ReadonlyMap<EventId, ProtocolEvent>,
+  diagnostics: ValidationDiagnostic[],
+): void {
+  const write = event.payload.write;
+  const read = eventsById.get(write.dependsOnReadEventId);
+  if (read === undefined) {
+    diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `/events/${event.eventId}/payload/write/dependsOnReadEventId`, "dependent write read event is absent"));
+  } else if (read.eventType !== "file.read" && read.eventType !== "symbol.read") {
+    diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/write/dependsOnReadEventId`, "dependent write must reference a resource read"));
+  } else {
+    if (!sameDomain(event, read)) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/write/dependsOnReadEventId`, "dependent write read crosses repository or domain"));
+    }
+    if (event.taskId === null || read.taskId !== event.taskId) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/taskId`, "dependent write and read must have the same task attribution"));
+    }
+  }
+
+  const dependency = [...eventsById.values()].find((candidate): candidate is DependencyChangedEvent =>
+    candidate.eventType === "dependency.changed" && candidate.payload.dependency.dependencyId === write.dependencyId);
+  if (dependency === undefined) {
+    diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `/events/${event.eventId}/payload/write/dependencyId`, "dependent write dependency is absent"));
+  } else {
+    if (!sameDomain(event, dependency)) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/write/dependencyId`, "dependent write dependency crosses repository or domain"));
+    }
+    if (dependency.payload.dependency.dependentResourceId !== write.resourceId) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/write/resourceId`, "dependent write resource does not match its dependency"));
+    }
+    if ((read?.eventType === "file.read" || read?.eventType === "symbol.read") &&
+      dependency.payload.dependency.dependencyResourceId !== read.payload.resource.resourceId) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/write/dependsOnReadEventId`, "dependent write read resource does not match its dependency"));
+    }
+  }
+
+  const changed = event.causationId === null ? undefined : eventsById.get(event.causationId);
+  if (changed === undefined) {
+    diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `/events/${event.eventId}/causationId`, "dependent write must be caused by its changed resource event"));
+  } else if (changed.eventType !== "file.changed" && changed.eventType !== "symbol.changed") {
+    diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/causationId`, "dependent write causation must reference a changed resource"));
+  } else {
+    if (changed.payload.resource.resourceId !== write.resourceId) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/payload/write/resourceId`, "dependent write resource does not match its changed resource event"));
+    }
+    if (!sameDomain(event, changed) || event.correlationId !== changed.correlationId || changed.taskId !== event.taskId) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/causationId`, "dependent write changed resource crosses repository, domain, correlation, or task"));
+    }
+  }
+}
+
 export function validateEventSet(events: readonly ProtocolEvent[]): readonly ValidationDiagnostic[] {
   const diagnostics: ValidationDiagnostic[] = [];
   const eventsById = new Map<EventId, ProtocolEvent>();
@@ -214,6 +319,8 @@ export function validateEventSet(events: readonly ProtocolEvent[]): readonly Val
 
     if (event.eventType === "tool.completed") validateToolCompletion(event, eventsById, diagnostics);
     if (event.eventType === "attribution.corrected") validateAttributionCorrection(event, eventsById, diagnostics);
+    if (event.eventType === "finding.feedback.created") validateFindingFeedback(event, eventsById, diagnostics);
+    if (event.eventType === "write.dependent") validateDependentWrite(event, eventsById, diagnostics);
     validateResourcePayload(event, diagnostics);
   }
 

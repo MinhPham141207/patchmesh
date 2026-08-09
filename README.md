@@ -5,12 +5,11 @@ detects when one agent's change may invalidate another agent's running or comple
 work, explains the dependency path, and requests the smallest reliable response
 before integration.
 
-> **Project status:** M1 through M3 are implemented and verified: the strict workspace,
-> protocol boundary, in-memory collector, append-only SQLite event store, deterministic
-> causal replay, and in-process MCP runtime boundary are available. MCP transports,
-> effect observation, projections, daemon services, CLI commands, and detection remain
-> planned. The
-> implementation sequence is defined in the [roadmap](docs/ROADMAP.md).
+> **Project status:** Phase 0 and Phase 1 through M7 are implemented and verified.
+> PatchMesh currently provides an observation-and-replay slice; deterministic detection,
+> coordination decisions, targeted revalidation, enforcement, and additional runtime
+> adapters remain planned. The implementation sequence is defined in the
+> [roadmap](docs/ROADMAP.md).
 
 ## The problem
 
@@ -32,7 +31,7 @@ PatchMesh focuses on this question:
 
 > When has concurrent work stopped being independent?
 
-## Current M1-M3 slice
+## Current Phase 1 slice
 
 The current implementation provides:
 
@@ -40,24 +39,28 @@ The current implementation provides:
 - runtime-agnostic V1 event types and Phase 0 boundary validation;
 - an in-memory normalized-event collector;
 - an in-process MCP proxy with a tested `tool.requested` and `tool.completed` round trip;
+- filesystem, Git, content-hash, process-outcome, opaque-operation, and conservative
+  coverage observation;
 - append-only SQLite event storage with canonical digests and idempotent retries;
-- deterministic causal replay with bounded reference failures and source-gap reporting.
+- deterministic causal replay with bounded reference failures and source-gap reporting;
+- rebuildable, stable-order work-graph projections and immutable attribution correction;
+- read-only daemon services and `patchmesh status`, `agents`, `events`, and `graph`;
+- an observation-only cross-worktree golden slice with resilience and performance evidence.
 
-## Planned first working slice
+## Later roadmap phases
 
-The next implementation slices target two coding agents in separate Git worktrees and
-remain report-only. They will provide:
+The next slices remain report-only until their roadmap evidence gates are met. They will
+provide:
 
-- MCP transport integration and verified filesystem, Git, process, and content-hash effects;
-- repository-, worktree-, task-, file-, symbol-, and version-aware graph state;
 - same-symbol overlap detection;
 - stale-read-before-write detection;
 - exported-contract invalidation;
 - evidence-backed `notify` and `request_revalidation` decisions;
-- CLI commands for status, stale work, events, and explanations.
+- targeted revalidation and validity history;
+- CLI commands for overlaps, stale work, and explanations.
 
-Automatic pause, rejection, semantic duplicate-work detection, multiple adapters,
-and a dashboard are deliberately deferred.
+Network MCP transport, automatic pause or rejection, semantic duplicate-work detection,
+multiple adapters, and a dashboard are deliberately deferred.
 
 ## Planned architecture
 

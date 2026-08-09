@@ -1,6 +1,14 @@
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  createFindingFeedbackCreatedEvent,
+  createDecisionDeliveryChangedEvent,
+  createPhase2RuntimeRecords,
+  createSameSymbolRuntimeRecords,
+} from "@patchmesh/core";
 import { createReadServices, ReadServiceError, type EventReader, type ReadServices } from "@patchmesh/query";
-import { SqliteEventStore } from "@patchmesh/storage";
+import type { DecisionCreatedEvent, DecisionDelivery, DecisionDeliveryChangedEvent, DecisionId, FindingFeedbackCreatedEvent, FindingId } from "@patchmesh/protocol";
+import { SqliteEventStore, type AppendResult } from "@patchmesh/storage";
 
 export interface DaemonOptions {
   readonly reader?: EventReader;
@@ -13,9 +21,49 @@ export interface DaemonHealth {
   readonly errorCategory: string | null;
 }
 
+export interface FindingFeedbackInput {
+  readonly findingId: FindingId;
+  readonly decisionId: FindingFeedbackCreatedEvent["payload"]["feedback"]["decisionId"];
+  readonly actor: FindingFeedbackCreatedEvent["payload"]["feedback"]["actor"];
+  readonly disposition: FindingFeedbackCreatedEvent["payload"]["feedback"]["disposition"];
+  readonly useful: FindingFeedbackCreatedEvent["payload"]["feedback"]["useful"];
+  readonly reason: FindingFeedbackCreatedEvent["payload"]["feedback"]["reason"];
+}
+
+export interface DecisionDeliveryInput {
+  readonly decisionId: DecisionId;
+  readonly state: DecisionDelivery["state"];
+}
+
+function responseDigest(input: FindingFeedbackInput): string {
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex");
+}
+
 export interface PatchMeshDaemon {
   readonly services: ReadServices;
   readonly health: () => DaemonHealth;
+  /**
+   * Appends an immutable response to a Phase 2 finding. Readers supplied directly
+   * to the daemon deliberately remain read-only; feedback requires its durable
+   * SQLite event-store boundary.
+   */
+  recordFindingFeedback(event: FindingFeedbackCreatedEvent): AppendResult;
+  /** Creates a provenance-derived, deterministic immutable finding response. */
+  respondToFinding(input: FindingFeedbackInput): AppendResult;
+  /** Appends an immutable delivery-state transition for a Phase 2 decision. */
+  recordDecisionDelivery(event: DecisionDeliveryChangedEvent): AppendResult;
+  /** Creates a provenance-derived, deterministic immutable delivery response. */
+  respondToDecisionDelivery(input: DecisionDeliveryInput): AppendResult;
+  /** Replays durable evidence and appends report-only same-symbol findings. */
+  runSameSymbolDetection(): readonly {
+    readonly finding: AppendResult;
+    readonly decision: AppendResult;
+  }[];
+  /** Replays all durable Phase 2 detector evidence and appends report-only findings. */
+  runPhase2Detection(): readonly {
+    readonly finding: AppendResult;
+    readonly decision: AppendResult;
+  }[];
   close(): void;
 }
 
@@ -44,6 +92,97 @@ export function createDaemon(options: DaemonOptions): PatchMeshDaemon {
         store: status.store,
         errorCategory: status.errorCategory,
       };
+    },
+    recordFindingFeedback: (event) => {
+      if (store === null) {
+        throw new ReadServiceError("unavailable", "finding feedback requires a writable event store");
+      }
+      return store.append(event);
+    },
+    respondToFinding: (input) => {
+      if (store === null) {
+        throw new ReadServiceError("unavailable", "finding feedback requires a writable event store");
+      }
+      const writableStore = store;
+      const events = writableStore.read();
+      const findingEvent = events.find((event) => event.eventType === "finding.created" && event.payload.finding.findingId === input.findingId);
+      if (findingEvent === undefined) throw new ReadServiceError("cursor", "finding was not found");
+      if (input.decisionId !== null && !events.some((event) => event.eventType === "decision.created"
+        && event.payload.decision.decisionId === input.decisionId
+        && event.payload.decision.findingId === input.findingId)) {
+        throw new ReadServiceError("cursor", "decision does not belong to finding");
+      }
+      const digest = responseDigest(input);
+      return writableStore.append(createFindingFeedbackCreatedEvent({
+        ...input,
+        feedbackId: `feedback_${digest.slice(0, 32)}`,
+        evidenceEventIds: [findingEvent.eventId],
+      }, {
+        eventId: `evt_${digest.slice(32, 64)}`,
+        repositoryId: findingEvent.repositoryId,
+        workspaceId: findingEvent.workspaceId,
+        worktreeId: findingEvent.worktreeId,
+        correlationId: findingEvent.correlationId,
+        causationId: findingEvent.eventId,
+        source: { kind: "core", sourceId: "source_phase2", instanceId: "00000000-0000-4000-8000-000000000002" },
+        timestamp: findingEvent.timestamp,
+        sourceSequence: null,
+      }));
+    },
+    recordDecisionDelivery: (event) => {
+      if (store === null) {
+        throw new ReadServiceError("unavailable", "decision delivery requires a writable event store");
+      }
+      return store.append(event);
+    },
+    respondToDecisionDelivery: (input) => {
+      if (store === null) {
+        throw new ReadServiceError("unavailable", "decision delivery requires a writable event store");
+      }
+      const writableStore = store;
+      const decisionEvent = writableStore.read().find((event): event is DecisionCreatedEvent => event.eventType === "decision.created"
+        && event.payload.decision.decisionId === input.decisionId);
+      if (decisionEvent === undefined) throw new ReadServiceError("cursor", "decision was not found");
+      const digest = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+      return writableStore.append(createDecisionDeliveryChangedEvent({
+        decisionId: input.decisionId,
+        delivery: {
+          deliveryId: `delivery_${digest.slice(0, 32)}`,
+          target: decisionEvent.payload.decision.target,
+          state: input.state,
+          eventIds: [decisionEvent.eventId],
+        },
+      }, {
+        eventId: `evt_${digest.slice(32, 64)}`,
+        repositoryId: decisionEvent.repositoryId,
+        workspaceId: decisionEvent.workspaceId,
+        worktreeId: decisionEvent.worktreeId,
+        correlationId: decisionEvent.correlationId,
+        causationId: decisionEvent.eventId,
+        source: { kind: "core", sourceId: "source_phase2", instanceId: "00000000-0000-4000-8000-000000000002" },
+        timestamp: decisionEvent.timestamp,
+        sourceSequence: null,
+      }));
+    },
+    runSameSymbolDetection: () => {
+      if (store === null) {
+        throw new ReadServiceError("unavailable", "same-symbol detection requires a writable event store");
+      }
+      const writableStore = store;
+      return createSameSymbolRuntimeRecords(writableStore.read()).map((record) => ({
+        finding: writableStore.append(record.finding),
+        decision: writableStore.append(record.decision),
+      }));
+    },
+    runPhase2Detection: () => {
+      if (store === null) {
+        throw new ReadServiceError("unavailable", "Phase 2 detection requires a writable event store");
+      }
+      const writableStore = store;
+      return createPhase2RuntimeRecords(writableStore.read()).map((record) => ({
+        finding: writableStore.append(record.finding),
+        decision: writableStore.append(record.decision),
+      }));
     },
     close: () => {
       store?.close();

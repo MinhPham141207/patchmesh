@@ -5,6 +5,7 @@ import type {
   DecisionDeliveryChangedEvent,
   FileChangedEvent,
   FileReadEvent,
+  FindingFeedbackCreatedEvent,
   FindingCreatedEvent,
   ProtocolEvent,
   SymbolChangedEvent,
@@ -201,6 +202,26 @@ export function makeFindingCreated(): FindingCreatedEvent {
     ...base(eventId(10), 0, correlationId(10)),
     eventType: "finding.created",
     payload: { finding: {} as FindingCreatedEvent["payload"]["finding"] },
+  };
+}
+
+export function makeFindingFeedbackCreated(): FindingFeedbackCreatedEvent {
+  return {
+    ...base(eventId(14), 0, correlationId(14)),
+    schemaVersion: 2,
+    eventType: "finding.feedback.created",
+    payload: {
+      feedback: {
+        feedbackId: `feedback_${"f".repeat(32)}`,
+        findingId: `finding_${"f".repeat(32)}`,
+        decisionId: null,
+        actor: { agentId, taskId },
+        disposition: "dismissed",
+        useful: true,
+        reason: "notification prevented redundant work",
+        evidenceEventIds: [eventId(14)],
+      },
+    },
   };
 }
 

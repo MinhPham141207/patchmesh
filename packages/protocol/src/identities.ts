@@ -11,6 +11,7 @@ export type CorrelationId = `corr_${string}`;
 export type DependencyId = `dep_${string}`;
 export type WorkProductId = `work_${string}`;
 export type FindingId = `finding_${string}`;
+export type FeedbackId = `feedback_${string}`;
 export type DecisionId = `decision_${string}`;
 export type CoverageId = `coverage_${string}`;
 export type DeliveryId = `delivery_${string}`;

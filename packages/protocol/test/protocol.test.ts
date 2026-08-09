@@ -5,10 +5,22 @@ import {
   parseEvent,
   validateEventSet,
 } from "../src/index.js";
-import type { ProtocolEvent } from "../src/index.js";
+import type {
+  DecisionCreatedEvent,
+  DependentWriteEvent,
+  FindingCreatedEvent,
+  FindingFeedbackCreatedEvent,
+  ProtocolEvent,
+} from "../src/index.js";
 import {
   makeAllTypedEvents,
   makeAttributionCorrected,
+  makeDependencyChanged,
+  makeFileChanged,
+  makeFileRead,
+  makeFindingCreated,
+  makeFindingFeedbackCreated,
+  makeDecisionCreated,
   makeToolCompleted,
   makeToolRequested,
 } from "./fixtures.js";
@@ -73,9 +85,35 @@ test("rejects a payload for the wrong event type", () => {
 });
 
 test("rejects an unsupported schema version", () => {
-  const result = parseEvent({ ...makeToolRequested(), schemaVersion: 2 });
+  const result = parseEvent({ ...makeToolRequested(), schemaVersion: 3 });
   assert.equal(result.value, null);
   assert.equal(result.diagnostics[0]?.code, "PHASE0_SCHEMA_UNSUPPORTED");
+});
+
+test("accepts an immutable V2 finding feedback event at the boundary", () => {
+  const result = parseEvent(makeFindingFeedbackCreated());
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(result.value?.eventType, "finding.feedback.created");
+  assert.equal(result.value?.schemaVersion, 2);
+});
+
+test("accepts a V2 dependent write event at the boundary", () => {
+  const event: DependentWriteEvent = {
+    ...makeFindingFeedbackCreated(),
+    eventId: `evt_${"d".repeat(32)}`,
+    eventType: "write.dependent",
+    payload: {
+      write: {
+        dependencyId: `dep_${"d".repeat(32)}`,
+        resourceId: `res_${"1".repeat(64)}`,
+        dependsOnReadEventId: `evt_${"1".repeat(32)}`,
+        coverageId: `coverage_${"d".repeat(32)}`,
+      },
+    },
+  };
+  const result = parseEvent(event);
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(result.value?.eventType, "write.dependent");
 });
 
 test("requires nullable attribution fields to be present", () => {
@@ -159,4 +197,172 @@ test("rejects an attribution correction without an identity", () => {
     payload: { ...correction.payload, attributedAgentId: null, attributedTaskId: null },
   };
   assert.equal(validateEventSet([request, invalidCorrection])[0]?.code, "PHASE0_SCHEMA_INVALID");
+});
+
+test("rejects V2 feedback that does not reference a stored finding", () => {
+  const feedback = {
+    ...makeFindingFeedbackCreated(),
+    taskId: "task_a" as const,
+  };
+  const diagnostics = validateEventSet([feedback]);
+  assert.equal(diagnostics.some((entry) =>
+    entry.code === "PHASE2_REFERENCE_MISSING" && entry.path.endsWith("/feedback/findingId")), true);
+});
+
+test("accepts canonical V2 feedback references regardless of arrival order", () => {
+  const finding = {
+    ...makeFindingCreated(),
+    eventId: `evt_${"a".repeat(32)}`,
+    correlationId: `corr_${"a".repeat(32)}`,
+    taskId: "task_a" as const,
+    sourceSequence: 0,
+    payload: {
+      finding: {
+        findingId: `finding_${"a".repeat(32)}`,
+        findingType: "same_symbol_overlap" as const,
+        status: "open" as const,
+        subjectResourceId: `res_${"1".repeat(64)}`,
+        affectedTaskId: "task_a" as const,
+        dependencyIds: [],
+        evidenceEventIds: [`evt_${"a".repeat(32)}`],
+        confidence: 0.9,
+        confidenceBand: "high" as const,
+        severity: "warning" as const,
+        coverageIds: [`coverage_${"a".repeat(32)}`],
+        detector: { detectorId: "detector_phase2", version: "1" },
+      },
+    },
+  } as FindingCreatedEvent;
+  const decision = {
+    ...makeDecisionCreated(),
+    eventId: `evt_${"b".repeat(32)}`,
+    correlationId: finding.correlationId,
+    causationId: finding.eventId,
+    taskId: "task_a" as const,
+    sourceSequence: 1,
+    payload: {
+      decision: {
+        decisionId: `decision_${"b".repeat(32)}`,
+        findingId: finding.payload.finding.findingId,
+        target: { agentId: "agent_a", taskId: "task_a" },
+        coordinationAction: "notify",
+        gatewayDirective: "allow_with_notice",
+        reason: "overlap is confirmed",
+        evidenceEventIds: [finding.eventId],
+        confidence: 0.9,
+        confidenceBand: "high",
+        policy: { policyId: "policy_phase2", version: "1" },
+        expectedResponse: "affected",
+        coverageIds: [`coverage_${"a".repeat(32)}`],
+        state: "active",
+        deliveries: [],
+      },
+    },
+  } as DecisionCreatedEvent;
+  const feedback = {
+    ...makeFindingFeedbackCreated(),
+    eventId: `evt_${"c".repeat(32)}`,
+    correlationId: finding.correlationId,
+    causationId: decision.eventId,
+    taskId: "task_a" as const,
+    sourceSequence: 2,
+    payload: {
+      feedback: {
+        ...makeFindingFeedbackCreated().payload.feedback,
+        findingId: finding.payload.finding.findingId,
+        decisionId: decision.payload.decision.decisionId,
+        actor: { agentId: "agent_a", taskId: "task_a" },
+        evidenceEventIds: [finding.eventId, decision.eventId],
+      },
+    },
+  } as FindingFeedbackCreatedEvent;
+
+  assert.deepEqual(validateEventSet([finding, decision, feedback]), []);
+  assert.deepEqual(validateEventSet([feedback, finding, decision]), []);
+});
+
+test("rejects a V2 dependent write without durable read, dependency, and change evidence", () => {
+  const dependentWrite: DependentWriteEvent = {
+    ...makeFindingFeedbackCreated(),
+    eventId: `evt_${"e".repeat(32)}`,
+    eventType: "write.dependent",
+    taskId: "task_a",
+    payload: {
+      write: {
+        dependencyId: `dep_${"e".repeat(32)}`,
+        resourceId: `res_${"1".repeat(64)}`,
+        dependsOnReadEventId: `evt_${"f".repeat(32)}`,
+        coverageId: `coverage_${"e".repeat(32)}`,
+      },
+    },
+  };
+  const diagnostics = validateEventSet([dependentWrite]);
+  assert.equal(diagnostics.some((entry) =>
+    entry.code === "PHASE2_REFERENCE_MISSING" && entry.path.endsWith("/write/dependsOnReadEventId")), true);
+  assert.equal(diagnostics.some((entry) =>
+    entry.code === "PHASE2_REFERENCE_MISSING" && entry.path.endsWith("/write/dependencyId")), true);
+  assert.equal(diagnostics.some((entry) =>
+    entry.code === "PHASE2_REFERENCE_MISSING" && entry.path.endsWith("/causationId")), true);
+});
+
+test("accepts canonical V2 dependent-write references regardless of arrival order", () => {
+  const dependency = {
+    ...makeDependencyChanged(),
+    sourceSequence: 1,
+  };
+  const readTemplate = makeFileRead();
+  const read = {
+    ...readTemplate,
+    taskId: "task_a" as const,
+    sourceSequence: 0,
+    payload: {
+      ...readTemplate.payload,
+      resource: {
+        ...readTemplate.payload.resource,
+        resourceId: dependency.payload.dependency.dependencyResourceId,
+        locator: "src/dependency.ts",
+      },
+      version: {
+        ...readTemplate.payload.version,
+        resourceId: dependency.payload.dependency.dependencyResourceId,
+      },
+    },
+  };
+  const change = {
+    ...makeFileChanged(),
+    taskId: "task_a" as const,
+    sourceSequence: 2,
+  };
+  const dependentWrite: DependentWriteEvent = {
+    ...makeFindingFeedbackCreated(),
+    eventId: `evt_${"d".repeat(32)}`,
+    eventType: "write.dependent",
+    correlationId: change.correlationId,
+    causationId: change.eventId,
+    taskId: read.taskId,
+    sourceSequence: 3,
+    payload: {
+      write: {
+        dependencyId: dependency.payload.dependency.dependencyId,
+        resourceId: change.payload.resource.resourceId,
+        dependsOnReadEventId: read.eventId,
+        coverageId: `coverage_${"d".repeat(32)}`,
+      },
+    },
+  };
+
+  assert.deepEqual(validateEventSet([read, dependency, change, dependentWrite]), []);
+  assert.deepEqual(validateEventSet([dependentWrite, change, dependency, read]), []);
+
+  const unrelatedRead = {
+    ...read,
+    payload: {
+      ...read.payload,
+      resource: { ...read.payload.resource, resourceId: change.payload.resource.resourceId },
+      version: { ...read.payload.version, resourceId: change.payload.resource.resourceId },
+    },
+  };
+  assert.equal(validateEventSet([unrelatedRead, dependency, change, dependentWrite]).some((entry) =>
+    entry.code === "PHASE2_SCHEMA_INVALID" &&
+    entry.message === "dependent write read resource does not match its dependency"), true);
 });

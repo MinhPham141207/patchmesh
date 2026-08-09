@@ -15,8 +15,10 @@ import {
   versionNodeId,
 } from "./work-graph-ids.js";
 import type {
+  DecisionView,
   AgentNode,
   AttributionOverride,
+  FindingView,
   GraphEdge,
   GraphNode,
   ResourceNode,
@@ -49,6 +51,8 @@ function initialState(): WorkGraphState {
     correctionsByTarget: new Map(),
     nodes: new Map(),
     edges: new Map(),
+    findings: new Map(),
+    decisions: new Map(),
     coverageInputs: [],
   };
 }
@@ -231,6 +235,73 @@ function mapEvent(state: WorkGraphState, event: ProtocolEvent): void {
   if (event.eventType === "dependency.changed") addDependency(state, event);
 }
 
+function deriveFindingAndDecisionViews(state: WorkGraphState): void {
+  const findings = new Map<FindingView["finding"]["findingId"], FindingView>();
+  const decisions = new Map<string, DecisionView>();
+  const feedback = new Map<FindingView["finding"]["findingId"], FindingView["feedback"]>();
+  const deliveries = new Map<string, Map<string, DecisionView["deliveries"][number]>>();
+
+  for (const event of [...state.eventsById.values()].sort((left, right) => compareStrings(left.eventId, right.eventId))) {
+    if (event.eventType === "finding.created") {
+      findings.set(event.payload.finding.findingId, {
+        finding: event.payload.finding,
+        feedback: [],
+        status: event.payload.finding.status,
+        eventIds: [event.eventId],
+      });
+    }
+    if (event.eventType === "finding.feedback.created") {
+      const current = feedback.get(event.payload.feedback.findingId) ?? [];
+      feedback.set(event.payload.feedback.findingId, [...current, { eventId: event.eventId, feedback: event.payload.feedback }]);
+    }
+    if (event.eventType === "decision.created") {
+      decisions.set(event.payload.decision.decisionId, {
+        decision: event.payload.decision,
+        deliveries: [],
+        feedback: [],
+        eventIds: [event.eventId],
+      });
+    }
+    if (event.eventType === "decision.delivery.changed") {
+      const byDelivery = deliveries.get(event.payload.decisionId) ?? new Map();
+      const existing = byDelivery.get(event.payload.delivery.deliveryId);
+      if (existing === undefined || existing.eventIds.length <= event.payload.delivery.eventIds.length) {
+        byDelivery.set(event.payload.delivery.deliveryId, event.payload.delivery);
+      }
+      deliveries.set(event.payload.decisionId, byDelivery);
+    }
+  }
+
+  for (const [findingId, view] of findings) {
+    const findingFeedback = [...(feedback.get(findingId) ?? [])].sort((left, right) => compareStrings(left.eventId, right.eventId));
+    findings.set(findingId, {
+      ...view,
+      feedback: findingFeedback,
+      status: findingFeedback.some((entry) => entry.feedback.disposition === "dismissed") ? "dismissed" : view.status,
+      eventIds: sortedUnique([view.eventIds[0] ?? "", ...findingFeedback.map((entry) => entry.eventId)]).filter(Boolean) as readonly EventId[],
+    });
+  }
+
+  for (const [decisionId, view] of decisions) {
+    const decisionFeedback = [...(feedback.get(view.decision.findingId) ?? [])]
+      .filter((entry) => entry.feedback.decisionId === decisionId)
+      .sort((left, right) => compareStrings(left.eventId, right.eventId));
+    const decisionDeliveries = [...(deliveries.get(decisionId)?.values() ?? [])]
+      .sort((left, right) => compareStrings(left.deliveryId, right.deliveryId));
+    decisions.set(decisionId, {
+      ...view,
+      deliveries: decisionDeliveries,
+      feedback: decisionFeedback,
+      eventIds: sortedUnique([view.eventIds[0] ?? "", ...decisionDeliveries.flatMap((entry) => entry.eventIds), ...decisionFeedback.map((entry) => entry.eventId)]).filter(Boolean) as readonly EventId[],
+    });
+  }
+
+  state.findings.clear();
+  for (const [findingId, view] of findings) state.findings.set(findingId, view);
+  state.decisions.clear();
+  for (const [decisionId, view] of decisions) state.decisions.set(decisionId, view);
+}
+
 function rebuildProjection(state: WorkGraphState): WorkGraphState {
   const rebuilt: WorkGraphState = {
     ...initialState(),
@@ -244,6 +315,7 @@ function rebuildProjection(state: WorkGraphState): WorkGraphState {
     }
     mapEvent(rebuilt, effectiveEvent(event, rebuilt.correctionsByTarget));
   }
+  deriveFindingAndDecisionViews(rebuilt);
   return {
     ...rebuilt,
     coverageInputs: deriveProjectionCoverage(
@@ -260,6 +332,8 @@ function applyEvent(state: WorkGraphState, event: ProtocolEvent): WorkGraphState
     correctionsByTarget: new Map(state.correctionsByTarget),
     nodes: new Map(state.nodes),
     edges: new Map(state.edges),
+    findings: new Map(state.findings),
+    decisions: new Map(state.decisions),
     coverageInputs: [...state.coverageInputs],
   };
   if (event.eventType === "attribution.corrected") {
@@ -268,6 +342,7 @@ function applyEvent(state: WorkGraphState, event: ProtocolEvent): WorkGraphState
     return rebuildProjection(next);
   }
   mapEvent(next, effectiveEvent(event, next.correctionsByTarget));
+  deriveFindingAndDecisionViews(next);
   return {
     ...next,
     coverageInputs: deriveProjectionCoverage(
@@ -296,6 +371,8 @@ function snapshotFromState(
     nodes: nodes.map((node) => ({ ...node, evidenceEventIds: sortedUnique(node.evidenceEventIds) })),
     edges: edges.map((edge) => ({ ...edge, evidenceEventIds: sortedUnique(edge.evidenceEventIds) })),
     coverage: [...coverage].sort((left, right) => compareStrings(left.coverageId, right.coverageId)),
+    findings: [...state.findings.values()].sort((left, right) => compareStrings(left.finding.findingId, right.finding.findingId)),
+    decisions: [...state.decisions.values()].sort((left, right) => compareStrings(left.decision.decisionId, right.decision.decisionId)),
   });
 }
 

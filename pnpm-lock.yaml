@@ -32,6 +32,12 @@ importers:
 
   apps/daemon:
     dependencies:
+      '@patchmesh/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@patchmesh/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@patchmesh/query':
         specifier: workspace:*
         version: link:../../packages/query
@@ -41,6 +47,9 @@ importers:
 
   packages/adapters:
     dependencies:
+      '@patchmesh/analyzers':
+        specifier: workspace:*
+        version: link:../analyzers
       '@patchmesh/observation':
         specifier: workspace:*
         version: link:../observation
@@ -51,11 +60,26 @@ importers:
         specifier: workspace:*
         version: link:../storage
 
+  packages/analyzers:
+    dependencies:
+      '@patchmesh/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/collector:
     dependencies:
       '@patchmesh/protocol':
         specifier: workspace:*
         version: link:../protocol
+
+  packages/core:
+    dependencies:
+      '@patchmesh/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@patchmesh/storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/observation:
     dependencies:
