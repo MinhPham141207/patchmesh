@@ -22,6 +22,10 @@ export interface SymbolChangeEvidence {
   readonly taskId: TaskId | null;
   readonly worktreeId: WorktreeId;
   readonly coverageId: CoverageId;
+  /** Coverage proving the shared concurrency observation. */
+  readonly concurrencyCoverageId?: CoverageId;
+  readonly integrationTarget?: string;
+  readonly concurrencyEventId?: EventId;
 }
 
 function hasComparableIdentity(evidence: SymbolChangeEvidence): boolean {
@@ -53,15 +57,23 @@ export function detectSameSymbolOverlap(
 
   if (observed.resourceId !== candidate.resourceId
     || observed.taskId === candidate.taskId
+    || observed.worktreeId === candidate.worktreeId
+    || observed.integrationTarget === undefined
+    || candidate.integrationTarget === undefined
+    || observed.integrationTarget !== candidate.integrationTarget
+    || observed.concurrencyEventId === undefined
+    || candidate.concurrencyEventId !== observed.concurrencyEventId
+    || observed.concurrencyCoverageId === undefined
+    || candidate.concurrencyCoverageId !== observed.concurrencyCoverageId
     || !hasSameRepositoryWorkspace(observed.version, candidate.version)
     || observed.version.kind !== candidate.version.kind
     || observed.version.value === candidate.version.value) {
     return null;
   }
 
-  const evidenceEventIds = [observed.eventId, candidate.eventId]
+  const evidenceEventIds = [observed.eventId, candidate.eventId, observed.concurrencyEventId]
     .sort((left, right) => left.localeCompare(right));
-  const coverageIds = [...new Set([observed.coverageId, candidate.coverageId])]
+  const coverageIds = [...new Set([observed.coverageId, candidate.coverageId, observed.concurrencyCoverageId])]
     .sort((left, right) => left.localeCompare(right));
 
   return {

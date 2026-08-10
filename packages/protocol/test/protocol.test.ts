@@ -488,3 +488,60 @@ test("accepts canonical V2 dependent-write references regardless of arrival orde
     entry.code === "PHASE2_SCHEMA_INVALID" &&
     entry.message === "dependent write read resource does not match its dependency"), true);
 });
+
+test("requires a symbol comparison integration target to match sufficient derived evidence", () => {
+  const request = makeToolRequested();
+  const read = {
+    ...makeFileRead(),
+    taskId: "task_a" as const,
+    sourceSequence: 0,
+    causationId: request.eventId,
+    correlationId: request.correlationId,
+  };
+  const dependency = {
+    ...makeDependencyChanged(),
+    eventId: `evt_${"6".repeat(32)}` as const,
+    taskId: "task_a" as const,
+    causationId: request.eventId,
+    correlationId: request.correlationId,
+    sourceSequence: 1,
+    payload: {
+      dependency: {
+        ...makeDependencyChanged().payload.dependency,
+        dependencyResourceId: read.payload.resource.resourceId,
+      },
+    },
+  };
+  const change = {
+    ...makeSymbolChanged(),
+    eventId: `evt_${"7".repeat(32)}` as const,
+    taskId: "task_a" as const,
+    causationId: request.eventId,
+    correlationId: request.correlationId,
+    sourceSequence: 2,
+    payload: {
+      ...makeSymbolChanged().payload,
+      resource: { ...makeSymbolChanged().payload.resource, resourceId: dependency.payload.dependency.dependentResourceId },
+    },
+  };
+  const write: DependentWriteEvent = {
+    ...makeFindingFeedbackCreated(),
+    eventId: `evt_${"8".repeat(32)}`,
+    eventType: "write.dependent",
+    taskId: "task_a",
+    correlationId: request.correlationId,
+    causationId: change.eventId,
+    sourceSequence: 3,
+    payload: {
+      write: {
+        dependencyId: dependency.payload.dependency.dependencyId,
+        resourceId: change.payload.resource.resourceId,
+        dependsOnReadEventId: read.eventId,
+        coverageId: `coverage_${"8".repeat(32)}`,
+        comparison: { changedEventId: change.eventId, coverageId: `coverage_${"7".repeat(32)}`, integrationTarget: "main" },
+      },
+    },
+  };
+  assert.equal(validateEventSet([request, read, dependency, change, write]).some((entry) =>
+    entry.code === "PHASE2_SCHEMA_INVALID" && entry.path.endsWith("/comparison/integrationTarget")), true);
+});

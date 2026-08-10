@@ -18,7 +18,7 @@ const domain = {
 function version(
   resourceId: `res_${string}`,
   value: string | null,
-  worktreeId = domain.worktreeId,
+  worktreeId: `wt_${string}` = domain.worktreeId,
 ): ResourceVersion {
   return {
     resourceId,
@@ -33,8 +33,8 @@ const symbol = "res_quality_symbol" as const;
 const contract = "res_quality_contract" as const;
 
 const overlapPositive = detectSameSymbolOverlap(
-  { eventId: "evt_overlap_a", resourceId: symbol, version: version(symbol, "a"), agentId: "agent_a", taskId: "task_a", worktreeId: "wt_quality_a", coverageId: "coverage_overlap_a" },
-  { eventId: "evt_overlap_b", resourceId: symbol, version: version(symbol, "b", "wt_quality_b"), agentId: "agent_b", taskId: "task_b", worktreeId: "wt_quality_b", coverageId: "coverage_overlap_b" },
+  { eventId: "evt_overlap_a", resourceId: symbol, version: version(symbol, "a"), agentId: "agent_a", taskId: "task_a", worktreeId: "wt_quality_a", coverageId: "coverage_overlap_a", concurrencyCoverageId: "coverage_overlap_concurrency", integrationTarget: "main", concurrencyEventId: "evt_overlap_concurrency" },
+  { eventId: "evt_overlap_b", resourceId: symbol, version: version(symbol, "b", "wt_quality_b"), agentId: "agent_b", taskId: "task_b", worktreeId: "wt_quality_b", coverageId: "coverage_overlap_b", concurrencyCoverageId: "coverage_overlap_concurrency", integrationTarget: "main", concurrencyEventId: "evt_overlap_concurrency" },
 );
 
 const staleRead = {
@@ -51,9 +51,13 @@ const staleWrite = {
   resourceId: symbol,
   dependsOnReadEventId: "evt_stale_read",
   coverageId: "coverage_stale_write",
+  comparisonChangedEventId: "evt_stale_current",
+  comparisonCoverageId: "coverage_stale_current",
+  integrationTarget: "main",
 } as const;
+const staleCurrent = { ...version(symbol, "b"), eventId: "evt_stale_current" as const };
 
-const stalePositive = detectStaleReadBeforeWrite(staleRead, version(symbol, "b"), staleWrite);
+const stalePositive = detectStaleReadBeforeWrite(staleRead, staleCurrent, staleWrite);
 
 const contractChange = {
   eventId: "evt_contract_change",
@@ -62,6 +66,7 @@ const contractChange = {
   afterVersion: version(contract, "v2"),
   breaking: true,
   coverageId: "coverage_contract_change",
+  integrationTarget: "main",
 } as const;
 const contractConsumer = {
   eventId: "evt_contract_consumer",
@@ -71,6 +76,7 @@ const contractConsumer = {
   affectedTaskId: "task_consumer",
   observedContractVersion: version(contract, "v1"),
   coverageId: "coverage_contract_consumer",
+  integrationTarget: "main",
 } as const;
 const contractPositive = detectExportedContractInvalidation(contractChange, contractConsumer);
 
@@ -87,10 +93,10 @@ export const syntheticDetectorQualityCorpus: readonly DetectorCorpusCase[] = [
   { caseId: "v1-overlap-unattributed", findingType: "same_symbol_overlap", expectedFinding: false, actualFinding: detectSameSymbolOverlap({ eventId: "evt_overlap_null_a", resourceId: symbol, version: version(symbol, "a"), agentId: null, taskId: null, worktreeId: "wt_quality_a", coverageId: "coverage_overlap_a" }, { eventId: "evt_overlap_null_b", resourceId: symbol, version: version(symbol, "b"), agentId: "agent_b", taskId: "task_b", worktreeId: "wt_quality_b", coverageId: "coverage_overlap_b" }) },
 
   { caseId: "v1-stale-explicit-dependent-write", findingType: "stale_read_before_write", expectedFinding: true, actualFinding: stalePositive },
-  { caseId: "v1-stale-current-read", findingType: "stale_read_before_write", expectedFinding: false, actualFinding: detectStaleReadBeforeWrite(staleRead, version(symbol, "a"), staleWrite) },
-  { caseId: "v1-stale-unlinked-write", findingType: "stale_read_before_write", expectedFinding: false, actualFinding: detectStaleReadBeforeWrite(staleRead, version(symbol, "b"), { ...staleWrite, dependsOnReadEventId: "evt_other_read" }) },
-  { caseId: "v1-stale-different-task", findingType: "stale_read_before_write", expectedFinding: false, actualFinding: detectStaleReadBeforeWrite(staleRead, version(symbol, "b"), { ...staleWrite, taskId: "task_other" }) },
-  { caseId: "v1-stale-different-resource", findingType: "stale_read_before_write", expectedFinding: false, actualFinding: detectStaleReadBeforeWrite(staleRead, version("res_quality_other", "b"), staleWrite) },
+  { caseId: "v1-stale-current-read", findingType: "stale_read_before_write", expectedFinding: false, actualFinding: detectStaleReadBeforeWrite(staleRead, { ...staleCurrent, value: "a" }, staleWrite) },
+  { caseId: "v1-stale-unlinked-write", findingType: "stale_read_before_write", expectedFinding: false, actualFinding: detectStaleReadBeforeWrite(staleRead, staleCurrent, { ...staleWrite, dependsOnReadEventId: "evt_other_read" }) },
+  { caseId: "v1-stale-different-task", findingType: "stale_read_before_write", expectedFinding: false, actualFinding: detectStaleReadBeforeWrite(staleRead, staleCurrent, { ...staleWrite, taskId: "task_other" }) },
+  { caseId: "v1-stale-different-resource", findingType: "stale_read_before_write", expectedFinding: false, actualFinding: detectStaleReadBeforeWrite(staleRead, { ...staleCurrent, resourceId: "res_quality_other", domain: { ...staleCurrent.domain, worktreeId: staleCurrent.domain.worktreeId } }, staleWrite) },
 
   { caseId: "v1-contract-breaking-known-consumer", findingType: "exported_contract_invalidation", expectedFinding: true, actualFinding: contractPositive },
   { caseId: "v1-contract-non-breaking", findingType: "exported_contract_invalidation", expectedFinding: false, actualFinding: detectExportedContractInvalidation({ ...contractChange, breaking: false }, contractConsumer) },

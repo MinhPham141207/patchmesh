@@ -1,6 +1,6 @@
 # PatchMesh Event Protocol V1 and Phase 2 V2 Extensions
 
-> **Status:** V1 is the Phase 0 normative contract. Phase 2 adds two backward-
+> **Status:** V1 is the Phase 0 normative contract. Phase 2 adds four backward-
 > compatible schema-version-2 event types; V1 readers continue to replay V1 streams.
 
 ## Envelope
@@ -51,14 +51,21 @@ adds the following immutable extension events without changing V1 payloads:
   reference, actor, disposition, usefulness, reason, and evidence references.
 - `write.dependent` records that a task write depends on a previously observed read,
   a durable dependency edge, its causally linked changed resource, and a coverage ID.
+  Its optional `comparison` is explicit proof of the candidate dependency version that
+  was compared; a legacy write without it remains replayable but cannot prove staleness.
 - `evidence.derived` records analyzer/configuration identity, source-event references,
   integration target, coverage, stable fact identity, and normalized signature data
   for a durable symbol or dependency fact.
+- `task.concurrency.observed` records an adapter- or gateway-observed overlap between
+  two distinct task changes in distinct worktrees. It carries the integration target and
+  coverage ID; independent roots alone never establish concurrency.
 
 V2 references are validated when replaying an event set. Feedback must reference a
 finding (and, when supplied, its decision) in the same domain and correlation.
 Dependent writes require a task-attributed read, matching durable dependency, and
-matching changed-resource causation. Derived evidence must target its matching
+matching changed-resource causation. A supplied comparison must target the read resource
+in the same repository and workspace. Concurrency observations require two distinct
+task-attributed symbol changes in distinct worktrees from an adapter or gateway. Derived evidence must target its matching
 symbol/dependency event, use an analyzer source, and reference existing source events
 in the same repository/workspace. Producers must leave evidence degraded rather than
 emit an unresolved V2 reference.

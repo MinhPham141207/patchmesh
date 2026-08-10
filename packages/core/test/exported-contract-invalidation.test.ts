@@ -30,6 +30,7 @@ const change = (breaking = true): ExportedContractChangeEvidence => ({
   afterVersion: version("sha256:after", "evt_00000000000000000000000000000002"),
   breaking,
   coverageId: "coverage_contract",
+  integrationTarget: "main",
 });
 
 const consumer = (observed = "sha256:before"): ConsumerContractDependencyEvidence => ({
@@ -40,6 +41,7 @@ const consumer = (observed = "sha256:before"): ConsumerContractDependencyEvidenc
   affectedTaskId: "task_consumer",
   observedContractVersion: version(observed, "evt_00000000000000000000000000000003"),
   coverageId: "coverage_consumer",
+  integrationTarget: "main",
 });
 
 test("reports a known consumer of a broken exported contract", () => {

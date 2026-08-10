@@ -171,7 +171,10 @@ test("daemon persists immutable finding feedback only through a writable store",
       reason: "resolved by the task",
     }).status, "inserted");
     assert.deepEqual(daemon.runSameSymbolDetection(), []);
-    assert.deepEqual(daemon.runPhase2Detection(), []);
+    assert.throws(
+      () => daemon.runPhase2Detection(),
+      (error: unknown) => error instanceof ReadServiceError && error.code === "unavailable",
+    );
 
     readOnly = createDaemon({ reader: fixtureReader });
     assert.throws(

@@ -28,6 +28,10 @@ const detectors: readonly FieldDetector[] = [
   "exported_contract_invalidation",
 ];
 
+const minimumHoldoutCases = 20;
+const minimumPositiveHoldouts = 5;
+const minimumNegativeHoldouts = 5;
+
 function metricsFor(corpus: FieldCorpus, detector: FieldDetector): FieldDetectorMetrics {
   const cases = corpus.cases.filter((entry) => entry.caseKind === "detector_quality" && entry.detector === detector && entry.holdout);
   let truePositive = 0;
@@ -40,7 +44,7 @@ function metricsFor(corpus: FieldCorpus, detector: FieldDetector): FieldDetector
     if (entry.expectedFinding === false && entry.observedFinding === true) falsePositive += 1;
     if (entry.expectedFinding === false && entry.observedFinding === false) trueNegative += 1;
     if (entry.expectedFinding === true && entry.observedFinding === false) falseNegative += 1;
-    brierScore += (Number(entry.observedFinding) - (entry.confidence ?? 0)) ** 2;
+    brierScore += (Number(entry.expectedFinding) - (entry.confidence ?? 0)) ** 2;
   }
   const actualPositive = truePositive + falseNegative;
   const actualNegative = trueNegative + falsePositive;
@@ -60,7 +64,10 @@ function metricsFor(corpus: FieldCorpus, detector: FieldDetector): FieldDetector
 
 export function evaluateFieldCorpus(corpus: FieldCorpus): FieldQualityEvaluation {
   const metrics = detectors.map((detector) => metricsFor(corpus, detector));
-  const enoughCases = metrics.every((metric) => metric.caseCount > 0);
+  const enoughCases = metrics.every((metric) =>
+    metric.caseCount >= minimumHoldoutCases
+    && metric.truePositive + metric.falseNegative >= minimumPositiveHoldouts
+    && metric.trueNegative + metric.falsePositive >= minimumNegativeHoldouts);
   const accepted = enoughCases && metrics.every((metric) =>
     metric.precision >= 0.95 && metric.recall >= 0.9 && metric.brierScore <= 0.1 && metric.falsePositiveRate <= 0.02);
   return {

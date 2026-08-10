@@ -63,6 +63,15 @@ function sufficientCoverageId(eventId: EventId, coverageByEvent: ReadonlyMap<Eve
   return coverageByEvent.get(eventId) ?? null;
 }
 
+function hasSufficientCoverage(
+  event: ProtocolEvent,
+  coverageId: CoverageId,
+  eventsById: ReadonlyMap<EventId, ProtocolEvent>,
+  coverageByEvent: ReadonlyMap<EventId, CoverageId>,
+): boolean {
+  return sufficientCoverageForEvent(event, eventsById, coverageByEvent) === coverageId;
+}
+
 function sufficientCoverageForEvent(
   event: ProtocolEvent,
   eventsById: ReadonlyMap<EventId, ProtocolEvent>,
@@ -80,9 +89,19 @@ function sufficientCoverageForEvent(
 }
 
 function derivedEvidenceByTarget(events: readonly ProtocolEvent[]): ReadonlyMap<EventId, DerivedEvidenceEvent> {
-  return new Map(events
-    .filter((event): event is DerivedEvidenceEvent => event.eventType === "evidence.derived")
-    .map((event) => [event.payload.evidence.targetEventId, event] as const));
+  const grouped = new Map<EventId, DerivedEvidenceEvent[]>();
+  for (const event of events) {
+    if (event.eventType !== "evidence.derived" || event.payload.evidence.coverage.status !== "sufficient") continue;
+    const matches = grouped.get(event.payload.evidence.targetEventId) ?? [];
+    matches.push(event);
+    grouped.set(event.payload.evidence.targetEventId, matches);
+  }
+  const resolved = new Map<EventId, DerivedEvidenceEvent>();
+  for (const [target, matches] of grouped) {
+    // More than one metadata assertion is ambiguous, even when input order differs.
+    if (matches.length === 1) resolved.set(target, matches[0]!);
+  }
+  return resolved;
 }
 
 /**
@@ -94,19 +113,52 @@ export function deriveSameSymbolEvidence(events: readonly ProtocolEvent[]): read
   const coverageByEvent = sufficientCoverageIds(events);
   const eventsById = new Map(events.map((event) => [event.eventId, event] as const));
   const corrections = new Map<EventId, { readonly agentId: ProtocolEvent["agentId"]; readonly taskId: ProtocolEvent["taskId"] }>();
+  const correctionConflicts = new Set<EventId>();
   for (const event of events) {
     if (event.eventType === "attribution.corrected") {
-      corrections.set(event.payload.targetEventId, {
+      const next = {
         agentId: event.payload.attributedAgentId,
         taskId: event.payload.attributedTaskId,
-      });
+      };
+      const existing = corrections.get(event.payload.targetEventId);
+      if (existing !== undefined && (existing.agentId !== next.agentId || existing.taskId !== next.taskId)) correctionConflicts.add(event.payload.targetEventId);
+      else corrections.set(event.payload.targetEventId, next);
     }
+  }
+  const derivedByTarget = derivedEvidenceByTarget(events);
+  const concurrencyCandidatesByChange = new Map<EventId, Array<{
+    readonly eventId: EventId;
+    readonly integrationTarget: string;
+    readonly coverageId: CoverageId;
+    readonly otherChangeEventId: EventId;
+  }>>();
+  for (const event of events) {
+    if (event.eventType !== "task.concurrency.observed") continue;
+    const { firstChangeEventId, secondChangeEventId, integrationTarget, coverageId } = event.payload.observation;
+    if (!hasSufficientCoverage(event, coverageId, eventsById, coverageByEvent)) continue;
+    for (const [changeEventId, otherChangeEventId] of [[firstChangeEventId, secondChangeEventId], [secondChangeEventId, firstChangeEventId]] as const) {
+      const candidate = { eventId: event.eventId, integrationTarget, coverageId, otherChangeEventId };
+      const candidates = concurrencyCandidatesByChange.get(changeEventId) ?? [];
+      candidates.push(candidate);
+      concurrencyCandidatesByChange.set(changeEventId, candidates);
+    }
+  }
+  const concurrencyByChange = new Map<EventId, { readonly eventId: EventId; readonly integrationTarget: string; readonly coverageId: CoverageId }>();
+  for (const [changeEventId, candidates] of concurrencyCandidatesByChange) {
+    const uniqueAssertions = [...new Set(candidates.map((candidate) => `${candidate.otherChangeEventId}\u0000${candidate.integrationTarget}\u0000${candidate.coverageId}`))];
+    // Conflicting observations are ambiguous; duplicate equivalent observations select a stable event ID.
+    if (uniqueAssertions.length !== 1) continue;
+    const selected = [...candidates].sort((left, right) => left.eventId.localeCompare(right.eventId))[0]!;
+    concurrencyByChange.set(changeEventId, selected);
   }
   const evidence: SymbolChangeEvidence[] = [];
   for (const event of events) {
     if (event.eventType !== "symbol.changed" || event.payload.resource.kind !== "symbol") continue;
     const coverageId = sufficientCoverageForEvent(event, eventsById, coverageByEvent);
     if (coverageId === null) continue;
+    const metadata = derivedByTarget.get(event.eventId);
+    const concurrency = concurrencyByChange.get(event.eventId);
+    if (metadata === undefined || metadata.payload.evidence.factKind !== "symbol" || concurrency === undefined || metadata.payload.evidence.integrationTarget !== concurrency.integrationTarget || correctionConflicts.has(event.eventId)) continue;
     const attribution = corrections.get(event.eventId);
     evidence.push({
       eventId: event.eventId,
@@ -116,6 +168,9 @@ export function deriveSameSymbolEvidence(events: readonly ProtocolEvent[]): read
       taskId: attribution?.taskId ?? event.taskId,
       worktreeId: event.worktreeId,
       coverageId,
+      integrationTarget: metadata.payload.evidence.integrationTarget,
+      concurrencyEventId: concurrency.eventId,
+      concurrencyCoverageId: concurrency.coverageId,
     });
   }
   return evidence.sort((left, right) => left.eventId.localeCompare(right.eventId));
@@ -129,25 +184,16 @@ export function deriveStaleReadEvidence(events: readonly ProtocolEvent[]): {
 } {
   const coverageByEvent = sufficientCoverageIds(events);
   const eventsById = new Map(events.map((event) => [event.eventId, event] as const));
-  const orderedEvents = (() => {
-    try {
-      return projectWorkGraph(events).orderedEvents;
-    } catch {
-      return [] as readonly ProtocolEvent[];
-    }
-  })();
-  const eventOrder = new Map(orderedEvents.map((event, index) => [event.eventId, index] as const));
+  const orderedEvents = projectWorkGraph(events).orderedEvents;
   const reads: ResourceReadEvidence[] = [];
   const writes: DependentWriteEvidence[] = [];
   const currentVersions: CurrentVersionEvidence[] = [];
   for (const event of orderedEvents) {
     const coverageId = sufficientCoverageForEvent(event, eventsById, coverageByEvent);
     if (coverageId === null) continue;
-    const order = eventOrder.get(event.eventId);
     if ((event.eventType === "file.read" || event.eventType === "symbol.read") && event.taskId !== null) {
       reads.push({
         eventId: event.eventId,
-        ...(order === undefined ? {} : { eventOrder: order }),
         taskId: event.taskId,
         resourceId: event.payload.resource.resourceId,
         version: event.payload.version,
@@ -155,14 +201,21 @@ export function deriveStaleReadEvidence(events: readonly ProtocolEvent[]): {
       });
     }
     if (event.eventType === "write.dependent" && event.taskId !== null) {
+      const comparison = event.payload.write.comparison;
+      const comparisonChanged = comparison === undefined ? undefined : eventsById.get(comparison.changedEventId);
+      if (comparison !== undefined && (comparisonChanged === undefined || !hasSufficientCoverage(comparisonChanged, comparison.coverageId, eventsById, coverageByEvent))) continue;
       writes.push({
         eventId: event.eventId,
-        ...(order === undefined ? {} : { eventOrder: order }),
         dependencyId: event.payload.write.dependencyId,
         taskId: event.taskId,
         resourceId: event.payload.write.resourceId,
         dependsOnReadEventId: event.payload.write.dependsOnReadEventId,
         coverageId,
+        ...(comparison === undefined ? {} : {
+          comparisonChangedEventId: comparison.changedEventId,
+          comparisonCoverageId: comparison.coverageId,
+          integrationTarget: comparison.integrationTarget,
+        }),
       });
     }
     if ((event.eventType === "file.changed" || event.eventType === "symbol.changed")
@@ -170,7 +223,6 @@ export function deriveStaleReadEvidence(events: readonly ProtocolEvent[]): {
       currentVersions.push({
         ...event.payload.afterVersion,
         eventId: event.eventId,
-        ...(order === undefined ? {} : { eventOrder: order }),
       });
     }
   }
@@ -193,21 +245,14 @@ export function deriveExportedContractInvalidationEvidence(events: readonly Prot
   const coverageByEvent = sufficientCoverageIds(events);
   const eventsById = new Map(events.map((event) => [event.eventId, event] as const));
   const derivedByTarget = derivedEvidenceByTarget(events);
-  const orderedEvents = (() => {
-    try {
-      return projectWorkGraph(events).orderedEvents;
-    } catch {
-      return [] as readonly ProtocolEvent[];
-    }
-  })();
-  const eventOrder = new Map(orderedEvents.map((event, index) => [event.eventId, index] as const));
+  const orderedEvents = projectWorkGraph(events).orderedEvents;
   const consumers: ConsumerContractDependencyEvidence[] = [];
   for (const event of orderedEvents) {
     if (event.eventType !== "dependency.changed") continue;
     const coverageId = sufficientCoverageForEvent(event, eventsById, coverageByEvent);
     if (coverageId === null) continue;
     const metadata = derivedByTarget.get(event.eventId);
-    if (metadata !== undefined && metadata.payload.evidence.factKind !== "dependency") continue;
+    if (metadata === undefined || metadata.payload.evidence.factKind !== "dependency" || metadata.payload.evidence.coverage.status !== "sufficient") continue;
     consumers.push({
       eventId: event.eventId,
       dependencyId: event.payload.dependency.dependencyId,
@@ -216,7 +261,7 @@ export function deriveExportedContractInvalidationEvidence(events: readonly Prot
       affectedTaskId: event.taskId,
       observedContractVersion: event.payload.dependency.dependencyVersion,
       coverageId,
-      ...(metadata === undefined ? {} : { integrationTarget: metadata.payload.evidence.integrationTarget }),
+      integrationTarget: metadata.payload.evidence.integrationTarget,
     });
   }
   const consumersByContract = groupConsumersByContract(consumers);
@@ -224,7 +269,8 @@ export function deriveExportedContractInvalidationEvidence(events: readonly Prot
   for (const event of orderedEvents) {
     if (event.eventType !== "symbol.changed" || event.payload.changeKind !== "deleted") continue;
     const coverageId = sufficientCoverageForEvent(event, eventsById, coverageByEvent);
-    if (coverageId === null || event.payload.beforeVersion === null) continue;
+    const metadata = derivedByTarget.get(event.eventId);
+    if (coverageId === null || event.payload.beforeVersion === null || metadata === undefined || metadata.payload.evidence.factKind !== "symbol" || !metadata.payload.evidence.exported) continue;
     if ((consumersByContract.get(event.payload.resource.resourceId)?.length ?? 0) === 0) continue;
     changes.push({
       eventId: event.eventId,
@@ -233,6 +279,7 @@ export function deriveExportedContractInvalidationEvidence(events: readonly Prot
       afterVersion: event.payload.afterVersion,
       breaking: true,
       coverageId,
+      integrationTarget: metadata.payload.evidence.integrationTarget,
     });
   }
 
@@ -243,7 +290,7 @@ export function deriveExportedContractInvalidationEvidence(events: readonly Prot
   for (const event of orderedEvents) {
     if (event.eventType !== "symbol.changed") continue;
     const metadata = derivedByTarget.get(event.eventId);
-    if (metadata?.payload.evidence.factKind !== "symbol" || metadata.payload.evidence.normalizedSignature === null) continue;
+    if (metadata?.payload.evidence.factKind !== "symbol" || !metadata.payload.evidence.exported || metadata.payload.evidence.normalizedSignature === null) continue;
     const key = `${event.repositoryId}:${event.workspaceId}:${metadata.payload.evidence.integrationTarget}:${metadata.payload.evidence.stableFactId}`;
     const previous = priorContracts.get(key);
     if (previous !== undefined && previous.metadata.payload.evidence.normalizedSignature !== null) {

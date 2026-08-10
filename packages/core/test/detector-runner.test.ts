@@ -15,7 +15,7 @@ import {
 const resourceId = `res_${"a".repeat(64)}`;
 const worktreeId = "wt_11111111-1111-4111-8111-111111111111";
 
-function change(suffix: string, taskId: string): SymbolChangeEvidence {
+function change(suffix: string, taskId: string, changeWorktreeId = worktreeId): SymbolChangeEvidence {
   const eventId = `evt_${suffix.padStart(32, "0")}`;
   return {
     eventId,
@@ -25,7 +25,7 @@ function change(suffix: string, taskId: string): SymbolChangeEvidence {
       domain: {
         repositoryId: "repo_11111111-1111-4111-8111-111111111111",
         workspaceId: "ws_11111111-1111-4111-8111-111111111111",
-        worktreeId,
+        worktreeId: changeWorktreeId,
       },
       kind: "content_hash",
       value: `sha256:${suffix}`,
@@ -33,21 +33,24 @@ function change(suffix: string, taskId: string): SymbolChangeEvidence {
     },
     agentId: `agent_${taskId}`,
     taskId,
-    worktreeId,
+    worktreeId: changeWorktreeId,
     coverageId: `coverage_${suffix}`,
+    integrationTarget: "main",
+    concurrencyEventId: "evt_00000000000000000000000000000009",
+    concurrencyCoverageId: "coverage_concurrency",
   };
 }
 
 test("runs same-symbol detection deterministically and deduplicates repeated evidence", () => {
   const first = change("1", "task_a");
-  const second = change("2", "task_b");
+  const second = change("2", "task_b", "wt_22222222-2222-4222-8222-222222222222");
 
   const forward = runSameSymbolDetector([first, second, first]);
   const reversed = runSameSymbolDetector([second, first]);
 
   assert.equal(forward.length, 1);
   assert.deepEqual(forward, reversed);
-  assert.deepEqual(forward[0]?.evidence.evidenceEventIds, [first.eventId, second.eventId]);
+  assert.deepEqual(forward[0]?.evidence.evidenceEventIds, [first.eventId, second.eventId, "evt_00000000000000000000000000000009"]);
 });
 
 test("runs stale-read detection deterministically from explicit read dependencies", () => {
@@ -56,8 +59,8 @@ test("runs stale-read detection deterministically from explicit read dependencie
     version: { resourceId, domain: { repositoryId: "repo_11111111-1111-4111-8111-111111111111", workspaceId: "ws_11111111-1111-4111-8111-111111111111", worktreeId }, kind: "content_hash", value: "sha256:before", evidenceEventIds: ["evt_00000000000000000000000000000003"] },
     coverageId: "coverage_read",
   };
-  const write: DependentWriteEvidence = { eventId: "evt_00000000000000000000000000000004", dependencyId: "dep_stale", taskId: "task_a", resourceId, dependsOnReadEventId: read.eventId, coverageId: "coverage_write" };
-  const current = { ...read.version, value: "sha256:after", evidenceEventIds: ["evt_00000000000000000000000000000005"] };
+  const write: DependentWriteEvidence = { eventId: "evt_00000000000000000000000000000004", dependencyId: "dep_stale", taskId: "task_a", resourceId, dependsOnReadEventId: read.eventId, coverageId: "coverage_write", comparisonChangedEventId: "evt_00000000000000000000000000000005", comparisonCoverageId: "coverage_current", integrationTarget: "main" };
+  const current = { ...read.version, eventId: "evt_00000000000000000000000000000005" as const, value: "sha256:after", evidenceEventIds: ["evt_00000000000000000000000000000005"] };
 
   const forward = runStaleReadBeforeWriteDetector([read, read], [current], [write, write]);
   const reversed = runStaleReadBeforeWriteDetector([read], [current], [write]);
@@ -70,8 +73,8 @@ test("runs contract invalidation deterministically for known consumers", () => {
   const contractResourceId = `res_${"c".repeat(64)}`;
   const domain = { repositoryId: "repo_11111111-1111-4111-8111-111111111111", workspaceId: "ws_11111111-1111-4111-8111-111111111111", worktreeId };
   const before = { resourceId: contractResourceId, domain, kind: "content_hash" as const, value: "sha256:before", evidenceEventIds: ["evt_00000000000000000000000000000006"] };
-  const change: ExportedContractChangeEvidence = { eventId: "evt_00000000000000000000000000000006", contractResourceId, beforeVersion: before, afterVersion: { ...before, value: "sha256:after", evidenceEventIds: ["evt_00000000000000000000000000000007"] }, breaking: true, coverageId: "coverage_contract" };
-  const consumer: ConsumerContractDependencyEvidence = { eventId: "evt_00000000000000000000000000000008", dependencyId: "dep_contract", contractResourceId, consumerResourceId: `res_${"d".repeat(64)}`, affectedTaskId: "task_b", observedContractVersion: before, coverageId: "coverage_consumer" };
+  const change: ExportedContractChangeEvidence = { eventId: "evt_00000000000000000000000000000006", contractResourceId, beforeVersion: before, afterVersion: { ...before, value: "sha256:after", evidenceEventIds: ["evt_00000000000000000000000000000007"] }, breaking: true, coverageId: "coverage_contract", integrationTarget: "main" };
+  const consumer: ConsumerContractDependencyEvidence = { eventId: "evt_00000000000000000000000000000008", dependencyId: "dep_contract", contractResourceId, consumerResourceId: `res_${"d".repeat(64)}`, affectedTaskId: "task_b", observedContractVersion: before, coverageId: "coverage_consumer", integrationTarget: "main" };
 
   const forward = runExportedContractInvalidationDetector([change, change], [consumer, consumer]);
   const reversed = runExportedContractInvalidationDetector([change], [consumer]);

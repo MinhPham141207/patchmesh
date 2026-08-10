@@ -6,9 +6,10 @@ work, explains the dependency path, and requests the smallest reliable response
 before integration.
 
 > **Project status:** Phase 0 and Phase 1 through M7 are implemented and verified.
-> PatchMesh currently provides an observation-and-replay slice; deterministic detection,
-> coordination decisions, targeted revalidation, enforcement, and additional runtime
-> adapters remain planned. The implementation sequence is defined in the
+> Phase 2 report-only detection is in progress: its protocol, conservative detectors,
+> evidence binding, and fail-closed quality gates are implemented, but the Phase 2 exit
+> gates are not met. Targeted revalidation, enforcement, and additional runtime adapters
+> remain planned. The implementation sequence is defined in the
 > [roadmap](docs/ROADMAP.md).
 
 ## The problem
@@ -47,17 +48,15 @@ The current implementation provides:
 - read-only daemon services and `patchmesh status`, `agents`, `events`, and `graph`;
 - an observation-only cross-worktree golden slice with resilience and performance evidence.
 
-## Later roadmap phases
+## Phase 2 and later roadmap phases
 
-The next slices remain report-only until their roadmap evidence gates are met. They will
-provide:
-
-- same-symbol overlap detection;
-- stale-read-before-write detection;
-- exported-contract invalidation;
-- evidence-backed `notify` and `request_revalidation` decisions;
-- targeted revalidation and validity history;
-- CLI commands for overlaps, stale work, and explanations.
+The in-progress Phase 2 slice is report-only and only emits findings when explicit,
+sufficient provenance proves the relationship. It does not infer chronology from event
+ordering or concurrency from independent worktrees. Its remaining evidence gates include
+real adapter-produced concurrency and stale-comparison observations, reviewed detector
+holdouts, and the deferred runtime budget. Once those gates are met, later slices will
+provide targeted revalidation and validity history, measured opt-in enforcement, and
+additional runtime adapters.
 
 Network MCP transport, automatic pause or rejection, semantic duplicate-work detection,
 multiple adapters, and a dashboard are deliberately deferred.

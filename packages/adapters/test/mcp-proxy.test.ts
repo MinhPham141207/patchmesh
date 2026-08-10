@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
@@ -60,6 +61,10 @@ const observerSource = {
   sourceId: "source_observation",
   instanceId: "22222222-2222-4222-8222-222222222222",
 };
+
+function contentHash(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
 
 function snapshot(files: ReadonlyMap<string, { readonly contentHash: string }>): ObservationSnapshot {
   return {
@@ -161,11 +166,12 @@ test("derives persisted symbol changes from an observed TypeScript source file",
   const sourceDirectory = join(directory, "src");
   try {
     mkdirSync(sourceDirectory);
-    writeFileSync(join(sourceDirectory, "api.ts"), "export function api(): void {}\n", "utf8");
+    const source = "export function api(): void {}\n";
+    writeFileSync(join(sourceDirectory, "api.ts"), source, "utf8");
     const store = SqliteEventStore.open(databasePath);
     try {
       const observer = changedObserver({
-        after: capture(snapshot(new Map([["src/api.ts", { contentHash: "b".repeat(64) }]]))),
+        after: capture(snapshot(new Map([["src/api.ts", { contentHash: contentHash(source) }]]))),
       });
       const result = await createProxy(store, [
         "evt_00000000000000000000000000000020",
@@ -216,14 +222,16 @@ test("derives a persisted dependency from real changed local TypeScript sources"
   const sourceDirectory = join(directory, "src");
   try {
     mkdirSync(sourceDirectory);
-    writeFileSync(join(sourceDirectory, "api.ts"), "export interface Account { id: string }\n", "utf8");
-    writeFileSync(join(sourceDirectory, "consumer.ts"), 'import { Account } from "./api";\nfunction consume(value: Account) {}\n', "utf8");
+    const apiSource = "export interface Account { id: string }\n";
+    const consumerSource = 'import { Account } from "./api";\nfunction consume(value: Account) {}\n';
+    writeFileSync(join(sourceDirectory, "api.ts"), apiSource, "utf8");
+    writeFileSync(join(sourceDirectory, "consumer.ts"), consumerSource, "utf8");
     const store = SqliteEventStore.open(databasePath);
     try {
       const observer = changedObserver({
         after: capture(snapshot(new Map([
-          ["src/api.ts", { contentHash: "a".repeat(64) }],
-          ["src/consumer.ts", { contentHash: "b".repeat(64) }],
+          ["src/api.ts", { contentHash: contentHash(apiSource) }],
+          ["src/consumer.ts", { contentHash: contentHash(consumerSource) }],
         ]))),
       });
       const result = await createProxy(store, [
@@ -276,11 +284,12 @@ test("marks unsupported observed source as degraded without inventing symbols", 
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-"));
   const databasePath = join(directory, "events.sqlite");
   try {
-    writeFileSync(join(directory, "notes.txt"), "not TypeScript", "utf8");
+    const source = "not TypeScript";
+    writeFileSync(join(directory, "notes.txt"), source, "utf8");
     const store = SqliteEventStore.open(databasePath);
     try {
       const observer = changedObserver({
-        after: capture(snapshot(new Map([["notes.txt", { contentHash: "c".repeat(64) }]]))),
+        after: capture(snapshot(new Map([["notes.txt", { contentHash: contentHash(source) }]]))),
       });
       const result = await createProxy(store, [
         "evt_00000000000000000000000000000024",
@@ -303,6 +312,60 @@ test("marks unsupported observed source as degraded without inventing symbols", 
       assert.deepEqual(store.read().map((event) => event.eventType), ["tool.requested", "file.changed", "tool.completed"]);
       assert.equal(result.coverage?.presentation, "degraded");
       assert.deepEqual(result.analysisDiagnostics, [{ path: "notes.txt", reason: "unsupported_language" }]);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("degrades source analysis when the file changes after observation", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-"));
+  const databasePath = join(directory, "events.sqlite");
+  const sourceDirectory = join(directory, "src");
+  const observedSource = "export function observed(): void {}\n";
+  try {
+    mkdirSync(sourceDirectory);
+    writeFileSync(join(sourceDirectory, "api.ts"), observedSource, "utf8");
+    const store = SqliteEventStore.open(databasePath);
+    const eventStore: EventAppender = {
+      append(event) {
+        const persisted = store.append(event);
+        if (persisted.event.eventType === "file.changed") {
+          writeFileSync(join(sourceDirectory, "api.ts"), "export function replacement(): void {}\n", "utf8");
+        }
+        return persisted;
+      },
+      read: () => store.read(),
+    };
+    try {
+      const result = await createProxy(eventStore, [
+        "evt_00000000000000000000000000000050",
+        "evt_00000000000000000000000000000051",
+        "evt_00000000000000000000000000000052",
+      ], {
+        observer: changedObserver({
+          after: capture(snapshot(new Map([["src/api.ts", { contentHash: contentHash(observedSource) }]]))),
+        }),
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: "main",
+        },
+      }).execute(
+        { ...call, toolName: "edit_file", operation: "edit src/api.ts" },
+        { ...context, workspaceRoot: directory },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      assert.deepEqual(store.read().map((event) => event.eventType), ["tool.requested", "file.changed", "tool.completed"]);
+      assert.equal(result.coverage?.presentation, "degraded");
+      assert.deepEqual(result.analysisDiagnostics, [{
+        path: "src/api.ts",
+        reason: "changed source no longer matches observed version",
+      }]);
     } finally {
       store.close();
     }

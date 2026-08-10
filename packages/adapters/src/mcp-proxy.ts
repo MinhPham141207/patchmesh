@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import {
@@ -65,6 +65,10 @@ function appendValidated(event: ProtocolEvent, eventStore: EventAppender): Proto
 
 function randomHexId(): string {
   return randomUUID().replaceAll("-", "");
+}
+
+function contentHash(content: Uint8Array): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function asToolRequested(event: ProtocolEvent): ToolRequestedEvent {
@@ -426,11 +430,14 @@ export class McpProxy {
     const filePath = resolve(root, event.payload.resource.locator);
     const relativePath = relative(root, filePath);
     if (relativePath.startsWith("..") || isAbsolute(relativePath)) return "observed resource is outside the workspace root";
-    let content: string;
+    let content: Buffer;
     try {
-      content = await readFile(filePath, "utf8");
+      content = await readFile(filePath);
     } catch {
       return "changed source could not be read";
+    }
+    if (contentHash(content) !== event.payload.afterVersion.value) {
+      return "changed source no longer matches observed version";
     }
     const extension = extname(filePath).toLowerCase();
     const language: SourceAnalysisInput["language"] = extension === ".ts" || extension === ".tsx"
@@ -441,7 +448,7 @@ export class McpProxy {
     const facts = deriveEvidenceFacts({
       resource: event.payload.resource,
       version: event.payload.afterVersion,
-      content,
+      content: content.toString("utf8"),
       language,
       sourceEventIds: [event.eventId],
       analyzer: options.analyzer,

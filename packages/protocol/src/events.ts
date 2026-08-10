@@ -160,6 +160,24 @@ export interface DependentWritePayload {
     readonly resourceId: ResourceId;
     readonly dependsOnReadEventId: EventId;
     readonly coverageId: CoverageId;
+    /** V2.1 explicit comparison; absent legacy writes remain replayable but are not stale evidence. */
+    readonly comparison?: {
+      readonly changedEventId: EventId;
+      readonly coverageId: CoverageId;
+      readonly integrationTarget: string;
+    };
+  };
+}
+
+/** Immutable observation that two independently-attributed task changes overlapped. */
+export interface TaskConcurrencyObservedPayload {
+  readonly observation: {
+    readonly firstTaskId: TaskId;
+    readonly secondTaskId: TaskId;
+    readonly firstChangeEventId: EventId;
+    readonly secondChangeEventId: EventId;
+    readonly integrationTarget: string;
+    readonly coverageId: CoverageId;
   };
 }
 
@@ -326,6 +344,11 @@ export interface DerivedEvidenceEvent extends BaseEventV2 {
   readonly payload: DerivedEvidencePayload;
 }
 
+export interface TaskConcurrencyObservedEvent extends BaseEventV2 {
+  readonly eventType: "task.concurrency.observed";
+  readonly payload: TaskConcurrencyObservedPayload;
+}
+
 export interface DecisionCreatedEvent extends BaseEvent {
   readonly eventType: "decision.created";
   readonly payload: DecisionCreatedPayload;
@@ -357,6 +380,7 @@ export type ProjectionEvent =
   | FindingCreatedEvent
   | FindingFeedbackCreatedEvent
   | DependentWriteEvent
+  | TaskConcurrencyObservedEvent
   | DecisionCreatedEvent
   | ValidityChangedEvent
   | DecisionDeliveryChangedEvent;

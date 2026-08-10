@@ -1,6 +1,7 @@
 # PatchMesh Roadmap
 
-> **Status:** Phase 1 is complete through M7. Phase 2 and later capabilities remain
+> **Status:** Phase 1 is complete through M7. Phase 2 deterministic detection is in
+> progress and remains report-only; its exit gates are not met. Later capabilities remain
 > planned.
 
 ## Purpose

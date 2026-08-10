@@ -5,7 +5,7 @@
   "properties": {
     "schemaVersion": { "const": 2 },
     "eventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
-    "eventType": { "enum": ["finding.feedback.created", "write.dependent", "evidence.derived"] },
+    "eventType": { "enum": ["finding.feedback.created", "write.dependent", "evidence.derived", "task.concurrency.observed"] },
     "source": {
       "type": "object",
       "properties": {
@@ -59,6 +59,17 @@
           "type": "object",
           "properties": { "evidence": { "$ref": "./derived-evidence.schema.json" } },
           "required": ["evidence"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "eventType": { "const": "task.concurrency.observed" },
+        "payload": {
+          "type": "object",
+          "properties": { "observation": { "$ref": "./task-concurrency-observed.schema.json" } },
+          "required": ["observation"],
           "additionalProperties": false
         }
       }

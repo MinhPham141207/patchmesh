@@ -27,18 +27,31 @@ const evidence = (
   taskId: "task_a",
   worktreeId: "wt_11111111-1111-4111-8111-111111111111",
   coverageId: `coverage_${suffix}`,
+  integrationTarget: "main",
+  concurrencyEventId: "evt_00000000000000000000000000000003",
+  concurrencyCoverageId: "coverage_concurrency",
   ...options,
 });
 
 test("reports independently attributed changes to the same symbol", () => {
+  const candidate = evidence("2", { agentId: "agent_b", taskId: "task_b" });
+  const crossWorktreeCandidate: SymbolChangeEvidence = {
+    ...candidate,
+    worktreeId: "wt_22222222-2222-4222-8222-222222222222",
+    version: {
+      ...candidate.version,
+      domain: { ...candidate.version.domain, worktreeId: "wt_22222222-2222-4222-8222-222222222222" },
+    },
+  };
   const result = detectSameSymbolOverlap(
     evidence("1"),
-    evidence("2", { agentId: "agent_b", taskId: "task_b" }),
+    crossWorktreeCandidate,
   );
 
   assert.deepEqual(result?.evidence.evidenceEventIds, [
     "evt_00000000000000000000000000000001",
     "evt_00000000000000000000000000000002",
+    "evt_00000000000000000000000000000003",
   ]);
   assert.equal(result?.findingType, "same_symbol_overlap");
   assert.equal(result?.evidence.affectedTaskId, "task_b");
@@ -67,4 +80,23 @@ test("does not report shared task changes or incomplete attribution", () => {
     detectSameSymbolOverlap(evidence("1", { agentId: null }), evidence("2", { taskId: "task_b" })),
     null,
   );
+});
+
+test("does not report changes from the same worktree", () => {
+  const candidate = evidence("2", { agentId: "agent_b", taskId: "task_b" });
+  assert.equal(detectSameSymbolOverlap(evidence("1"), candidate), null);
+});
+
+test("does not report without the concurrency coverage proof", () => {
+  const candidate = evidence("2", {
+    agentId: "agent_b",
+    taskId: "task_b",
+    concurrencyCoverageId: undefined,
+    worktreeId: "wt_22222222-2222-4222-8222-222222222222",
+  });
+  const crossWorktreeCandidate = {
+    ...candidate,
+    version: { ...candidate.version, domain: { ...candidate.version.domain, worktreeId: candidate.worktreeId } },
+  };
+  assert.equal(detectSameSymbolOverlap(evidence("1"), crossWorktreeCandidate), null);
 });

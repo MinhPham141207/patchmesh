@@ -931,7 +931,6 @@ implementation.
 The roadmap requires these user interactions, but their CLI shape is not yet
 designed. They are obligations, not available commands:
 
-- Phase 2: dismiss a finding and record notification usefulness.
 - Phase 3: inspect validity history and recommended checks.
 - Phase 3: link revalidation results to decisions and show the proof required for a
   confirmed `stale` status.

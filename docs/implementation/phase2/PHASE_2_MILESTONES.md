@@ -23,12 +23,12 @@ automatically revalidate work.
 | --- | --- | --- |
 | M0 budget | Real `NodeObservationBoundary` measurements with raw samples and a deferred decision | Deferred — small and large tiers exceed provisional p95 budgets |
 | M1 contracts | Immutable V2 feedback; replayed finding/decision/delivery/feedback views; deterministic feedback/delivery writes; replay-time V2 reference checks | Partial — append-time out-of-order buffering and a complete compatibility audit remain |
-| M2 evidence | TypeScript/JavaScript source facts, durable V2 analyzer provenance, symbol events, resolver-confirmed dependency events, degraded unsupported/opaque handling | Partial — broader analyzer history and supported-language coverage remain |
-| M3 overlap | Deterministic same-symbol detector plus a real linked-worktree MCP/watcher golden path through sufficient coverage and durable replay/runtime append | Partial — broader labeled corpus and integration-target cases remain |
-| M4 stale read | Explicit `write.dependent` capture, durable-reference guard, replay reconstruction, and report-only daemon path | Partial — integration-target provenance, corrected-attribution cases, and labeled corpus acceptance remain |
-| M5 contracts | Cross-worktree resolver, multiple-consumer retention, deterministic supported-function compatibility classification, durable history, and real golden path | Partial — complete contract history and broader signature compatibility remain |
+| M2 evidence | Hash-bound TypeScript/JavaScript source facts, durable V2 analyzer provenance, symbol events, resolver-confirmed dependency events, degraded unsupported/opaque handling | Partial — broader analyzer history, supported-language coverage, and real adapter emission of the new relationship proofs remain |
+| M3 overlap | Deterministic same-symbol detector requiring sufficient derived metadata, matching target, and explicit adapter/gateway concurrency proof across worktrees | Partial — production concurrency observation and a reviewed labeled corpus remain |
+| M4 stale read | Explicit `write.dependent` comparison reference, integration target, durable-reference guard, replay reconstruction, and report-only path | Partial — production comparison capture, corrected-attribution corpus cases, and labeled acceptance remain |
+| M5 contracts | Cross-worktree resolver, strict sufficient/exported target metadata, multiple-consumer retention, deterministic supported-function compatibility classification, durable history | Partial — complete contract history, broader signatures, and reviewed corpus remain |
 | M6 report-only | Policy, explanation, append-only feedback CLI, and daemon delivery/feedback writers | Partial — delivery command UX and full CLI scenario coverage remain |
-| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; fail-closed field corpus/evaluator; [production host adapter boundary](M7_HOST_ADAPTER_BOUNDARY.md) | Blocked — external host adapter is missing; current field corpus has trace-integrity only |
+| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; fail-closed field corpus/evaluator that recomputes trace and artifact digests; [production host adapter boundary](M7_HOST_ADAPTER_BOUNDARY.md) | Blocked — external host adapter and reviewed detector-quality holdouts are missing; current field corpus has trace-integrity only |
 
 ## Milestone Order
 
@@ -65,7 +65,7 @@ This is a prerequisite gate, not a detector milestone.
 - Security and degraded-observability fixtures pass.
 - The Phase 1 boundary remains report-only and replayable.
 
-### M1: Finding, Decision, and Feedback Contracts (Planned)
+### M1: Finding, Decision, and Feedback Contracts (Partial)
 
 **Goal:** Establish deterministic, replayable contracts for findings, policy output,
 delivery, and user feedback.
@@ -99,7 +99,7 @@ delivery, and user feedback.
 - Decision creation, delivery state, dismissal, and usefulness feedback converge under
   duplicate and valid out-of-order inputs, with a stable replayed history.
 
-### M2: Deterministic Evidence Production (Planned)
+### M2: Deterministic Evidence Production (Partial)
 
 **Goal:** Produce the production evidence required by the Phase 2 detectors rather
 than relying on synthetic fixture events.
@@ -133,7 +133,7 @@ than relying on synthetic fixture events.
   explicitly degraded and cannot masquerade as symbol or dependency evidence.
 - Analyzer metadata and source-event provenance make every detector input auditable.
 
-### M3: Same-Symbol Overlap (Planned)
+### M3: Same-Symbol Overlap (Partial)
 
 **Goal:** Detect concurrent changes to the same symbol without treating all shared
 access as a conflict.
@@ -155,7 +155,7 @@ access as a conflict.
 - Replay and projection rebuild produce the same finding set.
 - No detector emits a gateway directive or coordination action directly.
 
-### M4: Stale Read Before Write (Planned)
+### M4: Stale Read Before Write (Partial)
 
 **Goal:** Detect a write based on a resource version that changed after it was read.
 
@@ -175,7 +175,7 @@ access as a conflict.
 - Coverage gaps reduce confidence or suppress a finding according to the contract.
 - Detector results remain observation-only.
 
-### M5: Exported Contract Invalidation (Planned)
+### M5: Exported Contract Invalidation (Partial)
 
 **Goal:** Detect when a candidate exported-function or API-contract change affects a
 known consumer.
@@ -197,7 +197,7 @@ known consumer.
   confidence, and coverage.
 - Semantic inference alone cannot produce a high-authority finding.
 
-### M6: Report-Only Policy, Delivery, Feedback, and CLI Explanation (Planned)
+### M6: Report-Only Policy, Delivery, Feedback, and CLI Explanation (Partial)
 
 **Goal:** Convert findings into targeted, non-disruptive coordination output.
 
@@ -225,7 +225,7 @@ known consumer.
   details.
 - Findings cannot silently pause, reject, or redirect an agent.
 
-### M7: Detector Quality and Phase Exit Gate (Planned)
+### M7: Detector Quality and Phase Exit Gate (Blocked)
 
 **Goal:** Measure detector quality before broadening authority or scope.
 

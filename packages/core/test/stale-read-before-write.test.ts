@@ -30,6 +30,7 @@ const read: ResourceReadEvidence = {
 };
 
 const current = (value: string) => ({
+  eventId: "evt_00000000000000000000000000000002" as const,
   resourceId,
   domain: { ...domain },
   kind: "content_hash" as const,
@@ -44,6 +45,9 @@ const write = (dependsOnReadEventId = read.eventId): DependentWriteEvidence => (
   resourceId,
   dependsOnReadEventId,
   coverageId: "coverage_write",
+  comparisonChangedEventId: "evt_00000000000000000000000000000002",
+  comparisonCoverageId: "coverage_current",
+  integrationTarget: "main",
 });
 
 test("reports a write that explicitly depends on a stale read", () => {

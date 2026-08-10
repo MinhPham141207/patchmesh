@@ -11,7 +11,6 @@ import type { DetectorFinding } from "./types.js";
 
 export interface ResourceReadEvidence {
   readonly eventId: EventId;
-  readonly eventOrder?: number;
   readonly taskId: TaskId;
   readonly resourceId: ResourceId;
   readonly version: ResourceVersion;
@@ -20,17 +19,18 @@ export interface ResourceReadEvidence {
 
 export interface DependentWriteEvidence {
   readonly eventId: EventId;
-  readonly eventOrder?: number;
   readonly dependencyId: DependencyId;
   readonly taskId: TaskId;
   readonly resourceId: ResourceId;
   readonly dependsOnReadEventId: EventId;
   readonly coverageId: CoverageId;
+  readonly comparisonChangedEventId?: EventId;
+  readonly comparisonCoverageId?: CoverageId;
+  readonly integrationTarget?: string;
 }
 
 export interface CurrentVersionEvidence extends ResourceVersion {
   readonly eventId?: EventId;
-  readonly eventOrder?: number;
 }
 
 function hasSameRepositoryWorkspace(left: ResourceVersion, right: ResourceVersion): boolean {
@@ -52,13 +52,12 @@ export function detectStaleReadBeforeWrite(
     || read.resourceId !== current.resourceId
     || read.taskId !== write.taskId
     || write.dependsOnReadEventId !== read.eventId
+    || write.comparisonChangedEventId !== current.eventId
+    || write.comparisonCoverageId === undefined
+    || write.integrationTarget === undefined
     || !hasSameRepositoryWorkspace(read.version, current)
     || read.version.kind !== current.kind
-    || read.version.value === current.value
-    || (read.eventOrder !== undefined
-      && current.eventOrder !== undefined
-      && write.eventOrder !== undefined
-      && (current.eventOrder <= read.eventOrder || current.eventOrder > write.eventOrder))) {
+    || read.version.value === current.value) {
     return null;
   }
 
@@ -67,7 +66,7 @@ export function detectStaleReadBeforeWrite(
     write.eventId,
     ...current.evidenceEventIds,
   ].sort((left, right) => left.localeCompare(right));
-  const coverageIds = [read.coverageId, write.coverageId]
+  const coverageIds = [read.coverageId, write.coverageId, write.comparisonCoverageId]
     .sort((left, right) => left.localeCompare(right));
 
   return {

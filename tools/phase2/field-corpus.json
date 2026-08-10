@@ -16,7 +16,8 @@
       "reviewedAt": "2026-08-10T09:00:00.000Z",
       "coverage": "unknown",
       "limitations": ["post-tool effect observation was unavailable", "not a detector-quality label"],
-      "replayDigest": "sha256:c3a07920731d817d9b16506ad17731f0f74a7046a3b717dd99d9347ae9073b40",
+      "replayDigest": "sha256:400e2b9b62e94f2adc533ea41cdc7ba8c18b392e4f22407c855b8bd958bd6066",
+      "detectorOutputPath": null,
       "detectorOutputDigest": null,
       "holdout": false
     }

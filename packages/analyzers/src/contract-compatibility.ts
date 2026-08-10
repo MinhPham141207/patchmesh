@@ -4,6 +4,7 @@ interface FunctionParameter {
   readonly name: string;
   readonly type: string;
   readonly optional: boolean;
+  readonly rest: boolean;
 }
 
 interface FunctionSignature {
@@ -44,9 +45,11 @@ function splitParameters(value: string): readonly string[] | null {
 
 function parseParameter(value: string): FunctionParameter | null {
   const normalized = value.trim();
-  if (normalized.length === 0 || normalized.startsWith("...")) return null;
-  const defaultIndex = normalized.indexOf("=");
-  const declaration = (defaultIndex < 0 ? normalized : normalized.slice(0, defaultIndex)).trim();
+  if (normalized.length === 0) return null;
+  const rest = normalized.startsWith("...");
+  const parameter = rest ? normalized.slice(3).trim() : normalized;
+  const defaultIndex = parameter.indexOf("=");
+  const declaration = (defaultIndex < 0 ? parameter : parameter.slice(0, defaultIndex)).trim();
   const optionalByDefault = defaultIndex >= 0;
   const colonIndex = declaration.indexOf(":");
   if (colonIndex <= 0) return null;
@@ -55,8 +58,9 @@ function parseParameter(value: string): FunctionParameter | null {
   if (type.length === 0) return null;
   const optional = optionalByDefault || rawName.endsWith("?");
   const name = rawName.replace(/\?$/, "").trim();
+  if (rest && optional) return null;
   if (!/^[A-Za-z_$][\w$]*$/.test(name)) return null;
-  return { name, type, optional };
+  return { name, type, optional, rest };
 }
 
 function parseFunction(value: string): FunctionSignature | null {
@@ -69,6 +73,7 @@ function parseFunction(value: string): FunctionSignature | null {
   for (const rawParameter of rawParameters) {
     const parameter = parseParameter(rawParameter);
     if (parameter === null) return null;
+    if (parameters.some((existing) => existing.rest)) return null;
     parameters.push(parameter);
   }
   const returnType = normalize(match[3] ?? "");
@@ -92,11 +97,11 @@ export function classifyContractCompatibility(before: string, after: string): Co
   for (let index = 0; index < previous.parameters.length; index += 1) {
     const beforeParameter = previous.parameters[index]!;
     const afterParameter = current.parameters[index]!;
-    if (beforeParameter.name !== afterParameter.name || beforeParameter.type !== afterParameter.type) return "breaking";
+    if (beforeParameter.type !== afterParameter.type || beforeParameter.rest !== afterParameter.rest) return "breaking";
     if (beforeParameter.optional && !afterParameter.optional) return "breaking";
   }
   for (const parameter of current.parameters.slice(previous.parameters.length)) {
-    if (!parameter.optional) return "breaking";
+    if (!parameter.optional && !parameter.rest) return "breaking";
   }
   return "compatible";
 }

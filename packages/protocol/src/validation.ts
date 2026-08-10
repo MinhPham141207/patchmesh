@@ -13,6 +13,7 @@ import type {
   FindingFeedbackCreatedEvent,
   ProtocolEvent,
   ToolCompletedEvent,
+  TaskConcurrencyObservedEvent,
 } from "./events.js";
 import type { EventId, Source } from "./identities.js";
 import {
@@ -47,6 +48,7 @@ function createValidators(): { readonly phase0: ValidateFunction; readonly phase
   ajv.addSchema(readSchema(phase2SchemaDirectory, "finding-feedback"));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "dependent-write"));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "derived-evidence"));
+  ajv.addSchema(readSchema(phase2SchemaDirectory, "task-concurrency-observed"));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "event-envelope"));
   const phase0 = ajv.getSchema("https://patchmesh.dev/schemas/phase0/v1/event-envelope.schema.json");
   const phase2 = ajv.getSchema("https://patchmesh.dev/schemas/phase2/v1/event-envelope.schema.json");
@@ -312,6 +314,49 @@ function validateDependentWrite(
       diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/causationId`, "dependent write changed resource crosses repository, domain, correlation, or task"));
     }
   }
+
+  const comparison = write.comparison;
+  if (comparison !== undefined) {
+    const changed = eventsById.get(comparison.changedEventId);
+    const path = `/events/${event.eventId}/payload/write/comparison`;
+    if (changed === undefined) diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `${path}/changedEventId`, "dependent write comparison change is absent"));
+    else if (changed.eventType !== "file.changed" && changed.eventType !== "symbol.changed") diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/changedEventId`, "dependent write comparison must reference a changed resource"));
+    else {
+      if (!sameRepositoryWorkspace(event, changed) || (read?.eventType === "file.read" || read?.eventType === "symbol.read") && (changed.payload.resource.resourceId !== read.payload.resource.resourceId || changed.payload.afterVersion.resourceId !== read.payload.version.resourceId)) {
+        diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/changedEventId`, "dependent write comparison does not match the read resource or domain"));
+      }
+      if (changed.eventType === "symbol.changed") {
+        const evidence = [...eventsById.values()].filter((candidate): candidate is DerivedEvidenceEvent =>
+          candidate.eventType === "evidence.derived"
+          && candidate.payload.evidence.targetEventId === changed.eventId
+          && candidate.payload.evidence.factKind === "symbol"
+          && candidate.payload.evidence.coverage.status === "sufficient",
+        );
+        if (evidence.length !== 1 || evidence[0]!.payload.evidence.integrationTarget !== comparison.integrationTarget) {
+          diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/integrationTarget`, "dependent write comparison integration target does not match sufficient symbol evidence"));
+        }
+      }
+    }
+  }
+}
+
+function validateTaskConcurrencyObservation(event: TaskConcurrencyObservedEvent, eventsById: ReadonlyMap<EventId, ProtocolEvent>, diagnostics: ValidationDiagnostic[]): void {
+  const observation = event.payload.observation;
+  const path = `/events/${event.eventId}/payload/observation`;
+  if (event.source.kind !== "gateway" && event.source.kind !== "adapter") {
+    diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `/events/${event.eventId}/source`, "concurrency observation must be emitted by an adapter or gateway"));
+  }
+  if (observation.firstTaskId === observation.secondTaskId) diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}`, "concurrency observation must identify two distinct tasks"));
+  const first = eventsById.get(observation.firstChangeEventId);
+  const second = eventsById.get(observation.secondChangeEventId);
+  for (const [name, change, taskId] of [["first", first, observation.firstTaskId], ["second", second, observation.secondTaskId]] as const) {
+    if (change === undefined) diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `${path}/${name}ChangeEventId`, "concurrency change event is absent"));
+    else if (change.eventType !== "symbol.changed") diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/${name}ChangeEventId`, "concurrency observation must reference a symbol change"));
+    else if (!sameRepositoryWorkspace(event, change) || change.taskId !== taskId) diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/${name}ChangeEventId`, "concurrency change does not match its task or domain"));
+  }
+  if (first?.eventType === "symbol.changed" && second?.eventType === "symbol.changed" && first.worktreeId === second.worktreeId) {
+    diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}`, "concurrency observation must reference distinct worktrees"));
+  }
 }
 
 function validateDerivedEvidence(
@@ -406,6 +451,7 @@ export function validateEventSet(events: readonly ProtocolEvent[]): readonly Val
     if (event.eventType === "attribution.corrected") validateAttributionCorrection(event, eventsById, diagnostics);
     if (event.eventType === "finding.feedback.created") validateFindingFeedback(event, eventsById, diagnostics);
     if (event.eventType === "write.dependent") validateDependentWrite(event, eventsById, diagnostics);
+    if (event.eventType === "task.concurrency.observed") validateTaskConcurrencyObservation(event, eventsById, diagnostics);
     if (event.eventType === "evidence.derived") validateDerivedEvidence(event, eventsById, diagnostics);
     validateResourcePayload(event, diagnostics);
   }

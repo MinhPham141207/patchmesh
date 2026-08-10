@@ -10,7 +10,7 @@ import type {
   ToolCompletedEvent,
   ToolRequestedEvent,
 } from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
 
 import {
   createPhase2RuntimeRecords,
@@ -41,7 +41,7 @@ const request: ToolRequestedEvent = {
   payload: { toolName: "edit_file", operation: "edit src/api.ts", targetResourceId: `res_${"a".repeat(64)}`, opaque: false },
 };
 
-function changed(eventId: SymbolChangedEvent["eventId"], agentId: SymbolChangedEvent["agentId"], taskId: SymbolChangedEvent["taskId"], value: string): SymbolChangedEvent {
+function changed(eventId: SymbolChangedEvent["eventId"], agentId: SymbolChangedEvent["agentId"], taskId: SymbolChangedEvent["taskId"], value: string, worktreeId = domain.worktreeId): SymbolChangedEvent {
   const resourceId = `res_${"a".repeat(64)}` as const;
   return {
     schemaVersion: 1,
@@ -50,6 +50,7 @@ function changed(eventId: SymbolChangedEvent["eventId"], agentId: SymbolChangedE
     source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "22222222-2222-4222-8222-222222222222" },
     timestamp: "2026-08-09T00:00:01.000Z",
     ...domain,
+    worktreeId,
     agentId,
     taskId,
     correlationId: request.correlationId,
@@ -60,7 +61,7 @@ function changed(eventId: SymbolChangedEvent["eventId"], agentId: SymbolChangedE
       beforeVersion: null,
       afterVersion: {
         resourceId,
-        domain,
+        domain: { ...domain, worktreeId },
         kind: "symbol_signature",
         value,
         evidenceEventIds: [eventId],
@@ -71,7 +72,7 @@ function changed(eventId: SymbolChangedEvent["eventId"], agentId: SymbolChangedE
 }
 
 const first = changed("evt_00000000000000000000000000000002", "agent_alpha", "task_alpha", `sha256:${"b".repeat(64)}`);
-const second = changed("evt_00000000000000000000000000000003", "agent_beta", "task_beta", `sha256:${"c".repeat(64)}`);
+const second = changed("evt_00000000000000000000000000000003", "agent_beta", "task_beta", `sha256:${"c".repeat(64)}`, "wt_44444444-4444-4444-8444-444444444444");
 const completion: ToolCompletedEvent = {
   ...request,
   eventId: "evt_00000000000000000000000000000004",
@@ -81,9 +82,43 @@ const completion: ToolCompletedEvent = {
   payload: { requestEventId: request.eventId, outcome: "succeeded", exitCode: 0, effectEventIds: [first.eventId, second.eventId] },
 };
 
+const overlapCoverageId = projectWorkGraph([request, first, second, completion]).snapshot.coverage
+  .find((coverage) => coverage.presentation === "sufficient" && coverage.evidenceEventIds.includes(first.eventId))!.coverageId;
+
+function derivedSymbolEvidence(target: SymbolChangedEvent, eventId: `evt_${string}`) {
+  return {
+    ...target,
+    schemaVersion: 2 as const,
+    eventId,
+    eventType: "evidence.derived" as const,
+    source: { kind: "analyzer" as const, sourceId: "source_typescript", instanceId: "22222222-2222-4222-8222-222222222222" },
+    causationId: target.eventId,
+    payload: { evidence: {
+      targetEventId: target.eventId, factKind: "symbol" as const,
+      analyzer: { analyzerId: "analyzer_typescript", version: "1" }, configuration: { parser: "typescript" },
+      configurationDigest: "sha256:f8a4fe6e12fee58f81df0e17bc5a91622bc226ca5f4e5502edef985c7d0f3839",
+      sourceEventIds: [target.eventId], integrationTarget: "main", coverage: { status: "sufficient" as const, reason: "supported" },
+      coverageId: overlapCoverageId, stableFactId: target.payload.resource.resourceId, exported: true, normalizedSignature: "export symbol",
+    } },
+  };
+}
+
+const firstEvidence = derivedSymbolEvidence(first, "evt_00000000000000000000000000000005");
+const secondEvidence = derivedSymbolEvidence(second, "evt_00000000000000000000000000000006");
+const concurrencyObservation = {
+  ...first,
+  schemaVersion: 2 as const,
+  eventId: "evt_00000000000000000000000000000007" as const,
+  eventType: "task.concurrency.observed" as const,
+  source: { kind: "gateway" as const, sourceId: "source_gateway", instanceId: "11111111-1111-4111-8111-111111111111" },
+  causationId: first.eventId,
+  taskId: null,
+  payload: { observation: { firstTaskId: "task_alpha" as const, secondTaskId: "task_beta" as const, firstChangeEventId: first.eventId, secondChangeEventId: second.eventId, integrationTarget: "main", coverageId: overlapCoverageId } },
+};
+
 test("derives, persists, and deduplicates report-only same-symbol records from replayable evidence", () => {
-  const events: readonly ProtocolEvent[] = [request, first, second, completion];
-  const reversed = [completion, second, first, request];
+  const events: readonly ProtocolEvent[] = [request, first, second, completion, firstEvidence, secondEvidence, concurrencyObservation];
+  const reversed = [concurrencyObservation, secondEvidence, firstEvidence, completion, second, first, request];
   assert.equal(deriveSameSymbolEvidence(events).length, 2);
   const records = createSameSymbolRuntimeRecords(events);
   assert.deepEqual(createSameSymbolRuntimeRecords(reversed), records);
@@ -104,6 +139,23 @@ test("derives, persists, and deduplicates report-only same-symbol records from r
   } finally {
     store.close();
   }
+});
+
+test("rejects mismatched or competing concurrency coverage observations deterministically", () => {
+  const mismatched = {
+    ...concurrencyObservation,
+    payload: { observation: { ...concurrencyObservation.payload.observation, coverageId: `coverage_${"2".repeat(32)}` } },
+  };
+  assert.deepEqual(deriveSameSymbolEvidence([request, first, second, firstEvidence, secondEvidence, mismatched]), []);
+
+  const competing = {
+    ...concurrencyObservation,
+    eventId: "evt_00000000000000000000000000000008" as const,
+    payload: { observation: { ...concurrencyObservation.payload.observation, integrationTarget: "release" } },
+  };
+  const forward = [request, first, second, firstEvidence, secondEvidence, concurrencyObservation, competing] as const;
+  assert.deepEqual(deriveSameSymbolEvidence(forward), []);
+  assert.deepEqual(deriveSameSymbolEvidence([...forward].reverse()), []);
 });
 
 test("suppresses symbol changes when coverage cannot be proven", () => {
@@ -223,6 +275,10 @@ test("reconstructs and persists stale-read findings from causally covered V2 wri
     causationId: writeRequest.eventId,
     payload: { requestEventId: writeRequest.eventId, outcome: "succeeded", exitCode: 0, effectEventIds: [written.eventId] },
   };
+  const coverageFor = (events: readonly ProtocolEvent[], evidenceEventId: string) => projectWorkGraph(events).snapshot.coverage
+    .find((coverage) => coverage.presentation === "sufficient" && coverage.evidenceEventIds.includes(evidenceEventId))!.coverageId;
+  const writeCoverageId = coverageFor([writeRequest, written, writeCompletion], written.eventId);
+  const comparisonCoverageId = coverageFor([currentRequest, current, currentCompletion], current.eventId);
   const dependentWrite: DependentWriteEvent = {
     ...writeRequest,
     schemaVersion: 2,
@@ -233,7 +289,8 @@ test("reconstructs and persists stale-read findings from causally covered V2 wri
       dependencyId: `dep_${"f".repeat(32)}`,
       resourceId: writtenResourceId,
       dependsOnReadEventId: read.eventId,
-      coverageId: "coverage_placeholder",
+      coverageId: writeCoverageId,
+      comparison: { changedEventId: current.eventId, coverageId: comparisonCoverageId, integrationTarget: "main" },
     } },
   };
   const dependency: DependencyChangedEvent = {
@@ -274,6 +331,15 @@ test("reconstructs and persists stale-read findings from causally covered V2 wri
   assert.equal(records.length, 1);
   assert.equal(records[0]?.finding.payload.finding.findingType, "stale_read_before_write");
   assert.equal(records[0]?.finding.payload.finding.evidenceEventIds.includes(historicalChange.eventId), false);
+
+  const mismatchedComparison = {
+    ...dependentWrite,
+    payload: { write: {
+      ...dependentWrite.payload.write,
+      comparison: { ...dependentWrite.payload.write.comparison!, coverageId: `coverage_${"2".repeat(32)}` },
+    } },
+  };
+  assert.equal(deriveStaleReadEvidence(events.map((event) => event.eventId === dependentWrite.eventId ? mismatchedComparison : event)).writes.length, 0);
 });
 
 test("reconstructs contract invalidation from durable cross-worktree history", () => {

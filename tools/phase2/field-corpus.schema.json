@@ -13,7 +13,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["caseId", "caseKind", "tracePaths", "scenario", "detector", "expectedFinding", "observedFinding", "confidence", "reviewerId", "reviewedAt", "coverage", "limitations", "replayDigest", "detectorOutputDigest", "holdout"],
+        "required": ["caseId", "caseKind", "tracePaths", "scenario", "detector", "expectedFinding", "observedFinding", "confidence", "reviewerId", "reviewedAt", "coverage", "limitations", "replayDigest", "detectorOutputPath", "detectorOutputDigest", "holdout"],
         "properties": {
           "caseId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
           "caseKind": { "enum": ["trace_integrity", "detector_quality"] },
@@ -28,6 +28,7 @@
           "coverage": { "enum": ["sufficient", "degraded", "unknown"] },
           "limitations": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 128 },
           "replayDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "detectorOutputPath": { "type": ["string", "null"], "minLength": 1 },
           "detectorOutputDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
           "holdout": { "type": "boolean" }
         }

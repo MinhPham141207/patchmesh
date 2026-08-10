@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase2/v1/task-concurrency-observed.schema.json",
+  "type": "object",
+  "properties": {
+    "firstTaskId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/taskId" },
+    "secondTaskId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/taskId" },
+    "firstChangeEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
+    "secondChangeEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
+    "integrationTarget": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" },
+    "coverageId": { "$ref": "../../phase0/v1/coverage.schema.json#/$defs/coverageId" }
+  },
+  "required": ["firstTaskId", "secondTaskId", "firstChangeEventId", "secondChangeEventId", "integrationTarget", "coverageId"],
+  "additionalProperties": false
+}

@@ -19,6 +19,7 @@ opencode.json
 node_modules/
 packages/*/dist/
 apps/*/dist/
+tools/*/dist/
 
 # Agent evidence runtime state
 .evidence/.locks/

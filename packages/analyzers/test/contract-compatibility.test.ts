@@ -13,11 +13,35 @@ test("classifies unchanged and additive optional signatures as compatible", () =
   );
 });
 
+test("classifies renamed positional parameters with unchanged semantics as compatible", () => {
+  assert.equal(
+    classifyContractCompatibility(
+      "export function calculate(value: number, precision?: number): number",
+      "export function calculate(input: number, digits?: number): number",
+    ),
+    "compatible",
+  );
+  assert.equal(
+    classifyContractCompatibility(
+      "export function calculate(value: number, ...weights: number[]): number",
+      "export function calculate(input: number, ...factors: number[]): number",
+    ),
+    "compatible",
+  );
+});
+
 test("classifies removed and incompatible signatures as breaking", () => {
   assert.equal(
     classifyContractCompatibility(
       "export function calculate(value: number): number",
       "export function calculate(value: string): number",
+    ),
+    "breaking",
+  );
+  assert.equal(
+    classifyContractCompatibility(
+      "export function calculate(value: number, ...weights: number[]): number",
+      "export function calculate(value: number, weights?: number[]): number",
     ),
     "breaking",
   );

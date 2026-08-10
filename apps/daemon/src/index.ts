@@ -179,10 +179,14 @@ export function createDaemon(options: DaemonOptions): PatchMeshDaemon {
         throw new ReadServiceError("unavailable", "Phase 2 detection requires a writable event store");
       }
       const writableStore = store;
-      return createPhase2RuntimeRecords(writableStore.read()).map((record) => ({
-        finding: writableStore.append(record.finding),
-        decision: writableStore.append(record.decision),
-      }));
+      try {
+        return createPhase2RuntimeRecords(writableStore.read()).map((record) => ({
+          finding: writableStore.append(record.finding),
+          decision: writableStore.append(record.decision),
+        }));
+      } catch {
+        throw new ReadServiceError("unavailable", "Phase 2 detection is unavailable because durable replay validation failed");
+      }
     },
     close: () => {
       store?.close();

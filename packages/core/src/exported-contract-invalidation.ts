@@ -16,7 +16,7 @@ export interface ExportedContractChangeEvidence {
   readonly afterVersion: ResourceVersion;
   readonly breaking: boolean;
   readonly coverageId: CoverageId;
-  readonly integrationTarget?: string;
+  readonly integrationTarget: string;
 }
 
 export interface ConsumerContractDependencyEvidence {
@@ -27,7 +27,7 @@ export interface ConsumerContractDependencyEvidence {
   readonly affectedTaskId: TaskId | null;
   readonly observedContractVersion: ResourceVersion;
   readonly coverageId: CoverageId;
-  readonly integrationTarget?: string;
+  readonly integrationTarget: string;
 }
 
 export function groupConsumersByContract(
@@ -64,9 +64,7 @@ export function detectExportedContractInvalidation(
 ): DetectorFinding | null {
   if (!change.breaking
     || change.contractResourceId !== consumer.contractResourceId
-    || (change.integrationTarget !== undefined
-      && consumer.integrationTarget !== undefined
-      && change.integrationTarget !== consumer.integrationTarget)
+    || change.integrationTarget !== consumer.integrationTarget
     || change.beforeVersion.value === null
     || matchesVersion(change.beforeVersion, change.afterVersion)
     || !matchesVersion(change.beforeVersion, consumer.observedContractVersion)) {

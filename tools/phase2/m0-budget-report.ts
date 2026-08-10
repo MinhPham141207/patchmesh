@@ -4,7 +4,6 @@ export interface M0WorkloadInput {
   readonly workloadId: string;
   readonly source: "node_observation" | "evidence_recorder";
   readonly samplesMs: readonly number[];
-  readonly p95Ms: number;
   readonly budgetMs: number;
   readonly failures: number;
 }
@@ -24,25 +23,58 @@ export interface M0BudgetReport {
   readonly owner: string | null;
   readonly dueGate: string | null;
   readonly environment: M0BudgetInput["environment"];
-  readonly workloads: readonly (M0WorkloadInput & { readonly accepted: boolean })[];
+  readonly workloads: readonly (M0WorkloadInput & { readonly p95Ms: number | null; readonly accepted: boolean })[];
+}
+
+const minimumSamplesPerWorkload = 5;
+
+export const nodeObservationBoundaryTiers = {
+  small: 30,
+  medium: 60,
+  large: 120,
+} as const;
+
+type NodeObservationBoundaryTier = keyof typeof nodeObservationBoundaryTiers;
+
+/** Uses the nearest-rank percentile so the reported p95 is always one observed sample. */
+export function p95FromSamples(samplesMs: readonly number[]): number | null {
+  if (samplesMs.length === 0) return null;
+  if (!samplesMs.every((sample) => Number.isFinite(sample) && sample >= 0)) return null;
+  const ordered = [...samplesMs].sort((left, right) => left - right);
+  return ordered[Math.ceil(ordered.length * 0.95) - 1] ?? null;
 }
 
 export function evaluateM0Budget(input: M0BudgetInput): M0BudgetReport {
+  const requiredTiers = new Set<NodeObservationBoundaryTier>(Object.keys(nodeObservationBoundaryTiers) as NodeObservationBoundaryTier[]);
+  const observedTiers = new Set(input.workloads.map((workload) => workload.workloadId));
+  const hasRequiredTiers = input.workloads.length === requiredTiers.size
+    && [...requiredTiers].every((tier) => observedTiers.has(tier));
   const recorderOnly = input.workloads.some((workload) => workload.source === "evidence_recorder");
-  const workloads = input.workloads.map((workload) => ({
-    ...workload,
-    accepted: workload.source === "node_observation"
-      && workload.failures === 0
-      && workload.samplesMs.length > 0
-      && workload.p95Ms <= workload.budgetMs,
-  }));
-  const allAccepted = workloads.length > 0 && workloads.every((workload) => workload.accepted);
+  const workloads = input.workloads.map((workload) => {
+    const p95Ms = p95FromSamples(workload.samplesMs);
+    const fixedBudget = nodeObservationBoundaryTiers[workload.workloadId as NodeObservationBoundaryTier];
+    return {
+      ...workload,
+      p95Ms,
+      accepted: fixedBudget !== undefined
+        && workload.source === "node_observation"
+        && Number.isInteger(workload.failures)
+        && workload.failures === 0
+        && workload.budgetMs === fixedBudget
+        && workload.samplesMs.length >= minimumSamplesPerWorkload
+        && p95Ms !== null
+        && p95Ms <= workload.budgetMs,
+    };
+  });
+  const allAccepted = hasRequiredTiers && workloads.every((workload) => workload.accepted);
   const decision = allAccepted && !recorderOnly ? "accepted" : "deferred";
   const reason = recorderOnly
     ? "recorder-only evidence cannot accept the NodeObservationBoundary interception budget"
-    : allAccepted
-      ? "all declared observation workloads are within budget"
-      : "one or more observation workloads are missing, failed, or over budget";
+    : !hasRequiredTiers
+      ? "NodeObservationBoundary evidence requires exactly the small, medium, and large workload tiers"
+      : allAccepted
+        ? "all required NodeObservationBoundary workloads are within their fixed budgets"
+        : "one or more required observation workloads are failed or over their fixed budget";
   if (decision === "deferred" && (input.owner === undefined || input.dueGate === undefined)) {
     throw new Error("deferred M0 decisions require owner and dueGate");
   }
