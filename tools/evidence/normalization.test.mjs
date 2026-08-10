@@ -33,3 +33,12 @@ test("redacts secret keys and bounds output", () => {
   assert.equal(JSON.stringify(event).includes("token="), false);
   assert.equal(event.result.outputDigest.startsWith("sha256:"), true);
 });
+
+test("counts nested secret redaction in structured output", () => {
+  const event = normalizeHookPayload({
+    action: "tool.completed",
+    result: { status: "succeeded", output: { apiKey: "super-secret" } },
+  }, { runId: "run-a", repositoryRoot: null, now: "2026-08-10T00:00:00.000Z" });
+
+  assert.equal(event.result.redactionCount, 1);
+});

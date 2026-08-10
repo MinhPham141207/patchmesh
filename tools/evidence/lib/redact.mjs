@@ -6,21 +6,10 @@ function isSecretKey(key) {
   return SECRET_KEY.test(key);
 }
 
-function redactNested(value, placeholder) {
-  if (Array.isArray(value)) return value.map((item) => redactNested(item, placeholder));
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, child]) => [
-      key,
-      isSecretKey(key) ? placeholder : redactNested(child, placeholder),
-    ]));
-  }
-  return value;
-}
-
 export function redactValue(value, { maxTextBytes = 4096, placeholder = "[REDACTED]" } = {}) {
   if (typeof value !== "string") {
-    const redactedValue = redactNested(value, placeholder);
-    return { value: redactedValue, redacted: redactedValue !== value, digest: sha256(value), redactionCount: 0 };
+    const redacted = redactObject(value, { placeholder });
+    return { value: redacted.value, redacted: redacted.redactionCount > 0, digest: sha256(value), redactionCount: redacted.redactionCount };
   }
   const redactedValue = value.length > maxTextBytes ? `${value.slice(0, maxTextBytes)}${placeholder}` : value;
   return {
