@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "patchmesh/evidence/run-manifest-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "recorderVersion", "runId", "parentRunId", "parentTaskId", "agentId", "taskId", "worktreeId", "startedAt", "endedAt", "status", "eventCount", "firstSequence", "lastSequence", "traceDigest", "errors", "gaps"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "recorderVersion": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "parentRunId": { "type": ["string", "null"] },
+    "parentTaskId": { "type": ["string", "null"] },
+    "agentId": { "type": ["string", "null"] },
+    "taskId": { "type": ["string", "null"] },
+    "worktreeId": { "type": ["string", "null"] },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "endedAt": { "type": ["string", "null"], "format": "date-time" },
+    "status": { "enum": ["running", "succeeded", "failed", "interrupted", "unknown"] },
+    "eventCount": { "type": "integer", "minimum": 0 },
+    "firstSequence": { "type": ["integer", "null"], "minimum": 1 },
+    "lastSequence": { "type": ["integer", "null"], "minimum": 1 },
+    "traceDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "errors": { "type": "array", "items": { "type": "string" }, "maxItems": 128 },
+    "gaps": { "type": "array", "items": { "type": "string" }, "maxItems": 128 }
+  }
+}

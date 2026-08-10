@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "maxTextBytes": 4096,
+  "maxErrorBytes": 2048,
+  "maxArrayEntries": 128,
+  "redactionPlaceholder": "[REDACTED]"
+}
