@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "m0_interception_budget",
+  "decision": "deferred",
+  "reason": "small and large NodeObservationBoundary workloads exceeded the provisional p95 budgets",
+  "owner": "phase2-runtime",
+  "dueGate": "M0 observation benchmark remediation",
+  "generatedAt": "2026-08-10T09:51:01.240Z",
+  "commit": "47db1e8092e4b099b54f53f137d3d273d1140e99",
+  "environment": {
+    "nodeVersion": "v24.15.0",
+    "os": "win32",
+    "osVersion": "10.0.26200",
+    "architecture": "x64",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+    "memoryBytes": 16813264896
+  },
+  "workloads": [
+    {
+      "workloadId": "small",
+      "source": "node_observation",
+      "fileCount": 1000,
+      "warmupRuns": 0,
+      "samplesMs": [438.2049000000002, 389.66020000000026, 297.91470000000027, 325.03279999999995, 360.1239999999998],
+      "p50Ms": 360.1239999999998,
+      "p95Ms": 438.2049000000002,
+      "budgetMs": 250,
+      "failures": 0,
+      "accepted": false
+    },
+    {
+      "workloadId": "medium",
+      "source": "node_observation",
+      "fileCount": 10000,
+      "warmupRuns": 0,
+      "samplesMs": [701.7691000000013, 500.1193999999996, 695.4671000000017, 700.3289999999979, 550.6799000000028],
+      "p50Ms": 695.4671000000017,
+      "p95Ms": 701.7691000000017,
+      "budgetMs": 1500,
+      "failures": 0,
+      "accepted": true
+    },
+    {
+      "workloadId": "large",
+      "source": "node_observation",
+      "fileCount": 50000,
+      "warmupRuns": 0,
+      "samplesMs": [1851.512000000017, 2297.0796000000264, 5538.082200000004, 2371.2674000000115, 2061.688699999999],
+      "p50Ms": 2297.0796000000264,
+      "p95Ms": 5538.082200000004,
+      "budgetMs": 5000,
+      "failures": 0,
+      "accepted": false
+    }
+  ]
+}

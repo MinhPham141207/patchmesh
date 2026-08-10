@@ -5,9 +5,13 @@ import {
   deriveDependencyChangedEvents,
   deriveEvidenceFacts,
   deriveSymbolChangedEvents,
+  configurationDigest,
   resolveLocalContractDependencies,
   type DerivedEvidenceFacts,
+  type AnalysisCoverage,
   type SourceAnalysisInput,
+  type SourceFacts,
+  type SymbolEvidenceFact,
   type SymbolEventContext,
 } from "@patchmesh/analyzers";
 import {
@@ -17,6 +21,7 @@ import {
   type DependentWriteEvent,
   type EventId,
   type FileChangedEvent,
+  type DerivedEvidenceEvent,
   type FileReadEvent,
   type LogicalResource,
   type ProtocolEvent,
@@ -272,6 +277,87 @@ function createFileReadEvent(
   };
 }
 
+function createDerivedEvidenceEvent(
+  target: ProtocolEvent,
+  eventId: EventId,
+  sourceFacts: SourceFacts,
+  factKind: "symbol" | "dependency",
+  stableFactId: string,
+  sourceEventIds: readonly EventId[],
+  exported: boolean,
+  coverageId: string,
+  normalizedSignature: string | null,
+): DerivedEvidenceEvent {
+  return {
+    schemaVersion: 2,
+    eventId,
+    eventType: "evidence.derived",
+    source: target.source,
+    timestamp: target.timestamp,
+    repositoryId: target.repositoryId,
+    workspaceId: target.workspaceId,
+    worktreeId: target.worktreeId,
+    agentId: target.agentId,
+    taskId: target.taskId,
+    correlationId: target.correlationId,
+    causationId: target.eventId,
+    sourceSequence: null,
+    payload: {
+      evidence: {
+        targetEventId: target.eventId,
+        factKind,
+        analyzer: sourceFacts.analyzer,
+        configuration: sourceFacts.configuration,
+        configurationDigest: configurationDigest(sourceFacts.configuration),
+        sourceEventIds: [...new Set(sourceEventIds)].sort((left, right) => left.localeCompare(right)),
+        integrationTarget: sourceFacts.integrationTarget,
+        coverage: sourceFacts.coverage,
+        coverageId: coverageId as DerivedEvidenceEvent["payload"]["evidence"]["coverageId"],
+        stableFactId: stableFactId as DerivedEvidenceEvent["payload"]["evidence"]["stableFactId"],
+        exported,
+        normalizedSignature,
+      },
+    },
+  };
+}
+
+function persistedContractFacts(events: readonly ProtocolEvent[]): readonly SymbolEvidenceFact[] {
+  const eventsById = new Map(events.map((event) => [event.eventId, event] as const));
+  const facts: SymbolEvidenceFact[] = [];
+  for (const metadata of events) {
+    if (metadata.eventType !== "evidence.derived"
+      || metadata.payload.evidence.factKind !== "symbol"
+      || !metadata.payload.evidence.exported
+      || metadata.payload.evidence.coverage.status !== "sufficient"
+      || metadata.payload.evidence.normalizedSignature === null) continue;
+    const target = eventsById.get(metadata.payload.evidence.targetEventId);
+    if (target?.eventType !== "symbol.changed") continue;
+    const coverage: AnalysisCoverage = metadata.payload.evidence.coverage.status === "sufficient"
+      ? { status: "sufficient", reason: "supported" }
+      : { status: "degraded", reason: "opaque_source" };
+    const sourceFacts: SourceFacts = {
+      resource: target.payload.resource,
+      version: target.payload.afterVersion,
+      symbols: [],
+      imports: [],
+      coverage,
+      sourceEventIds: metadata.payload.evidence.sourceEventIds,
+      analyzer: metadata.payload.evidence.analyzer,
+      configuration: metadata.payload.evidence.configuration,
+      integrationTarget: metadata.payload.evidence.integrationTarget,
+    };
+    facts.push({
+      resource: target.payload.resource,
+      version: target.payload.afterVersion,
+      exported: true,
+      signature: metadata.payload.evidence.normalizedSignature,
+      coverageId: metadata.payload.evidence.coverageId,
+      sourceFacts,
+    });
+  }
+  return facts.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+}
+
 function createDependentWriteEvent(
   call: McpToolCall,
   context: McpCallContext,
@@ -379,24 +465,64 @@ export class McpProxy {
       facts.symbols.map(() => this.createEventId()),
       symbolContext,
     );
-    try {
-      for (const symbolEvent of symbolEvents) appendValidated(symbolEvent, this.eventStore);
+     try {
+       for (const [index, symbolEvent] of symbolEvents.entries()) {
+         appendValidated(symbolEvent, this.eventStore);
+         const fact = facts.symbols[index];
+         if (fact === undefined) return "derived symbol fact is missing its event";
+         appendValidated(createDerivedEvidenceEvent(
+           symbolEvent,
+           this.createEventId(),
+           facts.source,
+           "symbol",
+           fact.resource.resourceId,
+            fact.sourceFacts.sourceEventIds,
+            fact.exported,
+            fact.coverageId,
+            fact.signature,
+         ), this.eventStore);
+       }
     } catch {
       return "derived symbol event persistence failed";
     }
     return { facts, context: symbolContext, symbolEventIds: symbolEvents.map((symbolEvent) => symbolEvent.eventId) };
   }
 
-  private persistResolvedDependencies(analyses: readonly DerivedSourceAnalysis[]): string | null {
-    const dependencies = resolveLocalContractDependencies(analyses.map((analysis) => analysis.facts));
+  private persistResolvedDependencies(
+    analyses: readonly DerivedSourceAnalysis[],
+    observedRead: McpToolCall["observedRead"],
+  ): string | null {
+    const observedVersions = observedRead === undefined
+      ? []
+      : [{
+          resourceId: observedRead.resource.resourceId,
+          kind: observedRead.version.kind,
+          value: observedRead.version.value,
+        }];
+    const dependencies = resolveLocalContractDependencies(
+      analyses.map((analysis) => analysis.facts),
+      this.eventStore.read === undefined ? [] : persistedContractFacts(this.eventStore.read()),
+      observedVersions,
+    );
     try {
       for (const dependency of dependencies) {
         const sourceEventId = dependency.consumer.sourceFacts.sourceEventIds[0];
         const analysis = analyses.find((candidate) => candidate.facts.source.sourceEventIds[0] === sourceEventId);
         if (analysis === undefined) return "resolved dependency is missing its consumer source context";
-        const event = deriveDependencyChangedEvents([dependency], [this.createEventId()], analysis.context)[0];
+         const event = deriveDependencyChangedEvents([dependency], [this.createEventId()], analysis.context)[0];
         if (event === undefined) return "resolver did not produce a dependency event";
         appendValidated(event, this.eventStore);
+        appendValidated(createDerivedEvidenceEvent(
+          event,
+          this.createEventId(),
+          dependency.consumer.sourceFacts,
+          "dependency",
+          event.payload.dependency.dependencyId,
+           event.payload.dependency.evidenceEventIds,
+           false,
+           dependency.consumer.coverageId,
+           dependency.contract.signature,
+        ), this.eventStore);
       }
     } catch {
       return "derived dependency event persistence failed";
@@ -599,7 +725,7 @@ export class McpProxy {
       }
     }
 
-    const dependencyReason = this.persistResolvedDependencies(sourceAnalyses);
+    const dependencyReason = this.persistResolvedDependencies(sourceAnalyses, call.observedRead);
     if (dependencyReason !== null) {
       analysisDiagnostics.push({ path: "dependencies", reason: dependencyReason });
       observationGaps.push({ kind: "unverified", scope: "source:dependencies", reason: dependencyReason });

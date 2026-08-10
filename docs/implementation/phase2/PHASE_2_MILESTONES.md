@@ -21,13 +21,14 @@ automatically revalidate work.
 
 | Milestone | Current evidence | Status |
 | --- | --- | --- |
+| M0 budget | Real `NodeObservationBoundary` measurements with raw samples and a deferred decision | Deferred — small and large tiers exceed provisional p95 budgets |
 | M1 contracts | Immutable V2 feedback; replayed finding/decision/delivery/feedback views; deterministic feedback/delivery writes; replay-time V2 reference checks | Partial — append-time out-of-order buffering and a complete compatibility audit remain |
-| M2 evidence | TypeScript/JavaScript source facts, symbol events, resolver-confirmed dependency events, degraded unsupported/opaque handling | Partial — analyzer facts are not durably replayed across adapter restarts |
+| M2 evidence | TypeScript/JavaScript source facts, durable V2 analyzer provenance, symbol events, resolver-confirmed dependency events, degraded unsupported/opaque handling | Partial — broader analyzer history and supported-language coverage remain |
 | M3 overlap | Deterministic same-symbol detector plus a real linked-worktree MCP/watcher golden path through sufficient coverage and durable replay/runtime append | Partial — broader labeled corpus and integration-target cases remain |
 | M4 stale read | Explicit `write.dependent` capture, durable-reference guard, replay reconstruction, and report-only daemon path | Partial — integration-target provenance, corrected-attribution cases, and labeled corpus acceptance remain |
-| M5 contracts | Resolver-confirmed dependency facts plus a replay/daemon path for explicitly deleted contracts | Partial — durable signature compatibility classification and complete contract history are not yet captured |
+| M5 contracts | Cross-worktree resolver, multiple-consumer retention, deterministic supported-function compatibility classification, durable history, and real golden path | Partial — complete contract history and broader signature compatibility remain |
 | M6 report-only | Policy, explanation, append-only feedback CLI, and daemon delivery/feedback writers | Partial — delivery command UX and full CLI scenario coverage remain |
-| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; explicit engineering thresholds and evaluator | Partial — synthetic engineering gate passes; field-reviewed corpus and calibration remain required |
+| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; fail-closed field corpus/evaluator | Partial — current field corpus has trace-integrity only; reviewed detector cases and calibration remain required |
 
 ## Milestone Order
 
@@ -35,7 +36,7 @@ Milestones are ordered by dependency. Each milestone must end with executable te
 recorded measurement evidence; detector scaffolding alone does not complete a
 milestone.
 
-### M0: Phase 1 Exit Gate (Planned)
+### M0: Phase 1 Exit Gate (Deferred)
 
 This is a prerequisite gate, not a detector milestone.
 
@@ -56,6 +57,10 @@ This is a prerequisite gate, not a detector milestone.
 - The Phase 1 overhead budget is explicitly accepted, deferred with an owner and due
   gate, or rejected with a documented reason; detector work cannot silently inherit
   an unreviewed performance baseline.
+- Current decision: deferred to `phase2-runtime` at the `M0 observation benchmark
+  remediation` gate. Raw measurements are recorded in
+  [`benchmarks/phase2-m0-budget.json`](../../benchmarks/phase2-m0-budget.json); the
+  small and large tiers exceed the provisional p95 budgets.
 - Incremental and cold replay produce equivalent graph state.
 - Security and degraded-observability fixtures pass.
 - The Phase 1 boundary remains report-only and replayable.

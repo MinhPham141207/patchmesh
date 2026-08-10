@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   detectExportedContractInvalidation,
+  groupConsumersByContract,
   type ConsumerContractDependencyEvidence,
   type ExportedContractChangeEvidence,
 } from "../src/index.js";
@@ -68,4 +69,22 @@ test("reports a known consumer that observed the contract in another worktree", 
 test("does not report compatible changes or consumers on a different version", () => {
   assert.equal(detectExportedContractInvalidation(change(false), consumer()), null);
   assert.equal(detectExportedContractInvalidation(change(), consumer("sha256:other")), null);
+});
+
+test("retains every consumer when grouping contract dependencies", () => {
+  const first = consumer();
+  const second = {
+    ...consumer(),
+    eventId: "evt_00000000000000000000000000000004",
+    dependencyId: "dep_contract_second_consumer",
+    consumerResourceId: `res_${"e".repeat(64)}`,
+    affectedTaskId: "task_second_consumer",
+  } satisfies ConsumerContractDependencyEvidence;
+
+  const grouped = groupConsumersByContract([first, second]);
+
+  assert.deepEqual(
+    grouped.get(contractResourceId)?.map((entry) => entry.dependencyId),
+    ["dep_contract_consumer", "dep_contract_second_consumer"],
+  );
 });

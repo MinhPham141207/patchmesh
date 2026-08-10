@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "corpusVersion": "field-v1",
+  "evidenceKind": "field_review",
+  "cases": [
+    {
+      "caseId": "trace-integrity-parent-child-failure",
+      "caseKind": "trace_integrity",
+      "tracePaths": [".evidence/trace/run_parent.jsonl", ".evidence/trace/run_child.jsonl"],
+      "scenario": "parent-child ordering and real subagent failure attribution",
+      "detector": null,
+      "expectedFinding": null,
+      "observedFinding": null,
+      "confidence": null,
+      "reviewerId": "phase2-review",
+      "reviewedAt": "2026-08-10T09:00:00.000Z",
+      "coverage": "unknown",
+      "limitations": ["post-tool effect observation was unavailable", "not a detector-quality label"],
+      "replayDigest": "sha256:c3a07920731d817d9b16506ad17731f0f74a7046a3b717dd99d9347ae9073b40",
+      "detectorOutputDigest": null,
+      "holdout": false
+    }
+  ]
+}

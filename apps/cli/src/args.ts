@@ -30,6 +30,7 @@ const commands = new Set<CommandName>(["status", "agents", "events", "graph", "o
 const eventTypes = new Set<EventType>([
   "tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read",
   "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected",
+  "evidence.derived",
   "finding.created", "finding.feedback.created", "write.dependent", "decision.created", "validity.changed", "decision.delivery.changed",
 ]);
 const dispositions = new Set<FindingFeedback["disposition"]>(["dismissed", "acknowledged", "not_affected", "already_handled", "needs_more_information"]);

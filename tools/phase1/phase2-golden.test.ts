@@ -114,7 +114,7 @@ test("real MCP calls across linked worktrees produce a covered same-symbol findi
     await withTemporaryDatabase(async (databasePath) => {
       const store = SqliteEventStore.open(databasePath);
       try {
-        const producer = await createProxy(store, [10, 11, 12, 13]).execute(
+        const producer = await createProxy(store, [10, 11, 12, 13, 14]).execute(
           editCall,
           createContext(
             producerWorktree,
@@ -134,7 +134,7 @@ test("real MCP calls across linked worktrees produce a covered same-symbol findi
             };
           },
         );
-        const consumer = await createProxy(store, [20, 21, 22, 23]).execute(
+        const consumer = await createProxy(store, [20, 21, 22, 23, 24]).execute(
           editCall,
           createContext(
             consumerWorktree,
@@ -175,6 +175,94 @@ test("real MCP calls across linked worktrees produce a covered same-symbol findi
         const projected = projectWorkGraph(store.read()).snapshot;
         assert.equal(projected.findings.length, 1);
         assert.equal(projected.decisions.length, 1);
+      } finally {
+        store.close();
+      }
+    });
+  });
+});
+
+test("real linked worktrees produce a durable exported-contract invalidation", async () => {
+  await withTemporaryDirectory("patchmesh-phase2-contract-golden-", async (root) => {
+    await runGit(root, "init", "-b", "main");
+    await runGit(root, "config", "user.email", "phase2@example.invalid");
+    await runGit(root, "config", "user.name", "PatchMesh Phase 2");
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "api.ts"), "export function calculateTotal(value: number): number { return value; }\n");
+    await writeFile(join(root, "src", "consumer.ts"), 'import { calculateTotal } from "./api";\nexport function use(value: number): number { return calculateTotal(value); }\n');
+    await runGit(root, "add", ".");
+    await runGit(root, "commit", "-m", "phase 2 contract baseline");
+
+    await withTemporaryDatabase(async (databasePath) => {
+      const store = SqliteEventStore.open(databasePath);
+      try {
+        const apiResourceId = fileResourceId(repositoryId, "src/api.ts");
+        const consumerResourceId = fileResourceId(repositoryId, "src/consumer.ts");
+        const history = await createProxy(store, [30, 31, 32, 33, 34]).execute(
+          { ...editCall, targetResourceId: apiResourceId },
+          createContext(
+            root,
+            "wt_33333333-3333-4333-8333-333333333333",
+            "agent_producer",
+            "task_producer",
+            "corr_33333333333333333333333333333333",
+            0,
+          ),
+          async () => {
+            await writeFile(join(root, "src", "api.ts"), "export function calculateTotal(value: number, tax?: number): number { return value + (tax ?? 0); }\n");
+            return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [apiResourceId] };
+          },
+        );
+        assert.equal(history.coverage?.presentation, "sufficient");
+        await runGit(root, "add", ".");
+        await runGit(root, "commit", "-m", "phase 2 contract v1");
+
+        const producerWorktree = join(root, "contract-producer-worktree");
+        const consumerWorktree = join(root, "contract-consumer-worktree");
+        await runGit(root, "worktree", "add", "--detach", producerWorktree, "HEAD");
+        await runGit(root, "worktree", "add", "--detach", consumerWorktree, "HEAD");
+
+        const consumer = await createProxy(store, [40, 41, 42, 43, 44, 45, 46]).execute(
+          { ...editCall, targetResourceId: consumerResourceId },
+          createContext(
+            consumerWorktree,
+            "wt_22222222-2222-4222-8222-222222222222",
+            "agent_consumer",
+            "task_consumer",
+            "corr_22222222222222222222222222222222",
+            2,
+          ),
+          async () => {
+            await writeFile(join(consumerWorktree, "src", "consumer.ts"), 'import { calculateTotal } from "./api";\nexport function use(value: number): number { return calculateTotal(value) + 1; }\n');
+            return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [consumerResourceId] };
+          },
+        );
+        assert.equal(consumer.coverage?.presentation, "sufficient");
+
+        const producer = await createProxy(store, [50, 51, 52, 53, 54]).execute(
+          { ...editCall, targetResourceId: apiResourceId },
+          createContext(
+            producerWorktree,
+            "wt_11111111-1111-4111-8111-111111111111",
+            "agent_producer",
+            "task_producer",
+            "corr_11111111111111111111111111111111",
+            4,
+          ),
+          async () => {
+            await writeFile(join(producerWorktree, "src", "api.ts"), "export function calculateTotal(value: string): number { return Number(value); }\n");
+            return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [apiResourceId] };
+          },
+        );
+        assert.equal(producer.coverage?.presentation, "sufficient");
+
+        const events = store.read();
+        assert.equal(events.filter((event) => event.eventType === "evidence.derived").length >= 4, true);
+        assert.equal(events.some((event) => event.eventType === "dependency.changed"), true);
+        const records = createPhase2RuntimeRecords(events);
+        const contractRecords = records.filter((record) => record.finding.payload.finding.findingType === "exported_contract_invalidation");
+        assert.equal(contractRecords.length, 1);
+        assert.equal(contractRecords[0]?.decision.payload.decision.gatewayDirective, "allow_with_notice");
       } finally {
         store.close();
       }

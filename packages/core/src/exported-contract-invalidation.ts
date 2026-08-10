@@ -16,6 +16,7 @@ export interface ExportedContractChangeEvidence {
   readonly afterVersion: ResourceVersion;
   readonly breaking: boolean;
   readonly coverageId: CoverageId;
+  readonly integrationTarget?: string;
 }
 
 export interface ConsumerContractDependencyEvidence {
@@ -26,6 +27,22 @@ export interface ConsumerContractDependencyEvidence {
   readonly affectedTaskId: TaskId | null;
   readonly observedContractVersion: ResourceVersion;
   readonly coverageId: CoverageId;
+  readonly integrationTarget?: string;
+}
+
+export function groupConsumersByContract(
+  consumers: readonly ConsumerContractDependencyEvidence[],
+): ReadonlyMap<ResourceId, readonly ConsumerContractDependencyEvidence[]> {
+  const grouped = new Map<ResourceId, ConsumerContractDependencyEvidence[]>();
+  for (const consumer of consumers) {
+    const entries = grouped.get(consumer.contractResourceId) ?? [];
+    entries.push(consumer);
+    grouped.set(consumer.contractResourceId, entries);
+  }
+  return new Map([...grouped.entries()].map(([resourceId, entries]) => [
+    resourceId,
+    [...entries].sort((left, right) => left.eventId.localeCompare(right.eventId)),
+  ]));
 }
 
 function matchesVersion(left: ResourceVersion, right: ResourceVersion): boolean {
@@ -47,6 +64,9 @@ export function detectExportedContractInvalidation(
 ): DetectorFinding | null {
   if (!change.breaking
     || change.contractResourceId !== consumer.contractResourceId
+    || (change.integrationTarget !== undefined
+      && consumer.integrationTarget !== undefined
+      && change.integrationTarget !== consumer.integrationTarget)
     || change.beforeVersion.value === null
     || matchesVersion(change.beforeVersion, change.afterVersion)
     || !matchesVersion(change.beforeVersion, consumer.observedContractVersion)) {

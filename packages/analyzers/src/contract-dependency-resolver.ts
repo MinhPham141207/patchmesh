@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 
 import type { DerivedEvidenceFacts, SymbolEvidenceFact } from "./evidence-facts.js";
+import type { ResourceId, ResourceVersion } from "@patchmesh/protocol";
 import type { ResolvedContractDependency } from "./dependency-events.js";
 
 const supportedExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] as const;
@@ -23,8 +24,23 @@ function candidateSourceLocators(consumerLocator: string, specifier: string): re
  */
 export function resolveLocalContractDependencies(
   facts: readonly DerivedEvidenceFacts[],
+  additionalContracts: readonly SymbolEvidenceFact[] = [],
+  observedVersions: readonly { readonly resourceId: ResourceId; readonly kind: ResourceVersion["kind"]; readonly value: string | null }[] = [],
 ): readonly ResolvedContractDependency[] {
-  const contracts = facts.flatMap((entry) => entry.exportedContracts);
+  const contractsByKey = new Map<string, SymbolEvidenceFact>();
+  for (const contract of [...facts.flatMap((entry) => entry.exportedContracts), ...additionalContracts]) {
+    const version = contract.version;
+    const key = [
+      contract.resource.resourceId,
+      version.domain.repositoryId,
+      version.domain.workspaceId,
+      version.domain.worktreeId,
+      version.kind,
+      version.value ?? "",
+    ].join(":");
+    contractsByKey.set(key, contract);
+  }
+  const contracts = [...contractsByKey.values()];
   const resolved: ResolvedContractDependency[] = [];
   for (const entry of facts) {
     if (entry.source.coverage.status !== "sufficient") continue;
@@ -32,17 +48,19 @@ export function resolveLocalContractDependencies(
       const targetLocators = new Set(candidateSourceLocators(entry.source.resource.locator, consumer.specifier));
       if (targetLocators.size === 0) continue;
       for (const name of consumer.importedNames) {
-        const matches = contracts.filter((contract) => {
+          const matches = contracts.filter((contract) => {
           const [sourceLocator, symbolName] = contract.resource.locator.split("#", 2);
           return sourceLocator !== undefined
             && symbolName === name
             && targetLocators.has(sourceLocator)
             && contract.sourceFacts.integrationTarget === entry.source.integrationTarget
             && contract.sourceFacts.resource.repositoryId === entry.source.resource.repositoryId
-            && contract.version.domain.repositoryId === entry.source.version.domain.repositoryId
-            && contract.version.domain.workspaceId === entry.source.version.domain.workspaceId
-            && contract.version.domain.worktreeId === entry.source.version.domain.worktreeId;
-        });
+             && contract.version.domain.repositoryId === entry.source.version.domain.repositoryId
+             && contract.version.domain.workspaceId === entry.source.version.domain.workspaceId;
+          }).filter((contract) => observedVersions.length === 0 || observedVersions.some((version) =>
+            version.resourceId === contract.resource.resourceId
+              && version.kind === contract.version.kind
+              && version.value === contract.version.value));
         if (matches.length === 1) resolved.push({ consumer, contract: matches[0]! });
       }
     }

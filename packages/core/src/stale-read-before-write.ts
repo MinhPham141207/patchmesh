@@ -11,6 +11,7 @@ import type { DetectorFinding } from "./types.js";
 
 export interface ResourceReadEvidence {
   readonly eventId: EventId;
+  readonly eventOrder?: number;
   readonly taskId: TaskId;
   readonly resourceId: ResourceId;
   readonly version: ResourceVersion;
@@ -19,11 +20,17 @@ export interface ResourceReadEvidence {
 
 export interface DependentWriteEvidence {
   readonly eventId: EventId;
+  readonly eventOrder?: number;
   readonly dependencyId: DependencyId;
   readonly taskId: TaskId;
   readonly resourceId: ResourceId;
   readonly dependsOnReadEventId: EventId;
   readonly coverageId: CoverageId;
+}
+
+export interface CurrentVersionEvidence extends ResourceVersion {
+  readonly eventId?: EventId;
+  readonly eventOrder?: number;
 }
 
 function hasSameRepositoryWorkspace(left: ResourceVersion, right: ResourceVersion): boolean {
@@ -37,7 +44,7 @@ function hasSameRepositoryWorkspace(left: ResourceVersion, right: ResourceVersio
  */
 export function detectStaleReadBeforeWrite(
   read: ResourceReadEvidence,
-  current: ResourceVersion,
+  current: CurrentVersionEvidence,
   write: DependentWriteEvidence,
 ): DetectorFinding | null {
   if (read.version.value === null
@@ -47,7 +54,11 @@ export function detectStaleReadBeforeWrite(
     || write.dependsOnReadEventId !== read.eventId
     || !hasSameRepositoryWorkspace(read.version, current)
     || read.version.kind !== current.kind
-    || read.version.value === current.value) {
+    || read.version.value === current.value
+    || (read.eventOrder !== undefined
+      && current.eventOrder !== undefined
+      && write.eventOrder !== undefined
+      && (current.eventOrder <= read.eventOrder || current.eventOrder > write.eventOrder))) {
     return null;
   }
 

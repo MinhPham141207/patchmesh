@@ -15,6 +15,7 @@ import { SqliteEventStore } from "@patchmesh/storage";
 import {
   createPhase2RuntimeRecords,
   createSameSymbolRuntimeRecords,
+  deriveExportedContractInvalidationEvidence,
   deriveSameSymbolEvidence,
   deriveStaleReadEvidence,
   runStaleReadBeforeWriteDetector,
@@ -146,6 +147,31 @@ test("reconstructs and persists stale-read findings from causally covered V2 wri
     causationId: readRequest.eventId,
     payload: { requestEventId: readRequest.eventId, outcome: "succeeded", exitCode: 0, effectEventIds: [] },
   };
+  const historicalRequest: ToolRequestedEvent = {
+    ...readRequest,
+    eventId: "evt_00000000000000000000000000000008",
+    taskId: "task_history",
+    correlationId: "corr_00000000000000000000000000000008",
+  };
+  const historicalChange: FileChangedEvent = {
+    ...historicalRequest,
+    eventId: "evt_00000000000000000000000000000009",
+    eventType: "file.changed",
+    causationId: historicalRequest.eventId,
+    payload: {
+      resource: { resourceId: readResourceId, repositoryId: domain.repositoryId, kind: "file", locator: "src/input.ts" },
+      beforeVersion: null,
+      afterVersion: version(readResourceId, "sha256:older", "evt_00000000000000000000000000000009"),
+      changeKind: "created",
+    },
+  };
+  const historicalCompletion: ToolCompletedEvent = {
+    ...historicalRequest,
+    eventId: "evt_0000000000000000000000000000000a",
+    eventType: "tool.completed",
+    causationId: historicalRequest.eventId,
+    payload: { requestEventId: historicalRequest.eventId, outcome: "succeeded", exitCode: 0, effectEventIds: [historicalChange.eventId] },
+  };
   const currentRequest: ToolRequestedEvent = {
     ...readRequest,
     eventId: "evt_00000000000000000000000000000013",
@@ -234,6 +260,7 @@ test("reconstructs and persists stale-read findings from causally covered V2 wri
     },
   };
   const events: readonly ProtocolEvent[] = [
+    historicalRequest, historicalChange, historicalCompletion,
     readRequest, read, readCompletion, currentRequest, current, currentCompletion,
     writeRequest, written, writeCompletion, dependentWrite, dependency,
   ];
@@ -246,4 +273,106 @@ test("reconstructs and persists stale-read findings from causally covered V2 wri
   const records = createPhase2RuntimeRecords(events);
   assert.equal(records.length, 1);
   assert.equal(records[0]?.finding.payload.finding.findingType, "stale_read_before_write");
+  assert.equal(records[0]?.finding.payload.finding.evidenceEventIds.includes(historicalChange.eventId), false);
+});
+
+test("reconstructs contract invalidation from durable cross-worktree history", () => {
+  const dependencyResourceId = `res_${"e".repeat(64)}` as const;
+  const dependencyId = `dep_${"f".repeat(32)}` as const;
+  const dependency: DependencyChangedEvent = {
+    ...request,
+    eventId: "evt_00000000000000000000000000000005",
+    eventType: "dependency.changed",
+    source: second.source,
+    agentId: second.agentId,
+    taskId: second.taskId,
+    sourceSequence: null,
+    causationId: first.eventId,
+    payload: {
+      dependency: {
+        dependencyId,
+        dependentResourceId: dependencyResourceId,
+        dependencyResourceId: first.payload.resource.resourceId,
+        dependentVersion: {
+          resourceId: dependencyResourceId,
+          domain: first.payload.afterVersion.domain,
+          kind: "content_hash",
+          value: "sha256:consumer",
+          evidenceEventIds: ["evt_00000000000000000000000000000005"],
+        },
+        dependencyVersion: first.payload.afterVersion,
+        observations: [{
+          kind: "statically_observed",
+          producer: { sourceId: "source_typescript", version: "1" },
+          rule: null,
+          evidenceEventIds: [first.eventId],
+        }],
+        evidenceEventIds: [first.eventId, "evt_00000000000000000000000000000005"],
+      },
+    },
+  };
+  const derivedEvidence = (
+    target: ProtocolEvent,
+    eventId: `evt_${string}`,
+    factKind: "symbol" | "dependency",
+    stableFactId: string,
+    normalizedSignature: string,
+    sourceEventIds: readonly `evt_${string}`[],
+  ) => ({
+    ...target,
+    schemaVersion: 2 as const,
+    eventId,
+    eventType: "evidence.derived" as const,
+    source: { kind: "analyzer" as const, sourceId: "source_typescript", instanceId: "22222222-2222-4222-8222-222222222222" },
+    causationId: target.eventId,
+    payload: {
+      evidence: {
+        targetEventId: target.eventId,
+        factKind,
+        analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+        configuration: { parser: "typescript" },
+        configurationDigest: "sha256:f8a4fe6e12fee58f81df0e17bc5a91622bc226ca5f4e5502edef985c7d0f3839",
+        sourceEventIds,
+        integrationTarget: "main",
+        coverage: { status: "sufficient" as const, reason: "supported" },
+        coverageId: `coverage_${"1".repeat(32)}`,
+        stableFactId,
+        exported: factKind === "symbol",
+        normalizedSignature,
+      },
+    },
+  });
+  const priorEvidence = derivedEvidence(
+    first,
+    "evt_00000000000000000000000000000006",
+    "symbol",
+    first.payload.resource.resourceId,
+    "export function calculate(value: number): number",
+    [first.eventId],
+  );
+  const currentEvidence = derivedEvidence(
+    second,
+    "evt_00000000000000000000000000000007",
+    "symbol",
+    second.payload.resource.resourceId,
+    "export function calculate(value: string): number",
+    [second.eventId],
+  );
+  const dependencyEvidence = derivedEvidence(
+    dependency,
+    "evt_00000000000000000000000000000008",
+    "dependency",
+    dependencyId,
+    "export function calculate(value: number): number",
+    dependency.payload.dependency.evidenceEventIds,
+  );
+  const events: readonly ProtocolEvent[] = [request, first, second, completion, dependency, priorEvidence, currentEvidence, dependencyEvidence];
+
+  const evidence = deriveExportedContractInvalidationEvidence(events);
+  assert.equal(evidence.consumers.length, 1);
+  assert.equal(evidence.changes.length, 1);
+  assert.equal(
+    createPhase2RuntimeRecords(events).filter((record) => record.finding.payload.finding.findingType === "exported_contract_invalidation").length,
+    1,
+  );
 });

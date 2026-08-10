@@ -14,6 +14,7 @@ export {
 } from "./stale-read-before-write.js";
 export {
   detectExportedContractInvalidation,
+  groupConsumersByContract,
   type ConsumerContractDependencyEvidence,
   type ExportedContractChangeEvidence,
 } from "./exported-contract-invalidation.js";

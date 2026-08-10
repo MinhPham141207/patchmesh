@@ -743,7 +743,7 @@ patchmesh events --agent agent-a --since 10m
 patchmesh events --type file.changed --follow
 ```
 
-### Common V1 event types
+### Common event types
 
 ```text
 tool.requested
@@ -754,6 +754,7 @@ symbol.read
 symbol.changed
 task.completed
 dependency.changed
+evidence.derived
 attribution.corrected
 finding.created
 decision.created

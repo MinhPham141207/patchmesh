@@ -34,6 +34,7 @@ const eventTypes: readonly EventType[] = [
   "symbol.changed",
   "task.completed",
   "dependency.changed",
+  "evidence.derived",
   "attribution.corrected",
   "finding.created",
   "finding.feedback.created",

@@ -7,11 +7,11 @@ import {
 import { detectSameSymbolOverlap, type SymbolChangeEvidence } from "./same-symbol-overlap.js";
 import {
   detectStaleReadBeforeWrite,
+  type CurrentVersionEvidence,
   type DependentWriteEvidence,
   type ResourceReadEvidence,
 } from "./stale-read-before-write.js";
 import { findingIdFor } from "./stable-identities.js";
-import type { ResourceVersion } from "@patchmesh/protocol";
 
 function stableFindings(candidates: readonly (DetectorFinding | null)[]): readonly DetectorFinding[] {
   const findings = new Map<string, DetectorFinding>();
@@ -37,7 +37,7 @@ export function runSameSymbolDetector(evidence: readonly SymbolChangeEvidence[])
 /** Runs stale-read detection only across writes explicitly linked to observed reads. */
 export function runStaleReadBeforeWriteDetector(
   reads: readonly ResourceReadEvidence[],
-  currentVersions: readonly ResourceVersion[],
+  currentVersions: readonly CurrentVersionEvidence[],
   writes: readonly DependentWriteEvidence[],
 ): readonly DetectorFinding[] {
   const candidates: DetectorFinding[] = [];

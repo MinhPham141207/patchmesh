@@ -172,6 +172,7 @@ test("derives persisted symbol changes from an observed TypeScript source file",
         "evt_00000000000000000000000000000021",
         "evt_00000000000000000000000000000022",
         "evt_00000000000000000000000000000023",
+        "evt_00000000000000000000000000000024",
       ], {
         observer,
         phase2SourceAnalysis: {
@@ -188,11 +189,17 @@ test("derives persisted symbol changes from an observed TypeScript source file",
 
       const events = store.read();
       assert.deepEqual(events.map((event) => event.eventType), [
-        "tool.requested", "file.changed", "symbol.changed", "tool.completed",
+        "tool.requested", "file.changed", "symbol.changed", "evidence.derived", "tool.completed",
       ]);
       assert.deepEqual(result.analysisDiagnostics, []);
       assert.equal(projectWorkGraph(events).snapshot.nodes.some((node) => node.kind === "resource" && node.resource.kind === "symbol"), true);
-      const completion = events[3];
+       const derived = events[3];
+       if (derived?.eventType !== "evidence.derived") throw new Error("expected durable analyzer evidence");
+       assert.equal(derived.payload.evidence.factKind, "symbol");
+       assert.equal(derived.payload.evidence.integrationTarget, "main");
+       assert.equal(derived.payload.evidence.configurationDigest.startsWith("sha256:"), true);
+       assert.deepEqual(derived.payload.evidence.sourceEventIds, [events[1]?.eventId]);
+       const completion = events[4];
       if (completion?.eventType !== "tool.completed") throw new Error("expected tool completion");
       assert.deepEqual(completion.payload.effectEventIds, [events[1]?.eventId, events[2]?.eventId]);
     } finally {
@@ -227,6 +234,9 @@ test("derives a persisted dependency from real changed local TypeScript sources"
         "evt_00000000000000000000000000000034",
         "evt_00000000000000000000000000000035",
         "evt_00000000000000000000000000000036",
+        "evt_00000000000000000000000000000037",
+        "evt_00000000000000000000000000000038",
+        "evt_00000000000000000000000000000039",
       ], {
         observer,
         phase2SourceAnalysis: {
@@ -243,12 +253,16 @@ test("derives a persisted dependency from real changed local TypeScript sources"
 
       const events = store.read();
       assert.deepEqual(events.map((event) => event.eventType), [
-        "tool.requested", "file.changed", "symbol.changed", "file.changed", "symbol.changed", "dependency.changed", "tool.completed",
+        "tool.requested", "file.changed", "symbol.changed", "evidence.derived", "file.changed", "symbol.changed", "evidence.derived", "dependency.changed", "evidence.derived", "tool.completed",
       ]);
-      const dependency = events[5];
+      const dependency = events[7];
       if (dependency?.eventType !== "dependency.changed") throw new Error("expected a resolved dependency event");
-      assert.equal(dependency.payload.dependency.dependentResourceId, events[3]?.eventType === "file.changed" ? events[3].payload.resource.resourceId : null);
-      assert.equal(dependency.causationId, "evt_00000000000000000000000000000033");
+      assert.equal(dependency.payload.dependency.dependentResourceId, events[4]?.eventType === "file.changed" ? events[4].payload.resource.resourceId : null);
+      assert.equal(dependency.causationId, "evt_00000000000000000000000000000034");
+      const dependencyEvidence = events[8];
+      if (dependencyEvidence?.eventType !== "evidence.derived") throw new Error("expected durable dependency evidence");
+      assert.equal(dependencyEvidence.payload.evidence.factKind, "dependency");
+      assert.equal(dependencyEvidence.payload.evidence.stableFactId, dependency.payload.dependency.dependencyId);
       assert.deepEqual(result.analysisDiagnostics, []);
     } finally {
       store.close();

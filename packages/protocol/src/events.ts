@@ -163,6 +163,23 @@ export interface DependentWritePayload {
   };
 }
 
+export interface DerivedEvidencePayload {
+  readonly evidence: {
+    readonly targetEventId: EventId;
+    readonly factKind: "symbol" | "dependency";
+    readonly analyzer: { readonly analyzerId: string; readonly version: string };
+    readonly configuration: Readonly<Record<string, string | number | boolean>>;
+    readonly configurationDigest: string;
+    readonly sourceEventIds: readonly EventId[];
+    readonly integrationTarget: string;
+    readonly coverage: { readonly status: "sufficient" | "degraded"; readonly reason: string };
+    readonly coverageId: CoverageId;
+    readonly stableFactId: ResourceId | DependencyId;
+    readonly exported: boolean;
+    readonly normalizedSignature: string | null;
+  };
+}
+
 export interface DecisionTarget {
   readonly agentId: NullableAgentId;
   readonly taskId: NullableTaskId;
@@ -304,6 +321,11 @@ export interface DependentWriteEvent extends BaseEventV2 {
   readonly payload: DependentWritePayload;
 }
 
+export interface DerivedEvidenceEvent extends BaseEventV2 {
+  readonly eventType: "evidence.derived";
+  readonly payload: DerivedEvidencePayload;
+}
+
 export interface DecisionCreatedEvent extends BaseEvent {
   readonly eventType: "decision.created";
   readonly payload: DecisionCreatedPayload;
@@ -328,7 +350,8 @@ export type Phase1InputEvent =
   | SymbolChangedEvent
   | TaskCompletedEvent
   | DependencyChangedEvent
-  | AttributionCorrectedEvent;
+  | AttributionCorrectedEvent
+  | DerivedEvidenceEvent;
 
 export type ProjectionEvent =
   | FindingCreatedEvent

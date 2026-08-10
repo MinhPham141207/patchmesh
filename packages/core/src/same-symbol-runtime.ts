@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import type { CoverageId, EventId, ProtocolEvent, ResourceVersion } from "@patchmesh/protocol";
+import { classifyContractCompatibility } from "@patchmesh/analyzers";
+import type { CoverageId, EventId, ProtocolEvent } from "@patchmesh/protocol";
+import type { DerivedEvidenceEvent } from "@patchmesh/protocol";
 import { projectWorkGraph } from "@patchmesh/storage";
 
 import { createDurableReportOnlyRecords, type DurableReportOnlyRecords } from "./durable-records.js";
@@ -11,6 +13,7 @@ import { evaluateReportOnlyPolicy } from "./report-only-policy.js";
 import { runSameSymbolDetector } from "./detector-runner.js";
 import { decisionIdFor, findingIdFor } from "./stable-identities.js";
 import type { DetectorFinding } from "./types.js";
+import { groupConsumersByContract } from "./exported-contract-invalidation.js";
 import type {
   ConsumerContractDependencyEvidence,
   ExportedContractChangeEvidence,
@@ -20,6 +23,7 @@ import type {
   DependentWriteEvidence,
   ResourceReadEvidence,
 } from "./stale-read-before-write.js";
+import type { CurrentVersionEvidence } from "./stale-read-before-write.js";
 
 const runtimeSource = {
   kind: "core" as const,
@@ -75,6 +79,12 @@ function sufficientCoverageForEvent(
   return null;
 }
 
+function derivedEvidenceByTarget(events: readonly ProtocolEvent[]): ReadonlyMap<EventId, DerivedEvidenceEvent> {
+  return new Map(events
+    .filter((event): event is DerivedEvidenceEvent => event.eventType === "evidence.derived")
+    .map((event) => [event.payload.evidence.targetEventId, event] as const));
+}
+
 /**
  * Reconstructs same-symbol evidence from durable events only. It deliberately
  * requires a single sufficient coverage record for each change; ambiguous,
@@ -114,20 +124,30 @@ export function deriveSameSymbolEvidence(events: readonly ProtocolEvent[]): read
 /** Reconstructs stale-read inputs from durable V2 writes and causally-covered resource reads. */
 export function deriveStaleReadEvidence(events: readonly ProtocolEvent[]): {
   readonly reads: readonly ResourceReadEvidence[];
-  readonly currentVersions: readonly ResourceVersion[];
+  readonly currentVersions: readonly CurrentVersionEvidence[];
   readonly writes: readonly DependentWriteEvidence[];
 } {
   const coverageByEvent = sufficientCoverageIds(events);
   const eventsById = new Map(events.map((event) => [event.eventId, event] as const));
+  const orderedEvents = (() => {
+    try {
+      return projectWorkGraph(events).orderedEvents;
+    } catch {
+      return [] as readonly ProtocolEvent[];
+    }
+  })();
+  const eventOrder = new Map(orderedEvents.map((event, index) => [event.eventId, index] as const));
   const reads: ResourceReadEvidence[] = [];
   const writes: DependentWriteEvidence[] = [];
-  const currentVersions: ResourceVersion[] = [];
-  for (const event of events) {
+  const currentVersions: CurrentVersionEvidence[] = [];
+  for (const event of orderedEvents) {
     const coverageId = sufficientCoverageForEvent(event, eventsById, coverageByEvent);
     if (coverageId === null) continue;
+    const order = eventOrder.get(event.eventId);
     if ((event.eventType === "file.read" || event.eventType === "symbol.read") && event.taskId !== null) {
       reads.push({
         eventId: event.eventId,
+        ...(order === undefined ? {} : { eventOrder: order }),
         taskId: event.taskId,
         resourceId: event.payload.resource.resourceId,
         version: event.payload.version,
@@ -137,6 +157,7 @@ export function deriveStaleReadEvidence(events: readonly ProtocolEvent[]): {
     if (event.eventType === "write.dependent" && event.taskId !== null) {
       writes.push({
         eventId: event.eventId,
+        ...(order === undefined ? {} : { eventOrder: order }),
         dependencyId: event.payload.write.dependencyId,
         taskId: event.taskId,
         resourceId: event.payload.write.resourceId,
@@ -146,7 +167,11 @@ export function deriveStaleReadEvidence(events: readonly ProtocolEvent[]): {
     }
     if ((event.eventType === "file.changed" || event.eventType === "symbol.changed")
       && event.payload.afterVersion.value !== null) {
-      currentVersions.push(event.payload.afterVersion);
+      currentVersions.push({
+        ...event.payload.afterVersion,
+        eventId: event.eventId,
+        ...(order === undefined ? {} : { eventOrder: order }),
+      });
     }
   }
   return {
@@ -167,11 +192,22 @@ export function deriveExportedContractInvalidationEvidence(events: readonly Prot
 } {
   const coverageByEvent = sufficientCoverageIds(events);
   const eventsById = new Map(events.map((event) => [event.eventId, event] as const));
+  const derivedByTarget = derivedEvidenceByTarget(events);
+  const orderedEvents = (() => {
+    try {
+      return projectWorkGraph(events).orderedEvents;
+    } catch {
+      return [] as readonly ProtocolEvent[];
+    }
+  })();
+  const eventOrder = new Map(orderedEvents.map((event, index) => [event.eventId, index] as const));
   const consumers: ConsumerContractDependencyEvidence[] = [];
-  for (const event of events) {
+  for (const event of orderedEvents) {
     if (event.eventType !== "dependency.changed") continue;
     const coverageId = sufficientCoverageForEvent(event, eventsById, coverageByEvent);
     if (coverageId === null) continue;
+    const metadata = derivedByTarget.get(event.eventId);
+    if (metadata !== undefined && metadata.payload.evidence.factKind !== "dependency") continue;
     consumers.push({
       eventId: event.eventId,
       dependencyId: event.payload.dependency.dependencyId,
@@ -180,15 +216,16 @@ export function deriveExportedContractInvalidationEvidence(events: readonly Prot
       affectedTaskId: event.taskId,
       observedContractVersion: event.payload.dependency.dependencyVersion,
       coverageId,
+      ...(metadata === undefined ? {} : { integrationTarget: metadata.payload.evidence.integrationTarget }),
     });
   }
-  const contracts = new Map(consumers.map((consumer) => [consumer.contractResourceId, consumer] as const));
+  const consumersByContract = groupConsumersByContract(consumers);
   const changes: ExportedContractChangeEvidence[] = [];
-  for (const event of events) {
+  for (const event of orderedEvents) {
     if (event.eventType !== "symbol.changed" || event.payload.changeKind !== "deleted") continue;
-    const consumer = contracts.get(event.payload.resource.resourceId);
     const coverageId = sufficientCoverageForEvent(event, eventsById, coverageByEvent);
-    if (consumer === undefined || coverageId === null || event.payload.beforeVersion === null) continue;
+    if (coverageId === null || event.payload.beforeVersion === null) continue;
+    if ((consumersByContract.get(event.payload.resource.resourceId)?.length ?? 0) === 0) continue;
     changes.push({
       eventId: event.eventId,
       contractResourceId: event.payload.resource.resourceId,
@@ -197,6 +234,37 @@ export function deriveExportedContractInvalidationEvidence(events: readonly Prot
       breaking: true,
       coverageId,
     });
+  }
+
+  const priorContracts = new Map<string, {
+    readonly event: Extract<ProtocolEvent, { readonly eventType: "symbol.changed" }>;
+    readonly metadata: DerivedEvidenceEvent;
+  }>();
+  for (const event of orderedEvents) {
+    if (event.eventType !== "symbol.changed") continue;
+    const metadata = derivedByTarget.get(event.eventId);
+    if (metadata?.payload.evidence.factKind !== "symbol" || metadata.payload.evidence.normalizedSignature === null) continue;
+    const key = `${event.repositoryId}:${event.workspaceId}:${metadata.payload.evidence.integrationTarget}:${metadata.payload.evidence.stableFactId}`;
+    const previous = priorContracts.get(key);
+    if (previous !== undefined && previous.metadata.payload.evidence.normalizedSignature !== null) {
+      const coverageId = sufficientCoverageForEvent(event, eventsById, coverageByEvent);
+      const compatibility = classifyContractCompatibility(
+        previous.metadata.payload.evidence.normalizedSignature,
+        metadata.payload.evidence.normalizedSignature,
+      );
+      if (coverageId !== null && compatibility === "breaking" && event.payload.beforeVersion === null) {
+        changes.push({
+          eventId: event.eventId,
+          contractResourceId: event.payload.resource.resourceId,
+          beforeVersion: previous.event.payload.afterVersion,
+          afterVersion: event.payload.afterVersion,
+          breaking: true,
+          coverageId,
+          integrationTarget: metadata.payload.evidence.integrationTarget,
+        });
+      }
+    }
+    priorContracts.set(key, { event, metadata });
   }
   return {
     changes: changes.sort((left, right) => left.eventId.localeCompare(right.eventId)),

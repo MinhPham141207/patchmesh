@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase2/v1/derived-evidence.schema.json",
+  "type": "object",
+  "properties": {
+    "targetEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
+    "factKind": { "enum": ["symbol", "dependency"] },
+    "analyzer": {
+      "type": "object",
+      "properties": {
+        "analyzerId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "version": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }
+      },
+      "required": ["analyzerId", "version"],
+      "additionalProperties": false
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": { "oneOf": [{ "type": "string" }, { "type": "number" }, { "type": "boolean" }] }
+    },
+    "configurationDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "sourceEventIds": {
+      "type": "array",
+      "items": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "integrationTarget": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "status": { "enum": ["sufficient", "degraded"] },
+        "reason": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }
+      },
+      "required": ["status", "reason"],
+      "additionalProperties": false
+    },
+    "coverageId": { "$ref": "../../phase0/v1/coverage.schema.json#/$defs/coverageId" },
+    "stableFactId": {
+      "oneOf": [
+        { "$ref": "../../phase0/v1/identities.schema.json#/$defs/resourceId" },
+        { "type": "string", "pattern": "^dep_[0-9a-f]{32}$" }
+      ]
+    },
+    "exported": { "type": "boolean" },
+    "normalizedSignature": { "oneOf": [{ "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, { "type": "null" }] }
+  },
+  "required": ["targetEventId", "factKind", "analyzer", "configuration", "configurationDigest", "sourceEventIds", "integrationTarget", "coverage", "coverageId", "stableFactId", "exported", "normalizedSignature"],
+  "additionalProperties": false
+}

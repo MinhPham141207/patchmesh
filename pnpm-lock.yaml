@@ -74,6 +74,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@patchmesh/analyzers':
+        specifier: workspace:*
+        version: link:../analyzers
       '@patchmesh/protocol':
         specifier: workspace:*
         version: link:../protocol

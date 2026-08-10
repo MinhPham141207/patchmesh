@@ -1,4 +1,5 @@
 import { recordHookPayload } from "./lib/recorder.mjs";
+import { translatePatchMeshPayload } from "./lib/patchmesh-bridge.mjs";
 import { pathToFileURL } from "node:url";
 
 async function readStdin() {
@@ -17,7 +18,7 @@ export async function main() {
     process.stderr.write(`${result.diagnostic.code}: ${result.diagnostic.message}\n`);
     return result;
   }
-  const result = await recordHookPayload({ payload });
+  const result = await recordHookPayload({ payload: translatePatchMeshPayload(payload), env: process.env });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (!result.accepted && result.diagnostic !== null) process.stderr.write(`${result.diagnostic.code}: ${result.diagnostic.message}\n`);
   return result;

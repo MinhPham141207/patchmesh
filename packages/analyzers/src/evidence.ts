@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { EventId, LogicalResource, ResourceVersion } from "@patchmesh/protocol";
 
 import { analyzeSource } from "./typescript.js";
@@ -22,6 +23,15 @@ export interface SourceFacts {
 
 function sortedUnique(values: readonly EventId[]): readonly EventId[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+export function configurationDigest(
+  configuration: Readonly<Record<string, string | number | boolean>>,
+): string {
+  const canonical = JSON.stringify(Object.fromEntries(
+    Object.entries(configuration).sort(([left], [right]) => left.localeCompare(right)),
+  ));
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 
 /**

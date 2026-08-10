@@ -5,7 +5,7 @@
   "properties": {
     "schemaVersion": { "const": 2 },
     "eventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
-    "eventType": { "enum": ["finding.feedback.created", "write.dependent"] },
+    "eventType": { "enum": ["finding.feedback.created", "write.dependent", "evidence.derived"] },
     "source": {
       "type": "object",
       "properties": {
@@ -48,6 +48,17 @@
           "type": "object",
           "properties": { "write": { "$ref": "./dependent-write.schema.json" } },
           "required": ["write"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "eventType": { "const": "evidence.derived" },
+        "payload": {
+          "type": "object",
+          "properties": { "evidence": { "$ref": "./derived-evidence.schema.json" } },
+          "required": ["evidence"],
           "additionalProperties": false
         }
       }

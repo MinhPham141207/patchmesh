@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -8,6 +9,7 @@ import type {
   DecisionCreatedEvent,
   DependentWriteEvent,
   DependencyChangedEvent,
+  DerivedEvidenceEvent,
   FindingFeedbackCreatedEvent,
   ProtocolEvent,
   ToolCompletedEvent,
@@ -44,6 +46,7 @@ function createValidators(): { readonly phase0: ValidateFunction; readonly phase
   for (const name of phase0SchemaNames) ajv.addSchema(readSchema(phase0SchemaDirectory, name));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "finding-feedback"));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "dependent-write"));
+  ajv.addSchema(readSchema(phase2SchemaDirectory, "derived-evidence"));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "event-envelope"));
   const phase0 = ajv.getSchema("https://patchmesh.dev/schemas/phase0/v1/event-envelope.schema.json");
   const phase2 = ajv.getSchema("https://patchmesh.dev/schemas/phase2/v1/event-envelope.schema.json");
@@ -109,6 +112,17 @@ function sameDomain(left: ProtocolEvent, right: ProtocolEvent): boolean {
   return left.repositoryId === right.repositoryId &&
     left.workspaceId === right.workspaceId &&
     left.worktreeId === right.worktreeId;
+}
+
+function sameRepositoryWorkspace(left: ProtocolEvent, right: ProtocolEvent): boolean {
+  return left.repositoryId === right.repositoryId && left.workspaceId === right.workspaceId;
+}
+
+function configurationDigest(configuration: Readonly<Record<string, string | number | boolean>>): string {
+  const canonical = JSON.stringify(Object.fromEntries(
+    Object.entries(configuration).sort(([left], [right]) => left.localeCompare(right)),
+  ));
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 
 function sameVersionDomain(event: ProtocolEvent, version: { domain: { repositoryId: string; workspaceId: string; worktreeId: string } }): boolean {
@@ -300,6 +314,50 @@ function validateDependentWrite(
   }
 }
 
+function validateDerivedEvidence(
+  event: DerivedEvidenceEvent,
+  eventsById: ReadonlyMap<EventId, ProtocolEvent>,
+  diagnostics: ValidationDiagnostic[],
+): void {
+  const evidence = event.payload.evidence;
+  const target = eventsById.get(evidence.targetEventId);
+  const path = `/events/${event.eventId}/payload/evidence`;
+  if (event.source.kind !== "analyzer") {
+    diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/analyzer`, "derived evidence must be emitted by an analyzer source"));
+  }
+  if (configurationDigest(evidence.configuration) !== evidence.configurationDigest) {
+    diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/configurationDigest`, "derived evidence configuration digest does not match configuration"));
+  }
+  if (target === undefined) {
+    diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `${path}/targetEventId`, "derived evidence target event is absent"));
+  } else {
+    const expectedEventType = evidence.factKind === "symbol" ? "symbol.changed" : "dependency.changed";
+    if (target.eventType !== expectedEventType) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/targetEventId`, "derived evidence target type does not match fact kind"));
+    }
+    if (!sameDomain(event, target) || event.correlationId !== target.correlationId || event.causationId !== target.eventId) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/targetEventId`, "derived evidence target does not match its causal domain"));
+    }
+    const expectedFactId = target.eventType === "symbol.changed"
+      ? target.payload.resource.resourceId
+      : target.eventType === "dependency.changed"
+        ? target.payload.dependency.dependencyId
+        : null;
+    if (expectedFactId !== evidence.stableFactId) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/stableFactId`, "derived evidence fact ID does not match its target"));
+    }
+  }
+
+  for (const sourceEventId of evidence.sourceEventIds) {
+    const source = eventsById.get(sourceEventId);
+    if (source === undefined) {
+      diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `${path}/sourceEventIds`, "derived evidence source event is absent"));
+    } else if (!sameRepositoryWorkspace(event, source)) {
+      diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/sourceEventIds`, "derived evidence source crosses repository or workspace"));
+    }
+  }
+}
+
 export function validateEventSet(events: readonly ProtocolEvent[]): readonly ValidationDiagnostic[] {
   const diagnostics: ValidationDiagnostic[] = [];
   const eventsById = new Map<EventId, ProtocolEvent>();
@@ -348,6 +406,7 @@ export function validateEventSet(events: readonly ProtocolEvent[]): readonly Val
     if (event.eventType === "attribution.corrected") validateAttributionCorrection(event, eventsById, diagnostics);
     if (event.eventType === "finding.feedback.created") validateFindingFeedback(event, eventsById, diagnostics);
     if (event.eventType === "write.dependent") validateDependentWrite(event, eventsById, diagnostics);
+    if (event.eventType === "evidence.derived") validateDerivedEvidence(event, eventsById, diagnostics);
     validateResourcePayload(event, diagnostics);
   }
 

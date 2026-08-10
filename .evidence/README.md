@@ -35,6 +35,53 @@ Runtime-specific Codex, OpenCode, or future hook translators should only map
 their native payload into these fields. They should not write trace files or
 implement trace ordering themselves.
 
+## PatchMesh Production Bridge
+
+When the runtime caller has just awaited `McpProxy.execute`, it may attach an
+explicit `patchmesh` bridge object before invoking `record.mjs`:
+
+```json
+{
+  "action": "tool.completed",
+  "toolCallId": "tool-1",
+  "patchmesh": {
+    "result": {
+      "execution": { "outcome": "succeeded", "exitCode": 0 },
+      "completedEventId": "evt_<id>",
+      "coverage": {
+        "presentation": "sufficient",
+        "gaps": []
+      },
+      "observationDiagnostics": [],
+      "analysisDiagnostics": []
+    },
+    "events": [
+      {
+        "eventId": "evt_<id>",
+        "eventType": "tool.completed",
+        "payload": { "effectEventIds": ["evt_<file-change-id>"] }
+      },
+      {
+        "eventId": "evt_<file-change-id>",
+        "eventType": "file.changed",
+        "payload": {
+          "resource": { "resourceId": "res_<id>", "kind": "file", "locator": "src/api.ts" },
+          "beforeVersion": {},
+          "afterVersion": {},
+          "changeKind": "modified"
+        }
+      }
+    ]
+  }
+}
+```
+
+`record.mjs` removes the bridge object before storage. Only `file.changed`
+events explicitly linked from the persisted `tool.completed.effectEventIds`
+array can populate `derivedEffect`. Missing completion/effect evidence remains
+`unknown`; coverage gaps produce `degraded`; requested hook paths are never
+copied into observed effect paths.
+
 The recorder emits a bounded JSON result with `accepted`, `duplicate`,
 `eventId`, `tracePath`, and `diagnostic`. Malformed input, lock contention, and
 write failures exit successfully with `accepted: false` so an evidence failure

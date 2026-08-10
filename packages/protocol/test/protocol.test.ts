@@ -8,6 +8,7 @@ import {
 import type {
   DecisionCreatedEvent,
   DependentWriteEvent,
+  DerivedEvidenceEvent,
   FindingCreatedEvent,
   FindingFeedbackCreatedEvent,
   ProtocolEvent,
@@ -18,6 +19,7 @@ import {
   makeDependencyChanged,
   makeFileChanged,
   makeFileRead,
+  makeSymbolChanged,
   makeFindingCreated,
   makeFindingFeedbackCreated,
   makeDecisionCreated,
@@ -114,6 +116,67 @@ test("accepts a V2 dependent write event at the boundary", () => {
   const result = parseEvent(event);
   assert.deepEqual(result.diagnostics, []);
   assert.equal(result.value?.eventType, "write.dependent");
+});
+
+test("accepts durable V2 derived-evidence provenance", () => {
+  const target = makeSymbolChanged();
+  const event: DerivedEvidenceEvent = {
+    ...target,
+    schemaVersion: 2,
+    eventId: `evt_${"e".repeat(32)}`,
+    eventType: "evidence.derived",
+    source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "22222222-2222-4222-8222-222222222222" },
+    causationId: target.eventId,
+    payload: {
+      evidence: {
+        targetEventId: target.eventId,
+        factKind: "symbol",
+        analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+        configuration: { parser: "typescript" },
+        configurationDigest: "sha256:f8a4fe6e12fee58f81df0e17bc5a91622bc226ca5f4e5502edef985c7d0f3839",
+        sourceEventIds: [target.eventId],
+        integrationTarget: "main",
+        coverage: { status: "sufficient", reason: "supported" },
+        coverageId: `coverage_${"1".repeat(32)}`,
+        stableFactId: target.payload.resource.resourceId,
+        exported: true,
+        normalizedSignature: "export function example(value: number): number",
+      },
+    },
+  };
+
+  assert.deepEqual(parseEvent(event).diagnostics, []);
+  assert.deepEqual(validateEventSet([target, event]), []);
+});
+
+test("rejects derived evidence with a missing source event", () => {
+  const target = makeSymbolChanged();
+  const event = {
+    ...target,
+    schemaVersion: 2 as const,
+    eventId: `evt_${"f".repeat(32)}` as const,
+    eventType: "evidence.derived" as const,
+    source: { kind: "analyzer" as const, sourceId: "source_typescript", instanceId: "22222222-2222-4222-8222-222222222222" },
+    causationId: target.eventId,
+    payload: {
+      evidence: {
+        targetEventId: target.eventId,
+        factKind: "symbol" as const,
+        analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+        configuration: { parser: "typescript" },
+        configurationDigest: "sha256:f8a4fe6e12fee58f81df0e17bc5a91622bc226ca5f4e5502edef985c7d0f3839",
+        sourceEventIds: [`evt_${"0".repeat(32)}`],
+        integrationTarget: "main",
+        coverage: { status: "sufficient" as const, reason: "supported" },
+        coverageId: `coverage_${"1".repeat(32)}`,
+        stableFactId: target.payload.resource.resourceId,
+        exported: true,
+        normalizedSignature: "export function example(value: number): number",
+      },
+    },
+  };
+
+  assert.equal(validateEventSet([target, event]).some((entry) => entry.code === "PHASE2_REFERENCE_MISSING"), true);
 });
 
 test("requires nullable attribution fields to be present", () => {
