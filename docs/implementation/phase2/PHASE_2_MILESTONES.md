@@ -28,7 +28,7 @@ automatically revalidate work.
 | M4 stale read | Explicit `write.dependent` capture, durable-reference guard, replay reconstruction, and report-only daemon path | Partial — integration-target provenance, corrected-attribution cases, and labeled corpus acceptance remain |
 | M5 contracts | Cross-worktree resolver, multiple-consumer retention, deterministic supported-function compatibility classification, durable history, and real golden path | Partial — complete contract history and broader signature compatibility remain |
 | M6 report-only | Policy, explanation, append-only feedback CLI, and daemon delivery/feedback writers | Partial — delivery command UX and full CLI scenario coverage remain |
-| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; fail-closed field corpus/evaluator | Partial — current field corpus has trace-integrity only; reviewed detector cases and calibration remain required |
+| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; fail-closed field corpus/evaluator; [production host adapter boundary](M7_HOST_ADAPTER_BOUNDARY.md) | Blocked — external host adapter is missing; current field corpus has trace-integrity only |
 
 ## Milestone Order
 
