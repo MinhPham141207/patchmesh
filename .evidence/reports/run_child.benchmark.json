@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": "evidence-v1",
+  "workloadId": "run_child",
+  "kind": "trace_summary",
+  "generatedAt": "2026-08-10T08:57:55.499Z",
+  "warmupRuns": 2,
+  "measuredRuns": 10,
+  "samples": [
+    {
+      "elapsedMs": 0.3743000000000052,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 0.27010000000001355,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 0.24490000000000123,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 0.27599999999998204,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 0.1939000000000135,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 0.29230000000001155,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 2.296199999999999,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 0.3427000000000078,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 0.1414000000000044,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    },
+    {
+      "elapsedMs": 0.14619999999999322,
+      "eventCount": 4,
+      "traceSizeBytes": 2623,
+      "redactionCount": 0,
+      "unknownEffectCount": 4,
+      "failure": null
+    }
+  ],
+  "p50Ms": 0.27010000000001355,
+  "p95Ms": 2.296199999999999,
+  "failures": 0,
+  "eventCount": 4,
+  "environment": {
+    "timestamp": "2026-08-10T08:57:55.502Z",
+    "commit": "d2f644be9dd0154100dabd4a3ba10fe9eec63ec3",
+    "os": "win32 10.0.26200",
+    "architecture": "x64",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+    "memoryBytes": 16813264896,
+    "nodeVersion": "v24.15.0"
+  }
+}

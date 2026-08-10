@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "runId": "run_child",
+  "eventCount": 4,
+  "actionCounts": {
+    "session.start": 1,
+    "session.stop": 1,
+    "tool.failed": 1,
+    "tool.requested": 1
+  },
+  "resultCounts": {
+    "started": 2,
+    "succeeded": 1,
+    "failed": 1,
+    "interrupted": 0,
+    "rejected": 0,
+    "unknown": 0
+  },
+  "effectCounts": {
+    "verified": 0,
+    "inferred": 0,
+    "degraded": 0,
+    "unknown": 4
+  },
+  "completedToolCount": 0,
+  "failedToolCount": 1,
+  "interruptedToolCount": 0,
+  "rejectedToolCount": 0,
+  "unknownEffectCount": 4,
+  "redactionCount": 0,
+  "effectCoverage": 0,
+  "gapCounts": {
+    "post-tool effect observation was unavailable": 4
+  },
+  "traceDigest": "sha256:4280c4b13a35ac5d6d1d8862a15c715d4b94f70c872eefa902c90806eee494a5",
+  "manifestDigest": "sha256:ce5113e52e5e8027ec8ca53b76c18f8bec8eb4801da9b2f8a0132081046c1444"
+}

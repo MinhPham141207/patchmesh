@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "runId": "run_parent",
+  "eventCount": 5,
+  "actionCounts": {
+    "session.start": 1,
+    "session.stop": 1,
+    "subagent.start": 1,
+    "tool.completed": 1,
+    "tool.requested": 1
+  },
+  "resultCounts": {
+    "started": 3,
+    "succeeded": 2,
+    "failed": 0,
+    "interrupted": 0,
+    "rejected": 0,
+    "unknown": 0
+  },
+  "effectCounts": {
+    "verified": 0,
+    "inferred": 0,
+    "degraded": 0,
+    "unknown": 5
+  },
+  "completedToolCount": 1,
+  "failedToolCount": 0,
+  "interruptedToolCount": 0,
+  "rejectedToolCount": 0,
+  "unknownEffectCount": 5,
+  "redactionCount": 0,
+  "effectCoverage": 0,
+  "gapCounts": {
+    "post-tool effect observation was unavailable": 5
+  },
+  "traceDigest": "sha256:c3a07920731d817d9b16506ad17731f0f74a7046a3b717dd99d9347ae9073b40",
+  "manifestDigest": "sha256:d0d8ed6842daccda86f7e8a7427c81707a9950653265f3508c865ebdfbbdddc7"
+}
