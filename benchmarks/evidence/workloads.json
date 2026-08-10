@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": "evidence-v1",
+  "workloads": [
+    { "workloadId": "trace_summary_small", "traceGlob": "small", "warmupRuns": 2, "measuredRuns": 10 },
+    { "workloadId": "trace_summary_parent_subagent", "traceGlob": "parent-subagent", "warmupRuns": 2, "measuredRuns": 10 },
+    { "workloadId": "trace_summary_large", "traceGlob": "large", "warmupRuns": 1, "measuredRuns": 5 }
+  ]
+}
