@@ -1,5 +1,6 @@
 import { normalizeHookPayload } from "./normalize.mjs";
 import { appendTraceEvent } from "./trace-store.mjs";
+import { updateRunManifest } from "./manifest.mjs";
 import { EFFECT_STATUSES, RESULT_STATUSES } from "./types.mjs";
 
 function diagnostic(code, message) {
@@ -36,11 +37,19 @@ export async function recordHookPayload({ payload, env = process.env, now = new 
   const evidenceRoot = typeof env.PATCHMESH_EVIDENCE_ROOT === "string" ? env.PATCHMESH_EVIDENCE_ROOT : ".evidence";
   const event = normalizeHookPayload(payload, context);
   const result = await appendTraceEvent({ evidenceRoot, runId: context.runId, event });
+  let diagnosticResult = result.diagnostic;
+  if (result.accepted) {
+    try {
+      await updateRunManifest({ evidenceRoot, runId: context.runId, now });
+    } catch (error) {
+      diagnosticResult = diagnostic("TRACE_MANIFEST_FAILED", error instanceof Error ? error.message : String(error));
+    }
+  }
   return {
     accepted: result.accepted,
     duplicate: result.duplicate,
     eventId: result.event?.eventId ?? event.eventId,
     tracePath: result.tracePath,
-    diagnostic: result.diagnostic,
+    diagnostic: diagnosticResult,
   };
 }

@@ -29,6 +29,8 @@ test("records one hook payload with environment attribution", async () => {
     assert.equal(result.accepted, true);
     const lines = (await readFile(result.tracePath, "utf8")).trim().split("\n");
     assert.equal(JSON.parse(lines[0]).agentId, "agent-a");
+    const manifest = JSON.parse(await readFile(join(evidenceRoot, "runs", "run-a.manifest.json"), "utf8"));
+    assert.equal(manifest.eventCount, 1);
   });
 });
 
