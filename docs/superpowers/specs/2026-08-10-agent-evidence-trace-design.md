@@ -217,13 +217,14 @@ Codex, OpenCode, and future runtimes use small translators at the hook boundary
 to produce the recorder input contract. Runtime-specific parsing does not leak
 into the trace schema or PatchMesh core packages.
 
-If input is malformed, the recorder returns a non-zero result and emits a
-redacted `trace.error` only when a valid run context is available. It never
-writes the malformed raw payload.
+If input is malformed, the recorder returns an `accepted: false` diagnostic and
+emits a redacted `trace.error` only when a valid run context is available. It
+never writes the malformed raw payload. The hook process still exits
+successfully so recorder failure cannot block the observed operation.
 
 If the trace cannot be written, the recorder reports the failure to stderr and
-returns a diagnostic result. It must not fail the agent's underlying tool
-operation.
+returns an `accepted: false` diagnostic. The hook process still exits
+successfully and must not fail the agent's underlying tool operation.
 
 ## Validation and Benchmarks
 
