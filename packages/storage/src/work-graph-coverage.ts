@@ -82,6 +82,9 @@ function toolCoverage(
   }
 
   evidenceEventIds.push(completion.eventId);
+  const deterministicallyAttributedEffectEventIds = new Set(
+    completion.payload.deterministicallyAttributedEffectEventIds ?? [],
+  );
   const observedReadEventIds = [...eventsById.values()]
     .filter((event) => (event.eventType === "file.read" || event.eventType === "symbol.read")
       && event.causationId === request.eventId)
@@ -94,7 +97,7 @@ function toolCoverage(
       continue;
     }
     evidenceEventIds.push(effect.eventId);
-    if (effect.source.kind === "watcher") {
+    if (effect.source.kind === "watcher" && !deterministicallyAttributedEffectEventIds.has(effect.eventId)) {
       gaps.push(gap(
         "unverified",
         `tool:${request.eventId}`,

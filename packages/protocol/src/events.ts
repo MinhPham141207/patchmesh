@@ -56,6 +56,8 @@ export interface ToolCompletedPayload {
   readonly outcome: "succeeded" | "failed" | "interrupted";
   readonly exitCode: number | null;
   readonly effectEventIds: readonly EventId[];
+  /** Watcher file-change effects whose origin was confirmed by structured execution metadata. */
+  readonly deterministicallyAttributedEffectEventIds?: readonly EventId[];
 }
 
 export interface ResourceObservedPayload {

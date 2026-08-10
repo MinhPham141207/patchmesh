@@ -116,6 +116,9 @@ importers:
       '@patchmesh/adapters':
         specifier: workspace:*
         version: link:../../packages/adapters
+      '@patchmesh/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@patchmesh/observation':
         specifier: workspace:*
         version: link:../../packages/observation

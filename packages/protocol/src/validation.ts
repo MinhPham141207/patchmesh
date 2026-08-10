@@ -136,6 +136,33 @@ function validateToolCompletion(
   if (event.causationId !== event.payload.requestEventId && !event.payload.effectEventIds.includes(event.causationId as EventId)) {
     diagnostics.push(diagnostic("PHASE0_SCHEMA_INVALID", `/events/${event.eventId}/causationId`, "tool completion must be caused by its request or declared effect"));
   }
+
+  for (const effectEventId of event.payload.deterministicallyAttributedEffectEventIds ?? []) {
+    const path = `/events/${event.eventId}/payload/deterministicallyAttributedEffectEventIds`;
+    if (event.payload.outcome !== "succeeded") {
+      diagnostics.push(diagnostic("PHASE0_SCHEMA_INVALID", path, "deterministically attributed effects require a succeeded tool completion"));
+      continue;
+    }
+    if (!event.payload.effectEventIds.includes(effectEventId)) {
+      diagnostics.push(diagnostic("PHASE0_SCHEMA_INVALID", path, "deterministically attributed effect must be declared in effectEventIds"));
+      continue;
+    }
+    const effect = eventsById.get(effectEventId);
+    if (effect === undefined) {
+      diagnostics.push(diagnostic("PHASE0_REFERENCE_MISSING", path, "deterministically attributed effect event is absent"));
+      continue;
+    }
+    if (effect.eventType !== "file.changed" || effect.source.kind !== "watcher") {
+      diagnostics.push(diagnostic("PHASE0_SCHEMA_INVALID", path, "deterministically attributed effect must be a watcher file.changed event"));
+      continue;
+    }
+    if (!sameDomain(event, effect)
+      || event.correlationId !== effect.correlationId
+      || event.agentId !== effect.agentId
+      || event.taskId !== effect.taskId) {
+      diagnostics.push(diagnostic("PHASE0_SCHEMA_INVALID", path, "deterministically attributed effect does not match completion attribution"));
+    }
+  }
 }
 
 function validateAttributionCorrection(

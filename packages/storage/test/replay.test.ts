@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type {
   DecisionCreatedEvent,
+  DecisionDeliveryChangedEvent,
   DependentWriteEvent,
   DependencyChangedEvent,
   FileChangedEvent,
@@ -17,7 +18,7 @@ import type {
   ToolCompletedEvent,
   ToolRequestedEvent,
 } from "@patchmesh/protocol";
-import { SqliteEventStore, StorageError } from "../src/index.js";
+import { projectWorkGraph, SqliteEventStore, StorageError } from "../src/index.js";
 import { replayEvents } from "../src/replay.js";
 
 async function withTemporaryDatabase(run: (databasePath: string) => void | Promise<void>): Promise<void> {
@@ -222,19 +223,35 @@ const v2Decision: DecisionCreatedEvent = {
 const v2Feedback: FindingFeedbackCreatedEvent = {
   ...v2Finding,
   schemaVersion: 2,
-  eventId: `evt_${"4".repeat(31)}6`,
+  eventId: `evt_${"3".repeat(32)}`,
   eventType: "finding.feedback.created",
-  causationId: v2Decision.eventId,
+  causationId: `evt_${"4".repeat(31)}6`,
   payload: {
     feedback: {
-      feedbackId: `feedback_${"4".repeat(31)}6`,
+      feedbackId: `feedback_${"4".repeat(31)}7`,
       findingId: v2Finding.payload.finding.findingId,
       decisionId: v2Decision.payload.decision.decisionId,
       actor: { agentId: "agent_a", taskId: "task_a" },
-      disposition: "acknowledged",
+      disposition: "dismissed",
       useful: true,
       reason: "notification prevented redundant work",
       evidenceEventIds: [v2Finding.eventId, v2Decision.eventId],
+    },
+  },
+};
+
+const v2Delivery: DecisionDeliveryChangedEvent = {
+  ...v2Finding,
+  eventId: `evt_${"4".repeat(31)}6`,
+  eventType: "decision.delivery.changed",
+  causationId: v2Decision.eventId,
+  payload: {
+    decisionId: v2Decision.payload.decision.decisionId,
+    delivery: {
+      deliveryId: `delivery_${"4".repeat(31)}6`,
+      target: { agentId: "agent_a", taskId: "task_a" },
+      state: "delivered",
+      eventIds: [`evt_${"4".repeat(31)}6`],
     },
   },
 };
@@ -341,6 +358,7 @@ const v2DependentWrite: DependentWriteEvent = {
 const v2ReplayEvents: readonly ProtocolEvent[] = [
   v2Finding,
   v2Decision,
+  v2Delivery,
   v2Feedback,
   v2Read,
   v2Dependency,
@@ -399,9 +417,17 @@ test("V2 feedback and dependent-write replay converges under duplicates and out-
         const outOfOrderReplay = outOfOrder.replay();
         assert.deepEqual(
           outOfOrderReplay.orderedEvents.map((event) => event.eventId),
-          canonicalReplay.orderedEvents.map((event) => event.eventId),
+          v2ReplayEvents.map((event) => event.eventId),
         );
         assert.deepEqual(outOfOrderReplay.state, canonicalReplay.state);
+
+        const canonicalProjection = projectWorkGraph(canonical.read());
+        const outOfOrderProjection = projectWorkGraph(outOfOrder.read());
+        assert.deepEqual(outOfOrderProjection.snapshot, canonicalProjection.snapshot);
+        assert.equal(outOfOrderProjection.snapshot.findings[0]?.status, "dismissed");
+        assert.equal(outOfOrderProjection.snapshot.findings[0]?.feedback[0]?.feedback.useful, true);
+        assert.equal(outOfOrderProjection.snapshot.decisions[0]?.deliveries[0]?.state, "delivered");
+        assert.equal(outOfOrderProjection.snapshot.decisions[0]?.feedback.length, 1);
       } finally {
         canonical.close();
         outOfOrder.close();

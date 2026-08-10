@@ -36,6 +36,12 @@ Observation types are `tool.requested`, `tool.completed`, `file.read`, `file.cha
 `validity.changed`, and `decision.delivery.changed`. The event type-to-payload map is
 closed in the envelope validator.
 
+`tool.completed` may include `deterministicallyAttributedEffectEventIds` for watcher
+`file.changed` events whose resource identities were explicitly reported by the successful
+tool adapter and exactly confirmed by the intercepted observation. These IDs must also be
+listed in `effectEventIds`; replay rejects missing, non-watcher, mismatched, or
+cross-attribution references. Their absence preserves degraded snapshot-origin coverage.
+
 ## Phase 2 V2 event types
 
 [`schemas/phase2/v1/event-envelope.schema.json`](../../schemas/phase2/v1/event-envelope.schema.json)

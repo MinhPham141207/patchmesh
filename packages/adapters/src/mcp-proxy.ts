@@ -104,6 +104,7 @@ function createToolCompletedEvent(
   outcome: ToolCompletedEvent["payload"]["outcome"],
   exitCode: number | null,
   effectEventIds: readonly EventId[],
+  deterministicallyAttributedEffectEventIds: readonly EventId[],
 ): ToolCompletedEvent {
   return {
     schemaVersion: 1,
@@ -124,8 +125,44 @@ function createToolCompletedEvent(
       outcome,
       exitCode,
       effectEventIds,
+      ...(deterministicallyAttributedEffectEventIds.length === 0
+        ? {}
+        : { deterministicallyAttributedEffectEventIds }),
     },
   };
+}
+
+const snapshotOriginGapReason = "snapshot observation verifies final state but cannot prove each effect originated from the intercepted operation";
+
+function isSnapshotOriginGap(gap: ObservationGap): boolean {
+  return gap.kind === "unverified" && gap.scope === "tool.effects" && gap.reason === snapshotOriginGapReason;
+}
+
+function hasExactEffectResourceMatch(
+  reported: readonly string[],
+  observed: readonly string[],
+): boolean {
+  if (reported.length === 0 || reported.length !== observed.length) return false;
+  if (new Set(reported).size !== reported.length || new Set(observed).size !== observed.length) return false;
+  const orderedReported = [...reported].sort((left, right) => left.localeCompare(right));
+  const orderedObserved = [...observed].sort((left, right) => left.localeCompare(right));
+  return orderedReported.every((resourceId, index) => resourceId === orderedObserved[index]);
+}
+
+function deterministicallyAttributedEffectEventIds(
+  call: McpToolCall,
+  execution: ToolExecutionResult<unknown>,
+  changes: readonly FileChangedEvent[],
+  observationGaps: readonly ObservationGap[],
+  outOfBandEventIds: readonly EventId[],
+): readonly EventId[] {
+  if (execution.outcome !== "succeeded" || call.opaque || changes.length === 0 || outOfBandEventIds.length > 0) return [];
+  if (!hasExactEffectResourceMatch(
+    execution.effectResourceIds ?? [],
+    changes.map((change) => change.payload.resource.resourceId),
+  )) return [];
+  if (observationGaps.some((gap) => !isSnapshotOriginGap(gap))) return [];
+  return changes.map((change) => change.eventId);
 }
 
 function createResource(repositoryId: LogicalResource["repositoryId"], path: string): LogicalResource {
@@ -597,6 +634,17 @@ export class McpProxy {
       });
     }
 
+    const attributedEffectIds = deterministicallyAttributedEffectEventIds(
+      call,
+      execution,
+      interceptedChanges,
+      observationGaps,
+      outOfBandEventIds,
+    );
+    const resolvedObservationGaps = attributedEffectIds.length === 0
+      ? observationGaps
+      : observationGaps.filter((gap) => !isSnapshotOriginGap(gap));
+
     let completedEvent: ProtocolEvent;
     try {
       completedEvent = appendValidated(
@@ -608,6 +656,7 @@ export class McpProxy {
           execution.outcome,
           execution.exitCode,
           effectEventIds,
+          attributedEffectIds,
         ),
         this.eventStore,
       );
@@ -636,7 +685,7 @@ export class McpProxy {
           modes: beforeCapture !== null && afterCapture !== null
             ? ["intercepted", "verified"]
             : ["intercepted", "unknown"],
-          gaps: observationGaps,
+          gaps: resolvedObservationGaps,
           evidenceEventIds,
         });
 
@@ -671,7 +720,7 @@ export class McpProxy {
       completedEventId: completedEvent.eventId,
       readEventIds,
       coverage,
-      observationDiagnostics: observationGaps,
+      observationDiagnostics: resolvedObservationGaps,
       analysisDiagnostics,
     };
   }

@@ -125,7 +125,12 @@ test("persists verified effects and links them from completion", async () => {
       const result = await proxy.execute(
         { ...call, operation: "edit_file", toolName: "edit_file" },
         { ...context, workspaceRoot: tmpdir() },
-        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+        async () => ({
+          outcome: "succeeded",
+          value: true,
+          exitCode: 0,
+          effectResourceIds: [fileResourceId(context.repositoryId, "changed.txt")],
+        }),
       );
 
       const events = store.read();
@@ -140,6 +145,7 @@ test("persists verified effects and links them from completion", async () => {
         throw new Error("expected file effect and tool completion");
       }
       assert.deepEqual(completion.payload.effectEventIds, [effect.eventId]);
+      assert.deepEqual(completion.payload.deterministicallyAttributedEffectEventIds, [effect.eventId]);
       assert.equal(effect.causationId, events[0]?.eventId);
       assert.deepEqual(result.coverage?.modes, ["intercepted", "verified"]);
       assert.equal(result.coverage?.presentation, "sufficient");

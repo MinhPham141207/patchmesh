@@ -23,7 +23,7 @@ automatically revalidate work.
 | --- | --- | --- |
 | M1 contracts | Immutable V2 feedback; replayed finding/decision/delivery/feedback views; deterministic feedback/delivery writes; replay-time V2 reference checks | Partial — append-time out-of-order buffering and a complete compatibility audit remain |
 | M2 evidence | TypeScript/JavaScript source facts, symbol events, resolver-confirmed dependency events, degraded unsupported/opaque handling | Partial — analyzer facts are not durably replayed across adapter restarts |
-| M3 overlap | Deterministic same-symbol detector plus conservative durable replay/runtime append path | Partial — broader labeled corpus and integration-target cases remain |
+| M3 overlap | Deterministic same-symbol detector plus a real linked-worktree MCP/watcher golden path through sufficient coverage and durable replay/runtime append | Partial — broader labeled corpus and integration-target cases remain |
 | M4 stale read | Explicit `write.dependent` capture, durable-reference guard, replay reconstruction, and report-only daemon path | Partial — integration-target provenance, corrected-attribution cases, and labeled corpus acceptance remain |
 | M5 contracts | Resolver-confirmed dependency facts plus a replay/daemon path for explicitly deleted contracts | Partial — durable signature compatibility classification and complete contract history are not yet captured |
 | M6 report-only | Policy, explanation, append-only feedback CLI, and daemon delivery/feedback writers | Partial — delivery command UX and full CLI scenario coverage remain |

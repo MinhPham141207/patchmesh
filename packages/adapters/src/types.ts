@@ -54,7 +54,13 @@ export interface McpCallContext {
 }
 
 export type ToolExecutionResult<T> =
-  | { readonly outcome: "succeeded"; readonly value: T; readonly exitCode: number | null }
+  | {
+      readonly outcome: "succeeded";
+      readonly value: T;
+      readonly exitCode: number | null;
+      /** Resource IDs the adapter directly observed this operation changing. */
+      readonly effectResourceIds?: readonly ResourceId[];
+    }
   | { readonly outcome: "failed"; readonly error?: unknown; readonly exitCode: number | null }
   | { readonly outcome: "interrupted"; readonly reason?: unknown; readonly exitCode: number | null };
 

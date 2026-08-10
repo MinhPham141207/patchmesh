@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@patchmesh/adapters": "workspace:*",
+    "@patchmesh/core": "workspace:*",
     "@patchmesh/observation": "workspace:*",
     "@patchmesh/protocol": "workspace:*",
     "@patchmesh/storage": "workspace:*"

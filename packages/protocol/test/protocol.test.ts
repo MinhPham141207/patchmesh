@@ -150,6 +150,65 @@ test("accepts a causally ordered request and completion set", () => {
   assert.deepEqual(validateEventSet([request, completion]), []);
 });
 
+test("accepts deterministic watcher attribution on a tool completion", () => {
+  const request = makeToolRequested();
+  const changed = {
+    ...makeFileChanged(),
+    eventId: `evt_${"7".repeat(32)}` as const,
+    source: { kind: "watcher" as const, sourceId: "source_watcher", instanceId: "22222222-2222-4222-8222-222222222222" },
+    correlationId: request.correlationId,
+    causationId: request.eventId,
+  };
+  const completion = {
+    ...makeToolCompleted(request),
+    payload: {
+      ...makeToolCompleted(request).payload,
+      effectEventIds: [changed.eventId],
+      deterministicallyAttributedEffectEventIds: [changed.eventId],
+    },
+  };
+
+  assert.deepEqual(parseEvent(completion).diagnostics, []);
+  assert.deepEqual(validateEventSet([request, changed, completion]), []);
+});
+
+test("rejects deterministic attribution for a non-file-change effect", () => {
+  const request = makeToolRequested();
+  const completion = {
+    ...makeToolCompleted(request),
+    payload: {
+      ...makeToolCompleted(request).payload,
+      effectEventIds: [request.eventId],
+      deterministicallyAttributedEffectEventIds: [request.eventId],
+    },
+  };
+
+  assert.equal(validateEventSet([request, completion]).some((entry) =>
+    entry.code === "PHASE0_SCHEMA_INVALID" && entry.path.endsWith("/deterministicallyAttributedEffectEventIds")), true);
+});
+
+test("rejects deterministic attribution on a failed tool completion", () => {
+  const request = makeToolRequested();
+  const changed = {
+    ...makeFileChanged(),
+    eventId: `evt_${"8".repeat(32)}` as const,
+    source: { kind: "watcher" as const, sourceId: "source_watcher", instanceId: "22222222-2222-4222-8222-222222222222" },
+    correlationId: request.correlationId,
+    causationId: request.eventId,
+  };
+  const completion = {
+    ...makeToolCompleted(request, "failed"),
+    payload: {
+      ...makeToolCompleted(request, "failed").payload,
+      effectEventIds: [changed.eventId],
+      deterministicallyAttributedEffectEventIds: [changed.eventId],
+    },
+  };
+
+  assert.equal(validateEventSet([request, changed, completion]).some((entry) =>
+    entry.code === "PHASE0_SCHEMA_INVALID" && entry.message.includes("succeeded tool completion")), true);
+});
+
 test("rejects a completion whose request is missing", () => {
   const completion = makeToolCompleted();
   const missingRequest = `evt_${"9".repeat(32)}`;

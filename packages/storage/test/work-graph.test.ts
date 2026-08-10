@@ -195,6 +195,16 @@ const toolCompletion: ToolCompletedEvent = {
   },
 };
 
+const deterministicallyAttributedToolCompletion: ToolCompletedEvent = {
+  ...toolCompletion,
+  eventId: "evt_00000000000000000000000000000031",
+  sourceSequence: 6,
+  payload: {
+    ...toolCompletion.payload,
+    deterministicallyAttributedEffectEventIds: [linkedEffect.eventId],
+  },
+};
+
 const opaqueToolRequest: ToolRequestedEvent = {
   ...toolRequest,
   eventId: "evt_00000000000000000000000000000021",
@@ -382,6 +392,17 @@ test("degrades snapshot-watcher effect coverage because origin is uncertain", ()
     coverage.some((value) => value.gaps.some((gap) => gap.reason.includes("effect origin cannot be proven"))),
     true,
   );
+});
+
+test("derives sufficient coverage from durable deterministic watcher attribution", () => {
+  const coverage = projectOrdered([
+    toolRequest,
+    linkedEffect,
+    deterministicallyAttributedToolCompletion,
+  ]).snapshot.coverage;
+
+  assert.equal(coverage.some((value) => value.presentation === "sufficient"), true);
+  assert.equal(coverage.some((value) => value.gaps.some((gap) => gap.reason.includes("effect origin cannot be proven"))), false);
 });
 
 test("reports degraded coverage for opaque and unresolved effects", () => {
