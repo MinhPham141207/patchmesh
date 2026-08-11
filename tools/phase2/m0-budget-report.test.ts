@@ -5,23 +5,26 @@ import { evaluateM0Budget, p95FromSamples, type M0WorkloadInput } from "./m0-bud
 const workload = (workloadId: "small" | "medium" | "large", source: M0WorkloadInput["source"] = "node_observation") => ({
   workloadId,
   source,
-  samplesMs: [10, 20, 20, 30, 30],
-  budgetMs: workloadId === "small" ? 30 : workloadId === "medium" ? 60 : 120,
+  samplesMs: Array.from({ length: 30 }, () => 20),
+  budgetMs: workloadId === "small" ? 250 : workloadId === "medium" ? 1500 : 5000,
   failures: 0,
 });
 
-test("accepts only actual observation measurements within budget", () => {
+test("keeps legacy observation measurements non-qualifying even when within budget", () => {
   const report = evaluateM0Budget({
     environment: { nodeVersion: "v24.15.0", os: "win32", architecture: "x64" },
     workloads: [workload("small"), workload("medium"), workload("large")],
+    owner: "phase2-runtime",
+    dueGate: "M0 controlled benchmark",
   });
 
-  assert.equal(report.decision, "accepted");
-  assert.equal(report.workloads.every((entry) => entry.accepted), true);
+  assert.equal(report.decision, "deferred");
+  assert.equal(report.workloads.every((entry) => entry.accepted), false);
+  assert.match(report.reason, /canonical paired three-run/i);
 });
 
 test("recomputes p95 from the raw measurements instead of trusting a supplied summary", () => {
-  const staleSummary = { ...workload("small"), samplesMs: [10, 20, 30, 40, 50], p95Ms: 0 };
+  const staleSummary = { ...workload("small"), samplesMs: [...Array.from({ length: 28 }, () => 10), 300, 300], p95Ms: 0 };
   const report = evaluateM0Budget({
     environment: { nodeVersion: "v24.15.0", os: "win32", architecture: "x64" },
     workloads: [staleSummary, workload("medium"), workload("large")],
@@ -30,7 +33,7 @@ test("recomputes p95 from the raw measurements instead of trusting a supplied su
   });
 
   assert.equal(p95FromSamples([10, 20, 30, 40, 50]), 50);
-  assert.equal(report.workloads[0]?.p95Ms, 50);
+  assert.equal(report.workloads[0]?.p95Ms, 300);
   assert.equal(report.decision, "deferred");
 });
 
@@ -63,4 +66,16 @@ test("requires all named NodeObservationBoundary tiers with their fixed budgets"
 
   assert.equal(report.decision, "deferred");
   assert.match(report.reason, /small, medium, and large/);
+});
+
+test("requires the exact versioned retained-sample count", () => {
+  const report = evaluateM0Budget({
+    environment: { nodeVersion: "v24.15.0", os: "win32", architecture: "x64" },
+    workloads: [{ ...workload("small"), samplesMs: Array.from({ length: 29 }, () => 20) }, workload("medium"), workload("large")],
+    owner: "phase2-runtime",
+    dueGate: "M0 observation benchmark",
+  });
+
+  assert.equal(report.decision, "deferred");
+  assert.equal(report.workloads[0]?.accepted, false);
 });

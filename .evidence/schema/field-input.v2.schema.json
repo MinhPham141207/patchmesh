@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/evidence/schema/field-input.v2.schema.json",
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "detector": { "enum": ["same_symbol_overlap", "stale_read_before_write", "exported_contract_invalidation"] },
+    "adapter": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "runtime": { "type": "string", "minLength": 1 },
+        "runtimeVersion": { "type": "string", "minLength": 1 },
+        "adapterVersion": { "type": "string", "minLength": 1 },
+        "wrapsToolExecution": { "type": "boolean" },
+        "authoritativeIdentity": { "type": "boolean" },
+        "taskLifecycle": { "type": "boolean" },
+        "exactReportedEffects": { "type": "boolean" },
+        "integrationTargetSnapshot": { "type": "boolean" },
+        "concurrentWorktreeObservation": { "type": "boolean" },
+        "observedReadVersion": { "type": "boolean" },
+        "dependentWriteToken": { "type": "boolean" }
+      },
+      "required": ["schemaVersion", "runtime", "runtimeVersion", "adapterVersion", "wrapsToolExecution", "authoritativeIdentity", "taskLifecycle", "exactReportedEffects", "integrationTargetSnapshot", "concurrentWorktreeObservation", "observedReadVersion", "dependentWriteToken"],
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "caseId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "source": { "const": "real_production_adapter" },
+    "repositoryDomain": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "adapter": { "$ref": "#/$defs/adapter" },
+    "adapterCapabilityDigest": { "$ref": "#/$defs/digest" },
+    "integrationTargetSnapshotId": { "type": "string", "minLength": 1 },
+    "detector": { "$ref": "#/$defs/detector" },
+    "target": {
+      "type": "object",
+      "properties": {
+        "resourceId": { "type": "string", "minLength": 1 },
+        "affectedTaskId": { "type": ["string", "null"] }
+      },
+      "required": ["resourceId", "affectedTaskId"],
+      "additionalProperties": false
+    },
+    "protocolEvents": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "object" }
+    },
+    "protocolEventSetDigest": { "$ref": "#/$defs/digest" },
+    "limitations": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+  },
+  "required": ["schemaVersion", "caseId", "source", "repositoryDomain", "adapter", "adapterCapabilityDigest", "integrationTargetSnapshotId", "detector", "target", "protocolEvents", "protocolEventSetDigest", "limitations"],
+  "additionalProperties": false
+}

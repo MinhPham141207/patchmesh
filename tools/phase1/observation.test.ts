@@ -96,8 +96,9 @@ test("real MCP observation persists actual Git file effects and links completion
     const worktree = await createRepository(root);
     await withTemporaryDatabase(async (databasePath) => {
       const store = SqliteEventStore.open(databasePath);
+      let proxy: McpProxy | null = null;
       try {
-        const proxy = createProxy(store, worktree, [10, 11, 12]);
+        proxy = createProxy(store, worktree, [10, 11, 12]);
         const result = await proxy.execute(
           editCall,
           { ...createContext(worktree), workspaceRoot: worktree },
@@ -122,6 +123,7 @@ test("real MCP observation persists actual Git file effects and links completion
         ));
         assertNoPhase2Output(events);
       } finally {
+        await proxy?.dispose();
         store.close();
       }
     });
@@ -133,8 +135,9 @@ test("failed and interrupted MCP calls persist explicit non-success outcomes", a
     await createRepository(root);
     await withTemporaryDatabase(async (databasePath) => {
       const failedStore = SqliteEventStore.open(databasePath);
+      let failedProxy: McpProxy | null = null;
       try {
-        const failedProxy = createProxy(failedStore, root, [20, 21]);
+        failedProxy = createProxy(failedStore, root, [20, 21]);
         const failed = await failedProxy.execute(
           editCall,
           createContext(root),
@@ -146,6 +149,7 @@ test("failed and interrupted MCP calls persist explicit non-success outcomes", a
         if (completion?.eventType !== "tool.completed") throw new Error("expected failed completion");
         assert.equal(completion.payload.outcome, "failed");
       } finally {
+        await failedProxy?.dispose();
         failedStore.close();
       }
     });
@@ -155,10 +159,11 @@ test("failed and interrupted MCP calls persist explicit non-success outcomes", a
     await createRepository(root);
     await withTemporaryDatabase(async (databasePath) => {
       const store = SqliteEventStore.open(databasePath);
+      let proxy: McpProxy | null = null;
       try {
         const controller = new AbortController();
         controller.abort();
-        const proxy = createProxy(store, root, [30, 31]);
+        proxy = createProxy(store, root, [30, 31]);
         const interrupted = await proxy.execute(
           editCall,
           createContext(root, true),
@@ -173,6 +178,7 @@ test("failed and interrupted MCP calls persist explicit non-success outcomes", a
         if (completion?.eventType !== "tool.completed") throw new Error("expected interrupted completion");
         assert.equal(completion.payload.outcome, "interrupted");
       } finally {
+        await proxy?.dispose();
         store.close();
       }
     });
@@ -184,8 +190,9 @@ test("opaque shell effects produce degraded coverage instead of transparent attr
     await createRepository(root);
     await withTemporaryDatabase(async (databasePath) => {
       const store = SqliteEventStore.open(databasePath);
+      let proxy: McpProxy | null = null;
       try {
-        const proxy = createProxy(store, root, [40, 41, 42]);
+        proxy = createProxy(store, root, [40, 41, 42]);
         const result = await proxy.execute(
           {
             toolName: "run_shell",
@@ -202,6 +209,7 @@ test("opaque shell effects produce degraded coverage instead of transparent attr
         assert.equal(result.coverage?.presentation, "degraded");
         assert.ok(result.observationDiagnostics.some((gap) => gap.kind === "opaque"));
       } finally {
+        await proxy?.dispose();
         store.close();
       }
     });

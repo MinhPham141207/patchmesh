@@ -132,7 +132,20 @@ importers:
         specifier: workspace:*
         version: link:../../packages/storage
 
-  tools/phase2: {}
+  tools/phase2:
+    dependencies:
+      '@patchmesh/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
+      '@patchmesh/observation':
+        specifier: workspace:*
+        version: link:../../packages/observation
+      '@patchmesh/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@patchmesh/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
 
 packages:
 

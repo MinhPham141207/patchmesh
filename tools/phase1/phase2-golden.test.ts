@@ -108,13 +108,16 @@ const editCall: McpToolCall = {
   opaque: false,
 };
 
-test("real MCP calls across linked worktrees produce a covered same-symbol finding", async () => {
+test("sequential MCP calls across linked worktrees do not manufacture concurrency evidence", async () => {
   await withTemporaryDirectory("patchmesh-phase2-golden-", async (root) => {
     const [producerWorktree, consumerWorktree] = await createLinkedWorktrees(root);
     await withTemporaryDatabase(async (databasePath) => {
       const store = SqliteEventStore.open(databasePath);
+      let producerProxy: McpProxy | null = null;
+      let consumerProxy: McpProxy | null = null;
       try {
-        const producer = await createProxy(store, [10, 11, 12, 13, 14]).execute(
+        producerProxy = createProxy(store, [10, 11, 12, 13, 14]);
+        const producer = await producerProxy.execute(
           editCall,
           createContext(
             producerWorktree,
@@ -134,7 +137,8 @@ test("real MCP calls across linked worktrees produce a covered same-symbol findi
             };
           },
         );
-        const consumer = await createProxy(store, [20, 21, 22, 23, 24]).execute(
+        consumerProxy = createProxy(store, [20, 21, 22, 23, 24]);
+        const consumer = await consumerProxy.execute(
           editCall,
           createContext(
             consumerWorktree,
@@ -157,25 +161,21 @@ test("real MCP calls across linked worktrees produce a covered same-symbol findi
 
         const events = store.read();
         const graph = projectWorkGraph(events).snapshot;
-        assert.equal(producer.coverage?.presentation, "sufficient");
-        assert.equal(consumer.coverage?.presentation, "sufficient");
-        assert.equal(graph.coverage.filter((coverage) => coverage.presentation === "sufficient").length, 2);
+        assert.equal(producer.coverage?.presentation, "degraded", JSON.stringify(producer.coverage?.gaps));
+        assert.equal(consumer.coverage?.presentation, "degraded", JSON.stringify(consumer.coverage?.gaps));
+        assert.equal(graph.coverage.filter((coverage) => coverage.presentation === "degraded").length, 2);
         assert.equal(events.filter((event) => event.eventType === "file.changed").length, 2);
         assert.equal(events.filter((event) => event.eventType === "symbol.changed").length, 2);
 
         const records = createPhase2RuntimeRecords(events);
-        assert.equal(records.length, 1);
-        assert.equal(records[0]?.finding.payload.finding.findingType, "same_symbol_overlap");
-        assert.equal(records[0]?.decision.payload.decision.gatewayDirective, "allow_with_notice");
-
-        for (const record of records) {
-          assert.equal(store.append(record.finding).status, "inserted");
-          assert.equal(store.append(record.decision).status, "inserted");
-        }
+        assert.equal(events.some((event) => event.eventType === "task.concurrency.observed"), false);
+        assert.equal(records.length, 0);
         const projected = projectWorkGraph(store.read()).snapshot;
-        assert.equal(projected.findings.length, 1);
-        assert.equal(projected.decisions.length, 1);
+        assert.equal(projected.findings.length, 0);
+        assert.equal(projected.decisions.length, 0);
       } finally {
+        await producerProxy?.dispose();
+        await consumerProxy?.dispose();
         store.close();
       }
     });
@@ -195,10 +195,14 @@ test("real linked worktrees produce a durable exported-contract invalidation", a
 
     await withTemporaryDatabase(async (databasePath) => {
       const store = SqliteEventStore.open(databasePath);
+      let historyProxy: McpProxy | null = null;
+      let consumerProxy: McpProxy | null = null;
+      let producerProxy: McpProxy | null = null;
       try {
         const apiResourceId = fileResourceId(repositoryId, "src/api.ts");
         const consumerResourceId = fileResourceId(repositoryId, "src/consumer.ts");
-        const history = await createProxy(store, [30, 31, 32, 33, 34]).execute(
+        historyProxy = createProxy(store, [30, 31, 32, 33, 34]);
+        const history = await historyProxy.execute(
           { ...editCall, targetResourceId: apiResourceId },
           createContext(
             root,
@@ -222,7 +226,8 @@ test("real linked worktrees produce a durable exported-contract invalidation", a
         await runGit(root, "worktree", "add", "--detach", producerWorktree, "HEAD");
         await runGit(root, "worktree", "add", "--detach", consumerWorktree, "HEAD");
 
-        const consumer = await createProxy(store, [40, 41, 42, 43, 44, 45, 46]).execute(
+        consumerProxy = createProxy(store, [40, 41, 42, 43, 44, 45, 46]);
+        const consumer = await consumerProxy.execute(
           { ...editCall, targetResourceId: consumerResourceId },
           createContext(
             consumerWorktree,
@@ -239,7 +244,8 @@ test("real linked worktrees produce a durable exported-contract invalidation", a
         );
         assert.equal(consumer.coverage?.presentation, "sufficient");
 
-        const producer = await createProxy(store, [50, 51, 52, 53, 54]).execute(
+        producerProxy = createProxy(store, [50, 51, 52, 53, 54]);
+        const producer = await producerProxy.execute(
           { ...editCall, targetResourceId: apiResourceId },
           createContext(
             producerWorktree,
@@ -264,6 +270,9 @@ test("real linked worktrees produce a durable exported-contract invalidation", a
         assert.equal(contractRecords.length, 1);
         assert.equal(contractRecords[0]?.decision.payload.decision.gatewayDirective, "allow_with_notice");
       } finally {
+        await historyProxy?.dispose();
+        await consumerProxy?.dispose();
+        await producerProxy?.dispose();
         store.close();
       }
     });

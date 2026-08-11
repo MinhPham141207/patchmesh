@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/evidence/schema/generated-field-output.v2.schema.json",
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "detector": { "enum": ["same_symbol_overlap", "stale_read_before_write", "exported_contract_invalidation"] }
+  },
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "caseId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "detector": { "$ref": "#/$defs/detector" },
+    "detectorVersion": { "type": "string", "minLength": 1 },
+    "codeCommit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
+    "inputDigest": { "$ref": "#/$defs/digest" },
+    "observedFinding": { "type": "boolean" },
+    "predictedProbability": { "type": "number", "minimum": 0, "maximum": 1 },
+    "matchingFindingIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "allFindingDigest": { "$ref": "#/$defs/digest" },
+    "diagnostics": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["schemaVersion", "caseId", "detector", "detectorVersion", "codeCommit", "inputDigest", "observedFinding", "predictedProbability", "matchingFindingIds", "allFindingDigest", "diagnostics"],
+  "additionalProperties": false
+}

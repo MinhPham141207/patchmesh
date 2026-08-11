@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.invalid/schemas/phase2/m0-evidence.v1.schema.json",
+  "title": "PatchMesh Phase 2 M0 raw benchmark evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "evidenceKind", "definitionVersion", "definitionDigest",
+    "generatedAt", "commit", "gitDirty", "environment", "workloads",
+    "decision", "reason", "owner", "dueGate"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "evidenceKind": { "const": "m0_interception_budget" },
+    "definitionVersion": { "const": "phase2-m0-v1" },
+    "definitionDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+    "gitDirty": { "type": "boolean" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "workloads": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/workload" }
+    },
+    "decision": { "enum": ["accepted", "deferred", "rejected"] },
+    "reason": { "type": "string" },
+    "owner": { "type": ["string", "null"] },
+    "dueGate": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timestamp", "commit", "dirty", "os", "osRelease", "architecture",
+        "cpu", "memoryBytes", "nodeVersion", "pnpmVersion",
+        "workloadDefinitionDigest"
+      ],
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "dirty": { "type": "boolean" },
+        "os": { "type": "string", "minLength": 1 },
+        "osRelease": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 },
+        "cpu": { "type": "string", "minLength": 1 },
+        "memoryBytes": { "type": "number", "exclusiveMinimum": 0 },
+        "nodeVersion": { "type": "string", "minLength": 1 },
+        "pnpmVersion": { "type": "string", "minLength": 1 },
+        "workloadDefinitionDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baselineNs", "instrumentedNs", "overheadNs", "failure"],
+      "properties": {
+        "baselineNs": { "type": ["number", "null"], "minimum": 0 },
+        "instrumentedNs": { "type": ["number", "null"], "minimum": 0 },
+        "overheadNs": { "type": ["number", "null"], "minimum": 0 },
+        "failure": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/failure" }] }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "warmupSamples", "samples", "p50Ms", "p95Ms"],
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "warmupSamples": {
+          "type": "array", "minItems": 5, "maxItems": 5,
+          "items": { "$ref": "#/$defs/sample" }
+        },
+        "samples": {
+          "type": "array", "minItems": 30, "maxItems": 30,
+          "items": { "$ref": "#/$defs/sample" }
+        },
+        "p50Ms": { "type": ["number", "null"], "minimum": 0 },
+        "p95Ms": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workloadId", "fileCount", "budgetMs", "coldInitializationMs",
+        "coldInitializationRunsMs", "runs", "gateP95Ms", "failures", "accepted"
+      ],
+      "properties": {
+        "workloadId": { "enum": ["small", "medium", "large"] },
+        "fileCount": { "enum": [1000, 10000, 50000] },
+        "budgetMs": { "enum": [250, 1500, 5000] },
+        "coldInitializationMs": { "type": "number", "minimum": 0 },
+        "coldInitializationRunsMs": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "runs": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": { "$ref": "#/$defs/run" }
+        },
+        "gateP95Ms": { "type": ["number", "null"], "minimum": 0 },
+        "failures": { "type": "integer", "minimum": 0 },
+        "accepted": { "type": "boolean" }
+      }
+    }
+  }
+}

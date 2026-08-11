@@ -44,15 +44,21 @@ export function diffSnapshots(
   const pairedDeleted = new Set<string>();
   const pairedCreated = new Set<string>();
   const changes: ObservedFileChange[] = [];
+  const gaps: ObservationGap[] = [];
 
   for (const deletedPath of deletedPaths) {
     const deletedState = before.files.get(deletedPath);
     if (!deletedState) continue;
-    const createdPath = createdPaths.find((candidate) => {
+    const candidates = createdPaths.filter((candidate) => {
       if (pairedCreated.has(candidate)) return false;
       const createdState = after.files.get(candidate);
       return createdState !== undefined && sameState(deletedState, createdState);
     });
+    if (candidates.length > 1) {
+      gaps.push({ kind: "unverified", scope: deletedPath, reason: "rename pairing is ambiguous" });
+      continue;
+    }
+    const createdPath = candidates[0];
     if (!createdPath) continue;
     const createdState = after.files.get(createdPath);
     if (!createdState) continue;
@@ -106,13 +112,16 @@ export function diffSnapshots(
   changes.sort((left, right) => compareStrings(left.path, right.path));
   return {
     changes,
-    gaps: opaque
-      ? [{
-          kind: "opaque",
+    gaps: [
+      ...gaps,
+      ...(opaque
+        ? [{
+          kind: "opaque" as const,
           scope: "tool.effects",
           reason: "opaque operation effects are not prospectively enumerable",
         }]
-      : [],
+        : []),
+    ],
   };
 }
 

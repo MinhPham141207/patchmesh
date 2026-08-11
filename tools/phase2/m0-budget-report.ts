@@ -1,4 +1,5 @@
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { loadM0GateDefinition, type M0GateDefinition } from "./gate-definitions.js";
 
 export interface M0WorkloadInput {
   readonly workloadId: string;
@@ -18,6 +19,8 @@ export interface M0BudgetInput {
 export interface M0BudgetReport {
   readonly schemaVersion: 1;
   readonly evidenceKind: "m0_interception_budget";
+  readonly definitionVersion: M0GateDefinition["definitionVersion"];
+  readonly definitionDigest: `sha256:${string}`;
   readonly decision: "accepted" | "deferred" | "rejected";
   readonly reason: string;
   readonly owner: string | null;
@@ -26,15 +29,9 @@ export interface M0BudgetReport {
   readonly workloads: readonly (M0WorkloadInput & { readonly p95Ms: number | null; readonly accepted: boolean })[];
 }
 
-const minimumSamplesPerWorkload = 5;
-
-export const nodeObservationBoundaryTiers = {
-  small: 30,
-  medium: 60,
-  large: 120,
-} as const;
-
-type NodeObservationBoundaryTier = keyof typeof nodeObservationBoundaryTiers;
+const definitionRoot = fileURLToPath(new URL("../..", import.meta.url));
+const [m0GateDefinition, m0GateDefinitionDigest] = await loadM0GateDefinition(definitionRoot);
+const nodeObservationBoundaryTiers = new Map<string, number>(m0GateDefinition.workloads.map((workload) => [workload.workloadId, workload.budgetMs]));
 
 /** Uses the nearest-rank percentile so the reported p95 is always one observed sample. */
 export function p95FromSamples(samplesMs: readonly number[]): number | null {
@@ -45,48 +42,53 @@ export function p95FromSamples(samplesMs: readonly number[]): number | null {
 }
 
 export function evaluateM0Budget(input: M0BudgetInput): M0BudgetReport {
-  const requiredTiers = new Set<NodeObservationBoundaryTier>(Object.keys(nodeObservationBoundaryTiers) as NodeObservationBoundaryTier[]);
+  const requiredTiers = new Set<string>(nodeObservationBoundaryTiers.keys());
   const observedTiers = new Set(input.workloads.map((workload) => workload.workloadId));
   const hasRequiredTiers = input.workloads.length === requiredTiers.size
     && [...requiredTiers].every((tier) => observedTiers.has(tier));
   const recorderOnly = input.workloads.some((workload) => workload.source === "evidence_recorder");
   const workloads = input.workloads.map((workload) => {
     const p95Ms = p95FromSamples(workload.samplesMs);
-    const fixedBudget = nodeObservationBoundaryTiers[workload.workloadId as NodeObservationBoundaryTier];
+    const fixedBudget = nodeObservationBoundaryTiers.get(workload.workloadId);
+    const withinLegacyShape = fixedBudget !== undefined
+      && workload.source === "node_observation"
+      && Number.isInteger(workload.failures)
+      && workload.failures === 0
+      && workload.budgetMs === fixedBudget
+      && workload.samplesMs.length === m0GateDefinition.measuredSamples
+      && p95Ms !== null
+      && p95Ms <= workload.budgetMs;
     return {
       ...workload,
       p95Ms,
-      accepted: fixedBudget !== undefined
-        && workload.source === "node_observation"
-        && Number.isInteger(workload.failures)
-        && workload.failures === 0
-        && workload.budgetMs === fixedBudget
-        && workload.samplesMs.length >= minimumSamplesPerWorkload
-        && p95Ms !== null
-        && p95Ms <= workload.budgetMs,
+      // This legacy one-run shape is diagnostic only and can never qualify M0.
+      accepted: false,
+      withinLegacyShape,
     };
   });
-  const allAccepted = hasRequiredTiers && workloads.every((workload) => workload.accepted);
-  const decision = allAccepted && !recorderOnly ? "accepted" : "deferred";
+  const allWithinLegacyShape = hasRequiredTiers && workloads.every((workload) => workload.withinLegacyShape);
+  const decision = "deferred" as const;
   const reason = recorderOnly
     ? "recorder-only evidence cannot accept the NodeObservationBoundary interception budget"
     : !hasRequiredTiers
       ? "NodeObservationBoundary evidence requires exactly the small, medium, and large workload tiers"
-      : allAccepted
-        ? "all required NodeObservationBoundary workloads are within their fixed budgets"
+      : allWithinLegacyShape
+        ? "legacy measurements are within budget but cannot accept M0; use the canonical paired three-run artifact verifier"
         : "one or more required observation workloads are failed or over their fixed budget";
-  if (decision === "deferred" && (input.owner === undefined || input.dueGate === undefined)) {
+  if (input.owner === undefined || input.dueGate === undefined) {
     throw new Error("deferred M0 decisions require owner and dueGate");
   }
   return {
     schemaVersion: 1,
     evidenceKind: "m0_interception_budget",
+    definitionVersion: m0GateDefinition.definitionVersion,
+    definitionDigest: m0GateDefinitionDigest,
     decision,
     reason,
     owner: input.owner ?? null,
     dueGate: input.dueGate ?? null,
     environment: input.environment,
-    workloads,
+    workloads: workloads.map(({ withinLegacyShape: _withinLegacyShape, ...workload }) => workload),
   };
 }
 

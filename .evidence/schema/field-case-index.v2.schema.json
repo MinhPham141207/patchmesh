@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/evidence/schema/field-case-index.v2.schema.json",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "corpusVersion": { "type": "string", "minLength": 1 },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "caseId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+          "detector": { "enum": ["same_symbol_overlap", "stale_read_before_write", "exported_contract_invalidation"] },
+          "inputPath": { "type": "string", "pattern": "^\\.evidence/corpus/field-v2/inputs/[a-z0-9][a-z0-9._-]{2,127}\\.json$" },
+          "inputDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "labelPath": { "type": "string", "pattern": "^\\.evidence/corpus/field-v2/labels/[a-z0-9][a-z0-9._-]{2,127}\\.json$" },
+          "labelDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "scenarioFamily": { "type": "string", "minLength": 1 },
+          "holdout": { "const": true }
+        },
+        "required": ["caseId", "detector", "inputPath", "inputDigest", "labelPath", "labelDigest", "scenarioFamily", "holdout"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schemaVersion", "corpusVersion", "cases"],
+  "additionalProperties": false
+}

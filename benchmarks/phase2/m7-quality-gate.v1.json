@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": "phase2-m7-v1",
+  "detectors": [
+    "same_symbol_overlap",
+    "stale_read_before_write",
+    "exported_contract_invalidation"
+  ],
+  "holdoutRequirements": {
+    "minimumPositiveCasesPerDetector": 30,
+    "minimumNegativeCasesPerDetector": 150,
+    "requiresIndependentReviewer": true,
+    "requiresSufficientCoverage": true,
+    "requiresDistinctProtocolEventSetDigests": true,
+    "requiresScenarioDiversity": true
+  },
+  "thresholds": {
+    "minimumPrecision": 0.95,
+    "minimumRecall": 0.9,
+    "maximumBrierScore": 0.1,
+    "maximumObservedFalsePositiveRate": 0.02,
+    "maximumWilsonFalsePositiveRateUpperBound": 0.02,
+    "wilsonConfidenceLevel": 0.95,
+    "wilsonSidedness": "one_sided"
+  }
+}

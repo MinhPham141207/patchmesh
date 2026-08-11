@@ -39,7 +39,12 @@ export type ObservationGapKind =
   | "opaque"
   | "missing_sequence"
   | "unattributed"
-  | "unverified";
+  | "unverified"
+  | "watcher_overflow"
+  | "watcher_unavailable"
+  | "reconciliation_mismatch"
+  | "root_replaced"
+  | "overlapping_window";
 
 export interface ObservationGap {
   readonly kind: ObservationGapKind;
@@ -71,6 +76,26 @@ export interface ObservationBoundary {
   readonly source: Source;
   captureBefore(context: ObservationContext): Promise<ObservationCapture>;
   captureAfter(context: ObservationContext): Promise<ObservationCapture>;
+}
+
+/** Opaque handle for one executor-owned observation interval. */
+export interface ObservationWindow {
+  readonly workspaceId: WorkspaceId;
+  readonly cursor: number;
+  readonly before: ObservationCapture;
+}
+
+export interface ObservationWindowResult {
+  readonly capture: ObservationCapture;
+  readonly completeness: "complete" | "degraded";
+  readonly reconciliationRequired: boolean;
+}
+
+/** Optional fast path; callers must retain ObservationBoundary fallback support. */
+export interface IncrementalObservationBoundary extends ObservationBoundary {
+  beginWindow(context: ObservationContext): Promise<ObservationWindow>;
+  endWindow(window: ObservationWindow): Promise<ObservationWindowResult>;
+  dispose?(workspaceId?: WorkspaceId): Promise<void>;
 }
 
 export interface DerivedCoverage {

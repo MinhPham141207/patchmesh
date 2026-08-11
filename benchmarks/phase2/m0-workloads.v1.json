@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": "phase2-m0-v1",
+  "metric": "incremental_interception_overhead_ms",
+  "percentile": 0.95,
+  "warmupSamples": 5,
+  "measuredSamples": 30,
+  "independentRuns": 3,
+  "fixtureGenerator": {
+    "version": "phase2-m0-fixture-v1",
+    "contentSeed": "patchmesh-phase2-m0-v1",
+    "fileSizeDistribution": {
+      "kind": "fixed",
+      "bytesPerFile": 256
+    },
+    "changedHotFilesPerOperation": 1
+  },
+  "ignorePolicyVersion": "phase2-observation-ignore-v1",
+  "requiresNetworkAccess": false,
+  "requiresTemporaryLocalGitRepository": true,
+  "requiresSqliteStore": true,
+  "requiredEnvironmentFields": [
+    "timestamp",
+    "commit",
+    "dirty",
+    "os",
+    "osRelease",
+    "architecture",
+    "cpu",
+    "memoryBytes",
+    "nodeVersion",
+    "pnpmVersion",
+    "workloadDefinitionDigest"
+  ],
+  "workloads": [
+    {
+      "workloadId": "small",
+      "fileCount": 1000,
+      "budgetMs": 250
+    },
+    {
+      "workloadId": "medium",
+      "fileCount": 10000,
+      "budgetMs": 1500
+    },
+    {
+      "workloadId": "large",
+      "fileCount": 50000,
+      "budgetMs": 5000
+    }
+  ]
+}

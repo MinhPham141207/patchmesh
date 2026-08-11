@@ -38,6 +38,8 @@ import {
   type ObservationCapture,
   type ObservationContext,
   type ObservationGap,
+  type IncrementalObservationBoundary,
+  type ObservationWindow,
   type ObservedFileChange,
 } from "@patchmesh/observation";
 import type {
@@ -55,6 +57,10 @@ interface DerivedSourceAnalysis {
   readonly facts: DerivedEvidenceFacts;
   readonly context: SymbolEventContext;
   readonly symbolEventIds: readonly EventId[];
+}
+
+function isIncrementalObserver(value: McpProxyOptions["observer"]): value is IncrementalObservationBoundary {
+  return value !== undefined && "beginWindow" in value && "endWindow" in value;
 }
 
 function appendValidated(event: ProtocolEvent, eventStore: EventAppender): ProtocolEvent {
@@ -418,6 +424,11 @@ export class McpProxy {
     this.phase2SourceAnalysis = options.phase2SourceAnalysis;
   }
 
+  /** Releases observer-owned watcher sessions when the host shuts this proxy down. */
+  async dispose(): Promise<void> {
+    if (isIncrementalObserver(this.observer)) await this.observer.dispose?.();
+  }
+
   private async deriveChangedSourceEvents(
     event: FileChangedEvent,
     workspaceRoot: string | undefined,
@@ -579,6 +590,7 @@ export class McpProxy {
       }
     }
     let beforeCapture: ObservationCapture | null = null;
+    let observationWindow: ObservationWindow | null = null;
     if (this.observer) {
       if (context.workspaceRoot === undefined) {
         observationGaps.push({
@@ -594,7 +606,12 @@ export class McpProxy {
           worktreeId: context.worktreeId,
         };
         try {
-          beforeCapture = await this.observer.captureBefore(observationContext);
+          if (isIncrementalObserver(this.observer)) {
+            observationWindow = await this.observer.beginWindow(observationContext);
+            beforeCapture = observationWindow.before;
+          } else {
+            beforeCapture = await this.observer.captureBefore(observationContext);
+          }
           observationGaps.push(...beforeCapture.gaps);
         } catch {
           observationGaps.push({
@@ -624,7 +641,15 @@ export class McpProxy {
         worktreeId: context.worktreeId,
       };
       try {
-        afterCapture = await this.observer.captureAfter(observationContext);
+        if (observationWindow !== null && isIncrementalObserver(this.observer)) {
+          const result = await this.observer.endWindow(observationWindow);
+          afterCapture = result.capture;
+          if (result.completeness === "degraded") {
+            observationGaps.push({ kind: "unverified", scope: "observation.window", reason: "incremental observation window requires reconciliation" });
+          }
+        } else {
+          afterCapture = await this.observer.captureAfter(observationContext);
+        }
         observationGaps.push(...afterCapture.gaps);
       } catch {
         observationGaps.push({

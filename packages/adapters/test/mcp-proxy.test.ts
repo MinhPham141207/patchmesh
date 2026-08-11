@@ -15,6 +15,7 @@ import {
 import {
   fileResourceId,
   type ObservationBoundary,
+  type IncrementalObservationBoundary,
   type ObservationCapture,
   type ObservedFileChange,
   type ObservationSnapshot,
@@ -117,6 +118,61 @@ function createProxy(eventStore: EventAppender, ids: EventId[] = [
     ...options,
   });
 }
+
+test("uses an incremental observation window when the observer provides one", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    let beginCalls = 0;
+    let endCalls = 0;
+    const before = capture(snapshot(new Map()));
+    const after = capture(snapshot(new Map([["changed.txt", { contentHash: "b".repeat(64) }]])));
+    const observer: IncrementalObservationBoundary = {
+      source: observerSource,
+      async captureBefore() { throw new Error("snapshot fallback must not be used"); },
+      async captureAfter() { throw new Error("snapshot fallback must not be used"); },
+      async beginWindow() { beginCalls += 1; return { workspaceId: context.workspaceId, cursor: 7, before }; },
+      async endWindow() { endCalls += 1; return { capture: after, completeness: "complete", reconciliationRequired: false }; },
+    };
+    try {
+      await createProxy(store, [
+        "evt_00000000000000000000000000000001",
+        "evt_00000000000000000000000000000002",
+        "evt_00000000000000000000000000000003",
+      ], { observer }).execute(
+        { ...call, operation: "edit_file", toolName: "edit_file" },
+        { ...context, workspaceRoot: tmpdir() },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+      assert.equal(beginCalls, 1);
+      assert.equal(endCalls, 1);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("disposes observer-owned watcher sessions when the proxy shuts down", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    let disposeCalls = 0;
+    const captureValue = capture(snapshot(new Map()));
+    const observer: IncrementalObservationBoundary = {
+      source: observerSource,
+      async captureBefore() { return captureValue; },
+      async captureAfter() { return captureValue; },
+      async beginWindow() { return { workspaceId: context.workspaceId, cursor: 1, before: captureValue }; },
+      async endWindow() { return { capture: captureValue, completeness: "complete", reconciliationRequired: false }; },
+      async dispose() { disposeCalls += 1; },
+    };
+    try {
+      const proxy = createProxy(store, undefined, { observer });
+      await proxy.dispose();
+      assert.equal(disposeCalls, 1);
+    } finally {
+      store.close();
+    }
+  });
+});
 
 test("persists verified effects and links them from completion", async () => {
   await withTemporaryDatabase(async (databasePath) => {

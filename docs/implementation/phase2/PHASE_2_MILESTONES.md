@@ -21,7 +21,7 @@ automatically revalidate work.
 
 | Milestone | Current evidence | Status |
 | --- | --- | --- |
-| M0 budget | Real `NodeObservationBoundary` measurements with raw samples and a deferred decision | Deferred — small and large tiers exceed provisional p95 budgets |
+| M0 budget | Versioned M0 v1 contract and strict evidence schema; deterministic local-Git/SQLite fixture generator; paired direct-vs-`McpProxy` raw benchmark; fail-closed raw-evidence verifier | Deferred — implementation and reduced smoke coverage pass, but no independent clean-revision controlled artifact has been generated or verified |
 | M1 contracts | Immutable V2 feedback; replayed finding/decision/delivery/feedback views; deterministic feedback/delivery writes; replay-time V2 reference checks | Partial — append-time out-of-order buffering and a complete compatibility audit remain |
 | M2 evidence | Hash-bound TypeScript/JavaScript source facts, durable V2 analyzer provenance, symbol events, resolver-confirmed dependency events, degraded unsupported/opaque handling | Partial — broader analyzer history, supported-language coverage, and real adapter emission of the new relationship proofs remain |
 | M3 overlap | Deterministic same-symbol detector requiring sufficient derived metadata, matching target, and explicit adapter/gateway concurrency proof across worktrees | Partial — production concurrency observation and a reviewed labeled corpus remain |
@@ -58,7 +58,18 @@ This is a prerequisite gate, not a detector milestone.
   gate, or rejected with a documented reason; detector work cannot silently inherit
   an unreviewed performance baseline.
 - Current decision: deferred to `phase2-runtime` at the `M0 observation benchmark
-  remediation` gate. Raw measurements are recorded in
+  remediation` gate. `corepack pnpm phase2:m0:benchmark` writes the canonical default
+  `benchmarks/phase2/m0-evidence.generated.json`; `-- --output <artifact.json>` may select
+  another path. Independent verification is
+  `corepack pnpm phase2:m0:verify -- [artifact.json] --commit <revision> --environment
+  <expected-environment.json>`. The expected-environment file is established independently
+  for the controlled runner and has exactly `os`, `osRelease`, `architecture`, `cpu`,
+  `memoryBytes`, `nodeVersion`, and `pnpmVersion`. Omitting either independent revision or
+  environment binding is valid structural verification but remains deferred. A qualifying
+  artifact must be generated from the exact clean revision on that controlled stable
+  environment; ordinary CI runs only the reduced smoke and verifier regressions. No
+  qualifying clean-revision artifact exists yet. The legacy single-run evaluator is
+  diagnostic-only and cannot accept M0. Legacy measurements remain recorded in
   [`benchmarks/phase2-m0-budget.json`](../../benchmarks/phase2-m0-budget.json); the
   small and large tiers exceed the provisional p95 budgets.
 - Incremental and cold replay produce equivalent graph state.
@@ -246,6 +257,14 @@ for each detector. This result is explicitly `synthetic_engineering` and
 `advisoryOnly`; it is not field validation and cannot authorize broader detector
 authority. Reviewed production feedback must be added as a holdout corpus before
 the final M7 exit decision.
+
+The field-v2 contract foundation is checked in under `.evidence/schema/` with separate
+case-index, production-input, reviewer-label, and generated-output schemas. The matching
+`tools/phase2/field-v2-contracts.ts` loaders enforce canonical digests, approved-root and
+symlink confinement, protocol-event validation, adapter-capability binding, and independent
+reviewer identity. These contracts do not constitute a production adapter, field exporter,
+promoted holdout corpus, generated detector output, or M7 evidence; those remain blocked by
+the production-host capability checkpoint.
 
 **Exit evidence:**
 

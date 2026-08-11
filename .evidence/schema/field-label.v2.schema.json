@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/evidence/schema/field-label.v2.schema.json",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "caseId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "expectedFinding": { "type": "boolean" },
+    "reviewerId": { "type": "string", "minLength": 1 },
+    "reviewedAt": { "type": "string", "format": "date-time" },
+    "rationale": { "type": "string", "minLength": 1 },
+    "labelPolicyVersion": { "type": "string", "minLength": 1 },
+    "collectorId": { "type": "string", "minLength": 1 }
+  },
+  "required": ["schemaVersion", "caseId", "expectedFinding", "reviewerId", "reviewedAt", "rationale", "labelPolicyVersion", "collectorId"],
+  "additionalProperties": false
+}

@@ -97,6 +97,19 @@ test("pairs same-content delete and create paths as a deterministic rename", () 
   }]);
 });
 
+test("ambiguous rename candidates remain separate changes with an explicit gap", () => {
+  const before = { ...emptySnapshot(), files: new Map([["old.txt", file("same")]]) };
+  const after = { ...emptySnapshot(), files: new Map([["new-a.txt", file("same")], ["new-b.txt", file("same")]]) };
+  const result = diffSnapshots(before, after, false);
+
+  assert.deepEqual(result.changes.map((change) => [change.path, change.changeKind]), [
+    ["new-a.txt", "created"],
+    ["new-b.txt", "created"],
+    ["old.txt", "deleted"],
+  ]);
+  assert.deepEqual(result.gaps, [{ kind: "unverified", scope: "old.txt", reason: "rename pairing is ambiguous" }]);
+});
+
 test("marks opaque effects as degraded coverage", () => {
   const result = diffSnapshots(
     emptySnapshot(),
