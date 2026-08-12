@@ -28,7 +28,7 @@ automatically revalidate work.
 | M4 stale read | Explicit `write.dependent` comparison reference, integration target, durable-reference guard, replay reconstruction, and report-only path | Partial — production comparison capture, corrected-attribution corpus cases, and labeled acceptance remain |
 | M5 contracts | Cross-worktree resolver, strict sufficient/exported target metadata, multiple-consumer retention, deterministic supported-function compatibility classification, durable history | Partial — complete contract history, broader signatures, and reviewed corpus remain |
 | M6 report-only | Policy, explanation, append-only feedback CLI, and daemon delivery/feedback writers | Partial — delivery command UX and full CLI scenario coverage remain |
-| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; fail-closed field corpus/evaluator that recomputes trace and artifact digests; [production host adapter boundary](M7_HOST_ADAPTER_BOUNDARY.md) | Blocked — external host adapter and reviewed detector-quality holdouts are missing; current field corpus has trace-integrity only |
+| M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; fail-closed field corpus/evaluator that recomputes trace and artifact digests; internal-ready [`patchmesh-site` transparent MCP gateway](M7_HOST_ADAPTER_BOUNDARY.md) | Blocked externally — the gateway is tested and capability-detectable, but no actual `patchmesh-site` runtime has yet owned a tool execution through it or produced reviewed detector-quality holdouts |
 
 ## Milestone Order
 
@@ -265,6 +265,17 @@ symlink confinement, protocol-event validation, adapter-capability binding, and 
 reviewer identity. These contracts do not constitute a production adapter, field exporter,
 promoted holdout corpus, generated detector output, or M7 evidence; those remain blocked by
 the production-host capability checkpoint.
+
+PR4 internal readiness is implemented as `PatchMeshSiteMcpGateway` in
+`@patchmesh/adapters`. When a host contract declares synchronous gateway capability,
+it provides a transparent MCP dispatch path that calls `McpProxy.execute` exactly
+once, uses authoritative runtime/session identity, rejects payload identity conflicts,
+and forwards only same-store persisted completion-linked events to the recorder with a
+versioned capability digest. This is not evidence of a real production host run: the
+external `patchmesh-site` runtime must still wire the gateway around actual execution
+before the production-host checkpoint becomes unblocked. Relationship-proof capture,
+field export/dispatcher, and holdout collection remain PR5–PR7 work and are not
+implied by this adapter.
 
 **Exit evidence:**
 

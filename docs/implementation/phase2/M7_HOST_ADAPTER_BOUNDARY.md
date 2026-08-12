@@ -1,36 +1,54 @@
-# M7 Production Host Adapter Boundary
+# PR4 patchmesh-site MCP Gateway and M7 Production Host Boundary
 
 ## Status
 
-The PatchMesh repository provides the MCP proxy, observation boundary, event
-persistence, and evidence recorder bridge. It does not provide a production host
-adapter that invokes the proxy for real agent tool calls. M7 real-agent
-verification is blocked at that external boundary.
+PR4 now provides an internal `patchmesh-site` transparent MCP gateway in
+`@patchmesh/adapters`. It is the selected integration path for a host that
+declares synchronous dispatch ownership, and delegates every supported host tool
+call to `McpProxy.execute` exactly once. It constructs `McpCallContext` from a
+trusted host/session identity object, rejects mismatched payload identity, reads a
+closed same-store evidence slice after completion, and keeps recorder failure
+separate from the original tool result.
 
-This document is a contract for an external adapter. It is not an implementation
-of a new runtime, hook mechanism, or callsite.
+This is **internal readiness**, not production-gate acceptance. The actual
+`patchmesh-site` deployment/runtime callsite is outside this repository, so no
+real host-owned execution has yet passed through the gateway. M7 remains blocked
+until that external integration produces a qualifying persisted completion-linked
+effect. PR5–PR7 are not implemented by this gateway.
+
+The `patchmesh-site` host configuration must declare whether it has synchronous
+executor ownership. `detectPatchMeshSiteCapabilities` returns the canonical
+capability digest only when that contract is supplied; a false
+`synchronousGateway` returns the typed
+`PATCHMESH_SITE_SYNCHRONOUS_GATEWAY_UNAVAILABLE` blocker. Constructing a gateway
+from a blocked contract raises `PatchMeshSiteCapabilityError` with that code and
+digest, rather than silently activating an unqualified path.
 
 ## Existing PatchMesh Path
 
-The adapter must use the existing public types and path:
+The production host must instantiate and use the public gateway rather than call
+an executor directly:
 
 ```ts
-const store = SqliteEventStore.open(databasePath);
-const proxy = new McpProxy({
-  eventStore: store,
-  observer: new NodeObservationBoundary({ source: watcherSource }),
-  phase2SourceAnalysis: analysisOptions,
+const gateway = new PatchMeshSiteMcpGateway({
+  eventStore: SqliteEventStore.open(databasePath),
+  hostContract,
+  proxyOptions: {
+    observer: new NodeObservationBoundary({ source: watcherSource }),
+    phase2SourceAnalysis: analysisOptions,
+  },
+  evidenceRecorder,
 });
 
-const result = await proxy.execute(
+const result = await gateway.dispatch(authoritativeRuntimeIdentity, {
   call,
-  context,
-  executor,
-  signal,
-);
+  execute: executor,
+  hostToolCallId,
+}, signal);
 ```
 
-The exact proxy signature is:
+`PatchMeshSiteMcpGateway.dispatch` is the host boundary. Internally it calls the
+canonical proxy signature exactly once:
 
 ```ts
 execute<T>(
@@ -48,22 +66,25 @@ type ToolExecutor<T> =
   (signal: AbortSignal) => Promise<ToolExecutionResult<T>>;
 ```
 
-The adapter must supply real values for `McpToolCall`, `McpCallContext`, the
-workspace root, agent/task/worktree attribution, correlation ID, and source
-sequences. It must not invent effect paths or resource versions.
+The host supplies real values for `McpToolCall` and the authoritative runtime
+identity (workspace root, agent/task/worktree attribution, source, repository,
+and causation). The gateway assigns correlation and monotonic source sequences.
+Payload identity may only confirm that context; it cannot replace it. Neither the
+host nor the gateway may invent effect paths or resource versions.
 
 ## Required Post-Tool Handoff
 
-After `await proxy.execute(...)` returns, the adapter must read the persisted
-events from the same event store:
+After `await proxy.execute(...)` returns, the gateway reads the persisted events
+from the same event store:
 
 1. Locate `result.completedEventId`.
 2. Read that `tool.completed` event.
 3. Read only the events listed in its
    `payload.effectEventIds`.
 4. Retain only persisted `file.changed` events for the evidence effect payload.
-5. Pass the exact `McpProxyResult` and those persisted events to the evidence
-   recorder bridge.
+5. Pass the exact `McpProxyResult` and the closed persisted slice to the evidence
+   recorder bridge. The recorder payload also carries `runtime`, runtime/adapter
+   versions, and the canonical capability digest.
 
 The bridge input is:
 
@@ -75,6 +96,10 @@ The bridge input is:
   "worktreeId": "worktree-id-or-null",
   "toolCallId": "runtime-tool-call-id-or-null",
   "patchmesh": {
+    "runtime": "patchmesh-site",
+    "runtimeVersion": "host-owned version",
+    "adapterVersion": "PatchMesh adapter version",
+    "capabilityDigest": "sha256:...",
     "result": "the returned McpProxyResult",
     "events": [
       "the persisted tool.completed event",
@@ -123,12 +148,18 @@ The current committed `.evidence` traces do not satisfy the effect requirement:
 they are valid attribution traces with zero verified effects. They must not be
 reclassified or used as detector positives or negatives.
 
-## Current Repository Boundary
+## PR4 Verification and Remaining External Gate
 
-No production host adapter currently calls `McpProxy.execute`. Existing callsites
-are tests, Phase 1/2 golden harnesses, and the benchmark. The missing external
-component is therefore the runtime-specific owner of actual tool execution that
-can perform the post-tool handoff above.
+The internal gateway has deterministic integration coverage for capability
+detection, exact-once success/failure/interruption/non-zero execution, abort,
+identity mismatch, recorder failure, same-store evidence isolation, and a local
+Git-backed file-changing gateway call with non-empty completion-linked verified
+effects. This proves the repository-side implementation path only.
 
-Until that adapter exists, M7 remains blocked. No synthetic runtime, fake trace,
-requested-path inference, or tool-response inference is an acceptable substitute.
+The production gate becomes unblocked only when the real `patchmesh-site` host
+owns an execution, calls `PatchMeshSiteMcpGateway.dispatch`, and its SQLite store
+contains the resulting request, terminal completion, and non-empty sufficient
+completion-linked effects. That run must then pass the required trace and human
+review workflow. Until then M7 is externally blocked. No synthetic runtime, fake
+trace, requested-path inference, or tool-response inference is an acceptable
+substitute.
