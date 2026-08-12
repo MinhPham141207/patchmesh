@@ -42,6 +42,10 @@ export interface PatchMeshSiteHostContract {
   readonly taskLifecycle: boolean;
   readonly exactReportedEffects: boolean;
   readonly integrationTargetSnapshot: boolean;
+  /**
+   * Must remain false for this PR4 gateway: it serializes every dispatch so its
+   * source-sequence ordering is append-ordered.
+   */
   readonly concurrentWorktreeObservation: boolean;
   readonly observedReadVersion: boolean;
   readonly dependentWriteToken: boolean;
@@ -55,7 +59,10 @@ export type PatchMeshSiteCapabilityStatus =
     }
   | {
       readonly status: "blocked";
-      readonly code: "PATCHMESH_SITE_SYNCHRONOUS_GATEWAY_UNAVAILABLE" | "PATCHMESH_SITE_CAPABILITY_INVALID";
+      readonly code:
+        | "PATCHMESH_SITE_SYNCHRONOUS_GATEWAY_UNAVAILABLE"
+        | "PATCHMESH_SITE_CONCURRENT_WORKTREE_OBSERVATION_UNSUPPORTED"
+        | "PATCHMESH_SITE_CAPABILITY_INVALID";
       readonly reason: string;
       readonly capabilities: HostAdapterCapabilities;
       readonly capabilityDigest: HostAdapterCapabilityDigest;
@@ -72,7 +79,8 @@ export function detectPatchMeshSiteCapabilities(contract: PatchMeshSiteHostContr
     taskLifecycle: contract.taskLifecycle,
     exactReportedEffects: contract.exactReportedEffects,
     integrationTargetSnapshot: contract.integrationTargetSnapshot,
-    concurrentWorktreeObservation: contract.concurrentWorktreeObservation,
+    // Dispatch is intentionally serialized in PR4 to preserve append ordering.
+    concurrentWorktreeObservation: false,
     observedReadVersion: contract.observedReadVersion,
     dependentWriteToken: contract.dependentWriteToken,
   };
@@ -91,6 +99,15 @@ export function detectPatchMeshSiteCapabilities(contract: PatchMeshSiteHostContr
       status: "blocked",
       code: "PATCHMESH_SITE_SYNCHRONOUS_GATEWAY_UNAVAILABLE",
       reason: "patchmesh-site does not provide a synchronous executor-owning MCP gateway",
+      capabilities,
+      capabilityDigest,
+    };
+  }
+  if (contract.concurrentWorktreeObservation) {
+    return {
+      status: "blocked",
+      code: "PATCHMESH_SITE_CONCURRENT_WORKTREE_OBSERVATION_UNSUPPORTED",
+      reason: "patchmesh-site PR4 serializes gateway dispatches and cannot claim concurrent worktree observation",
       capabilities,
       capabilityDigest,
     };

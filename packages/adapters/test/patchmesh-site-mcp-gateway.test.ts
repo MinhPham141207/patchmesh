@@ -72,6 +72,7 @@ test("detects the synchronous patchmesh-site gateway capability and changes dige
   assert.equal(ready.status, "internal_ready");
   assert.equal(ready.capabilities.runtime, "patchmesh-site");
   assert.equal(ready.capabilities.wrapsToolExecution, true);
+  assert.equal(ready.capabilities.concurrentWorktreeObservation, false);
 
   const changed = detectPatchMeshSiteCapabilities({ ...hostContract, exactReportedEffects: false });
   assert.notEqual(changed.capabilityDigest, ready.capabilityDigest);
@@ -81,6 +82,10 @@ test("detects the synchronous patchmesh-site gateway capability and changes dige
   const invalid = detectPatchMeshSiteCapabilities({ ...hostContract, runtimeVersion: "" });
   assert.equal(invalid.status, "blocked");
   assert.equal(invalid.code, "PATCHMESH_SITE_CAPABILITY_INVALID");
+  const concurrent = detectPatchMeshSiteCapabilities({ ...hostContract, concurrentWorktreeObservation: true });
+  assert.equal(concurrent.status, "blocked");
+  assert.equal(concurrent.code, "PATCHMESH_SITE_CONCURRENT_WORKTREE_OBSERVATION_UNSUPPORTED");
+  assert.equal(concurrent.capabilities.concurrentWorktreeObservation, false);
   const blockedStore = SqliteEventStore.open(":memory:");
   try {
     assert.throws(
@@ -93,6 +98,19 @@ test("detects the synchronous patchmesh-site gateway capability and changes dige
     );
   } finally {
     blockedStore.close();
+  }
+  const concurrentStore = SqliteEventStore.open(":memory:");
+  try {
+    assert.throws(
+      () => new PatchMeshSiteMcpGateway({
+        eventStore: concurrentStore,
+        hostContract: { ...hostContract, concurrentWorktreeObservation: true },
+      }),
+      (error: unknown) => error instanceof PatchMeshSiteCapabilityError
+        && error.code === "PATCHMESH_SITE_CONCURRENT_WORKTREE_OBSERVATION_UNSUPPORTED",
+    );
+  } finally {
+    concurrentStore.close();
   }
 });
 

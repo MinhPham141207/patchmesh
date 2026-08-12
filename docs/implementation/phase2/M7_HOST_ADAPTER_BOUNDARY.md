@@ -24,6 +24,17 @@ capability digest only when that contract is supplied; a false
 from a blocked contract raises `PatchMeshSiteCapabilityError` with that code and
 digest, rather than silently activating an unqualified path.
 
+### PR4 serialized-dispatch limitation
+
+PR4 serializes every `PatchMeshSiteMcpGateway.dispatch` call, including calls for
+different worktrees. This preserves append-ordered adapter source sequences, but
+means this gateway does **not** support concurrent worktree observation. Its
+published capability is always `concurrentWorktreeObservation: false`; a host
+contract that declares it `true` is rejected with
+`PATCHMESH_SITE_CONCURRENT_WORKTREE_OBSERVATION_UNSUPPORTED`. Supporting true
+concurrent worktree observation requires a later, separately designed gateway
+concurrency model and is not implemented by PR4.
+
 ## Existing PatchMesh Path
 
 The production host must instantiate and use the public gateway rather than call
