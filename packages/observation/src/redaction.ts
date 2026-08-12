@@ -1,15 +1,16 @@
 const MAX_DIAGNOSTIC_LENGTH = 512;
+const SECRET_NAME = "(?:api[_-]?key|access[_-]?token|auth(?:orization)?|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|credential|private[_-]?key)";
 
 export function sanitizeDiagnostic(value: string): string {
   let sanitized = value;
   sanitized = sanitized.replace(/(\bBearer\s+)[^\s]+/giu, "$1<redacted>");
   sanitized = sanitized.replace(
-    /((?:api[_-]?key|access[_-]?token|password|passwd|secret|credential|authorization)\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/giu,
+    new RegExp(`(${SECRET_NAME}\\s*[:=]\\s*)("[^"]*"|'[^']*'|[^\\s,;&]+)`, "giu"),
     "$1<redacted>",
   );
   sanitized = sanitized.replace(
-    /([?&](?:api[_-]?key|access[_-]?token|password|passwd|secret|credential)=[^&\s]+)/giu,
-    "$1<redacted>",
+    new RegExp(`([?&])(${SECRET_NAME}=)[^&\\s]+`, "giu"),
+    "$1$2<redacted>",
   );
   return sanitized.slice(0, MAX_DIAGNOSTIC_LENGTH);
 }

@@ -121,6 +121,13 @@ runtime observation, storage, projections, or CLI commands.
 
 **Implementation milestones:** [`docs/implementation/phase2/PHASE_2_MILESTONES.md`](implementation/phase2/PHASE_2_MILESTONES.md).
 
+**PR4 host-adapter status:** Internal readiness is implemented through the
+[`patchmesh-site` transparent MCP gateway](implementation/phase2/M7_HOST_ADAPTER_BOUNDARY.md).
+It keeps `McpProxy.execute` as the canonical execution boundary and has verified
+same-store completion-linked effect handoff. The Phase 2 production-host gate remains
+blocked until a real `patchmesh-site` runtime owns an execution through that gateway;
+this repository does not claim that external run, and PR5–PR7 remain separate work.
+
 **Deliverables:**
 
 - a bounded deterministic evidence pipeline for observed file reads, source-derived
