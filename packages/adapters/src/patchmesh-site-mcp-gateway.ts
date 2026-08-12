@@ -107,6 +107,16 @@ export class PatchMeshSiteIdentityMismatchError extends Error {
   }
 }
 
+/** Raised before persistence when the supplied host identity is not an adapter source. */
+export class PatchMeshSiteRuntimeIdentityError extends Error {
+  readonly code = "PATCHMESH_SITE_RUNTIME_IDENTITY_INVALID";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PatchMeshSiteRuntimeIdentityError";
+  }
+}
+
 /** Raised when the host contract cannot support the synchronous PR4 boundary. */
 export class PatchMeshSiteCapabilityError extends Error {
   readonly code: Extract<PatchMeshSiteCapabilityStatus, { status: "blocked" }> ["code"];
@@ -211,6 +221,17 @@ function assertPayloadIdentity(identity: PatchMeshSiteRuntimeIdentity, claimed: 
   }
 }
 
+function assertRuntimeIdentity(identity: PatchMeshSiteRuntimeIdentity): void {
+  const source = identity?.source;
+  if (source?.kind !== "adapter"
+    || typeof source.sourceId !== "string" || source.sourceId.trim().length === 0
+    || typeof source.instanceId !== "string" || source.instanceId.trim().length === 0) {
+    throw new PatchMeshSiteRuntimeIdentityError(
+      "patchmesh-site runtime identity must provide a non-empty adapter sourceId and instanceId",
+    );
+  }
+}
+
 function sameToolContext(left: ProtocolEvent, right: ProtocolEvent): boolean {
   return left.repositoryId === right.repositoryId
     && left.workspaceId === right.workspaceId
@@ -277,7 +298,8 @@ export class PatchMeshSiteMcpGateway {
   private readonly eventStore: PatchMeshSiteEventStore;
   private readonly evidenceRecorder: PatchMeshSiteEvidenceRecorder | undefined;
   private readonly createCorrelationId: () => McpCallContext["correlationId"];
-  private sourceSequence = 0;
+  private readonly sourceSequences = new Map<string, number>();
+  private dispatchTail: Promise<void> = Promise.resolve();
 
   constructor(options: PatchMeshSiteMcpGatewayOptions) {
     const status = detectPatchMeshSiteCapabilities(options.hostContract);
@@ -295,7 +317,20 @@ export class PatchMeshSiteMcpGateway {
     invocation: PatchMeshSiteToolInvocation<T>,
     signal?: AbortSignal,
   ): Promise<PatchMeshSiteGatewayResult<T>> {
+    return this.runExclusive(() => this.dispatchSerialized(identity, invocation, signal));
+  }
+
+  private async dispatchSerialized<T>(
+    identity: PatchMeshSiteRuntimeIdentity,
+    invocation: PatchMeshSiteToolInvocation<T>,
+    signal: AbortSignal | undefined,
+  ): Promise<PatchMeshSiteGatewayResult<T>> {
+    assertRuntimeIdentity(identity);
     assertPayloadIdentity(identity, invocation.payloadIdentity);
+    const sourceKey = `${identity.source.kind}:${identity.source.sourceId}:${identity.source.instanceId}`;
+    const requestSourceSequence = this.sourceSequences.get(sourceKey) ?? 0;
+    const completionSourceSequence = requestSourceSequence + 1;
+    this.sourceSequences.set(sourceKey, completionSourceSequence + 1);
     const context: McpCallContext = {
       source: identity.source,
       repositoryId: identity.repositoryId,
@@ -306,8 +341,8 @@ export class PatchMeshSiteMcpGateway {
       taskId: identity.taskId,
       correlationId: this.createCorrelationId(),
       causationId: identity.causationId,
-      requestSourceSequence: this.sourceSequence++,
-      completionSourceSequence: this.sourceSequence++,
+      requestSourceSequence,
+      completionSourceSequence,
     };
     const proxyResult = await this.proxy.execute(invocation.call, context, invocation.execute, signal);
     let evidence: PatchMeshSitePersistedToolEvidence | null = null;
@@ -336,6 +371,23 @@ export class PatchMeshSiteMcpGateway {
       evidence = null;
     }
     return { execution: proxyResult.execution, proxyResult, evidence, recorderDiagnostic };
+  }
+
+  /**
+   * McpProxy receives fixed request/completion sequence numbers. Serializing the
+   * full dispatch prevents a later completion from being appended ahead of an
+   * earlier reserved completion when host calls overlap.
+   */
+  private async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.dispatchTail;
+    let release: (() => void) | undefined;
+    this.dispatchTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release!();
+    }
   }
 
   async dispose(): Promise<void> {

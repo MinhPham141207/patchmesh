@@ -78,13 +78,15 @@ After `await proxy.execute(...)` returns, the gateway reads the persisted events
 from the same event store:
 
 1. Locate `result.completedEventId`.
-2. Read that `tool.completed` event.
+2. Read that terminal `tool.completed` event and the persisted request identified by
+   its `payload.requestEventId`.
 3. Read only the events listed in its
    `payload.effectEventIds`.
 4. Retain only persisted `file.changed` events for the evidence effect payload.
 5. Pass the exact `McpProxyResult` and the closed persisted slice to the evidence
    recorder bridge. The recorder payload also carries `runtime`, runtime/adapter
-   versions, and the canonical capability digest.
+   versions, and the canonical capability digest. Its event order is always
+   request → linked `file.changed` effects → terminal completion.
 
 The bridge input is:
 
@@ -102,8 +104,9 @@ The bridge input is:
     "capabilityDigest": "sha256:...",
     "result": "the returned McpProxyResult",
     "events": [
-      "the persisted tool.completed event",
-      "its persisted file.changed effect events"
+      "the persisted tool.requested event",
+      "its persisted completion-linked file.changed effect events",
+      "the persisted tool.completed event"
     ]
   }
 }

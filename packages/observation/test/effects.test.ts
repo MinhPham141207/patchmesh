@@ -54,6 +54,15 @@ test("redacts secret-shaped diagnostics", () => {
   assert.equal(result.includes("<redacted>"), true);
 });
 
+test("redacts query-string secret values without removing safe query parameters", () => {
+  const result = sanitizeDiagnostic("recorder failed: https://example.invalid/record?mode=sync&token=query-secret-value&authorization=query-authorization-value");
+  assert.equal(result.includes("query-secret-value"), false);
+  assert.equal(result.includes("query-authorization-value"), false);
+  assert.match(result, /mode=sync/);
+  assert.match(result, /token=<redacted>/);
+  assert.match(result, /authorization=<redacted>/);
+});
+
 test("normalizes created, modified, deleted, and unchanged file effects", () => {
   const before = emptySnapshot();
   const beforeFiles = new Map([

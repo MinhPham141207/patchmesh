@@ -7,6 +7,7 @@ export {
   PatchMeshSiteIdentityMismatchError,
   PatchMeshSiteMcpGateway,
   PatchMeshSitePersistedEvidenceError,
+  PatchMeshSiteRuntimeIdentityError,
   readPatchMeshSitePersistedToolEvidence,
 } from "./patchmesh-site-mcp-gateway.js";
 export type {

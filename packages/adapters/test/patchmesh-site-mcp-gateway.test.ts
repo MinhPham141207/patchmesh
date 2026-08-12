@@ -13,6 +13,7 @@ import {
   PatchMeshSiteIdentityMismatchError,
   PatchMeshSiteMcpGateway,
   PatchMeshSitePersistedEvidenceError,
+  PatchMeshSiteRuntimeIdentityError,
   readPatchMeshSitePersistedToolEvidence,
   type PatchMeshSiteHostContract,
   type PatchMeshSiteRuntimeIdentity,
@@ -109,6 +110,72 @@ test("gateway rejects payload identity that attempts to override authoritative r
         PatchMeshSiteIdentityMismatchError,
       );
       assert.deepEqual(store.read(), []);
+    } finally {
+      await gateway.dispose();
+      store.close();
+    }
+  });
+});
+
+test("gateway rejects a non-adapter runtime source before execution or persistence", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    const gateway = new PatchMeshSiteMcpGateway({ eventStore: store, hostContract, createCorrelationId: nextCorrelation() });
+    try {
+      await assert.rejects(
+        gateway.dispatch({
+          ...runtimeIdentity(tmpdir()),
+          source: { kind: "watcher", sourceId: "source_patchmesh_site_wrong", instanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+        }, {
+          call: { toolName: "read_file", operation: "read", targetResourceId: null, opaque: false },
+          execute: async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+        }),
+        PatchMeshSiteRuntimeIdentityError,
+      );
+      assert.deepEqual(store.read(), []);
+    } finally {
+      await gateway.dispose();
+      store.close();
+    }
+  });
+});
+
+test("gateway serializes overlapping dispatches so adapter source sequences remain append-ordered", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    const gateway = new PatchMeshSiteMcpGateway({ eventStore: store, hostContract, createCorrelationId: nextCorrelation() });
+    let enteredFirst!: () => void;
+    const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve; });
+    let releaseFirst!: () => void;
+    const firstReleased = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let secondExecutions = 0;
+    try {
+      const identity = runtimeIdentity(tmpdir());
+      const first = gateway.dispatch(identity, {
+        call: { toolName: "read_file", operation: "first", targetResourceId: null, opaque: false },
+        execute: async () => {
+          enteredFirst();
+          await firstReleased;
+          return { outcome: "succeeded", value: "first", exitCode: 0 } as const;
+        },
+      });
+      await firstEntered;
+      const second = gateway.dispatch(identity, {
+        call: { toolName: "read_file", operation: "second", targetResourceId: null, opaque: false },
+        execute: async () => {
+          secondExecutions += 1;
+          return { outcome: "succeeded", value: "second", exitCode: 0 } as const;
+        },
+      });
+      await Promise.resolve();
+      assert.equal(secondExecutions, 0, "second executor waits for first completion");
+      releaseFirst();
+      await Promise.all([first, second]);
+      const adapterEvents = store.read().filter((event) => event.source.kind === "adapter");
+      assert.deepEqual(adapterEvents.map((event) => event.eventType), [
+        "tool.requested", "tool.completed", "tool.requested", "tool.completed",
+      ]);
+      assert.deepEqual(adapterEvents.map((event) => event.sourceSequence), [0, 1, 2, 3]);
     } finally {
       await gateway.dispose();
       store.close();
