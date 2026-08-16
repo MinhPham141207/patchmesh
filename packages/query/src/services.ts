@@ -83,7 +83,8 @@ function withCorrectedAttribution(events: readonly ProtocolEvent[]): readonly Pr
   }
   return events.map((event) => {
     const correction = corrections.get(event.eventId);
-    return correction === undefined
+    // V3 proof identities are part of their closed, immutable envelope.
+    return correction === undefined || event.schemaVersion === 3
       ? event
       : { ...event, agentId: correction.agentId, taskId: correction.taskId };
   });

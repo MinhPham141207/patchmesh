@@ -16,6 +16,7 @@ import type {
   ResourceId,
   ResourceVersion,
   Source,
+  TargetSnapshot,
   ToolName,
   WorkspaceId,
   WorktreeId,
@@ -36,6 +37,14 @@ export interface McpToolCall {
     readonly dependencyId: DependencyId;
     readonly resourceId: ResourceId;
     readonly dependsOnReadEventId: EventId;
+    /** Canonical host-issued token required for the PR5 proof-bearing path. */
+    readonly readToken?: import("@patchmesh/protocol").ObservedReadToken;
+    /** Persisted candidate change the observed version is compared against. */
+    readonly comparison?: {
+      readonly changedEventId: EventId;
+      readonly coverageId: import("@patchmesh/protocol").CoverageId;
+      readonly integrationTarget: string;
+    };
   };
 }
 
@@ -51,6 +60,8 @@ export interface McpCallContext {
   readonly causationId: EventId | null;
   readonly requestSourceSequence: number | null;
   readonly completionSourceSequence: number | null;
+  /** Immutable host-authoritative target. Absent contexts remain legacy-only. */
+  readonly targetSnapshot?: TargetSnapshot;
 }
 
 export type ToolExecutionResult<T> =
@@ -87,6 +98,15 @@ export interface McpProxyOptions {
   readonly observer?: ObservationBoundary;
   readonly createCorrelationId?: () => CorrelationId;
   readonly phase2SourceAnalysis?: Phase2SourceAnalysisOptions;
+  /** Host-declared authority; callers cannot enable PR5 proof production via context alone. */
+  readonly proofAuthority?: {
+    readonly authoritativeIdentity: boolean;
+    readonly taskLifecycle: boolean;
+    readonly integrationTargetSnapshot: boolean;
+    readonly observedReadVersion: boolean;
+    readonly dependentWriteToken: boolean;
+    readonly exactReportedEffects: boolean;
+  };
 }
 
 export interface McpProxyResult<T> {
@@ -94,6 +114,8 @@ export interface McpProxyResult<T> {
   readonly requestEventId: EventId;
   readonly completedEventId: EventId;
   readonly readEventIds: readonly EventId[];
+  /** Tokens issued only after their explicit read event was durably persisted. */
+  readonly observedReadTokens: readonly import("@patchmesh/protocol").ObservedReadToken[];
   readonly coverage: DerivedCoverage | null;
   readonly observationDiagnostics: readonly ObservationDiagnostic[];
   readonly analysisDiagnostics: readonly { readonly path: string; readonly reason: string }[];

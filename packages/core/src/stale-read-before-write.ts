@@ -5,6 +5,7 @@ import type {
   ResourceId,
   ResourceVersion,
   TaskId,
+  TargetSnapshot,
 } from "@patchmesh/protocol";
 
 import type { DetectorFinding } from "./types.js";
@@ -15,6 +16,7 @@ export interface ResourceReadEvidence {
   readonly resourceId: ResourceId;
   readonly version: ResourceVersion;
   readonly coverageId: CoverageId;
+  readonly targetSnapshot: TargetSnapshot;
 }
 
 export interface DependentWriteEvidence {
@@ -26,7 +28,11 @@ export interface DependentWriteEvidence {
   readonly coverageId: CoverageId;
   readonly comparisonChangedEventId?: EventId;
   readonly comparisonCoverageId?: CoverageId;
-  readonly integrationTarget?: string;
+  readonly targetSnapshot: TargetSnapshot;
+  readonly readTokenDigest: string;
+  readonly writeEffectEventId: EventId;
+  readonly writeEffectCoverageId: CoverageId;
+  readonly completionEventId: EventId;
 }
 
 export interface CurrentVersionEvidence extends ResourceVersion {
@@ -54,7 +60,8 @@ export function detectStaleReadBeforeWrite(
     || write.dependsOnReadEventId !== read.eventId
     || write.comparisonChangedEventId !== current.eventId
     || write.comparisonCoverageId === undefined
-    || write.integrationTarget === undefined
+    || read.targetSnapshot.targetSnapshotId !== write.targetSnapshot.targetSnapshotId
+    || read.targetSnapshot.digest !== write.targetSnapshot.digest
     || !hasSameRepositoryWorkspace(read.version, current)
     || read.version.kind !== current.kind
     || read.version.value === current.value) {
@@ -66,7 +73,7 @@ export function detectStaleReadBeforeWrite(
     write.eventId,
     ...current.evidenceEventIds,
   ].sort((left, right) => left.localeCompare(right));
-  const coverageIds = [read.coverageId, write.coverageId, write.comparisonCoverageId]
+  const coverageIds = [...new Set([read.coverageId, write.coverageId, write.comparisonCoverageId, write.writeEffectCoverageId])]
     .sort((left, right) => left.localeCompare(right));
 
   return {

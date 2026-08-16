@@ -5,6 +5,7 @@ import type {
   ResourceId,
   ResourceVersion,
   TaskId,
+  TargetSnapshot,
   WorktreeId,
 } from "@patchmesh/protocol";
 
@@ -24,7 +25,7 @@ export interface SymbolChangeEvidence {
   readonly coverageId: CoverageId;
   /** Coverage proving the shared concurrency observation. */
   readonly concurrencyCoverageId?: CoverageId;
-  readonly integrationTarget?: string;
+  readonly targetSnapshot?: TargetSnapshot;
   readonly concurrencyEventId?: EventId;
 }
 
@@ -34,12 +35,12 @@ function hasComparableIdentity(evidence: SymbolChangeEvidence): boolean {
     && evidence.version.value !== null;
 }
 
-function hasSameRepositoryWorkspace(
+function hasSameRepository(
   left: ResourceVersion,
   right: ResourceVersion,
 ): boolean {
   return left.domain.repositoryId === right.domain.repositoryId
-    && left.domain.workspaceId === right.domain.workspaceId;
+    && left.resourceId === right.resourceId;
 }
 
 /**
@@ -58,14 +59,15 @@ export function detectSameSymbolOverlap(
   if (observed.resourceId !== candidate.resourceId
     || observed.taskId === candidate.taskId
     || observed.worktreeId === candidate.worktreeId
-    || observed.integrationTarget === undefined
-    || candidate.integrationTarget === undefined
-    || observed.integrationTarget !== candidate.integrationTarget
+    || observed.targetSnapshot === undefined
+    || candidate.targetSnapshot === undefined
+    || observed.targetSnapshot.targetSnapshotId !== candidate.targetSnapshot.targetSnapshotId
+    || observed.targetSnapshot.digest !== candidate.targetSnapshot.digest
     || observed.concurrencyEventId === undefined
     || candidate.concurrencyEventId !== observed.concurrencyEventId
     || observed.concurrencyCoverageId === undefined
     || candidate.concurrencyCoverageId !== observed.concurrencyCoverageId
-    || !hasSameRepositoryWorkspace(observed.version, candidate.version)
+    || !hasSameRepository(observed.version, candidate.version)
     || observed.version.kind !== candidate.version.kind
     || observed.version.value === candidate.version.value) {
     return null;

@@ -14,7 +14,8 @@ This is **internal readiness**, not production-gate acceptance. The actual
 `patchmesh-site` deployment/runtime callsite is outside this repository, so no
 real host-owned execution has yet passed through the gateway. M7 remains blocked
 until that external integration produces a qualifying persisted completion-linked
-effect. PR5–PR7 are not implemented by this gateway.
+effect. PR5 relationship-proof capture is implemented for host-authoritative contexts;
+PR6–PR7 remain outside this gateway.
 
 The `patchmesh-site` host configuration must declare whether it has synchronous
 executor ownership. `detectPatchMeshSiteCapabilities` returns the canonical
@@ -28,12 +29,13 @@ digest, rather than silently activating an unqualified path.
 
 PR4 serializes every `PatchMeshSiteMcpGateway.dispatch` call, including calls for
 different worktrees. This preserves append-ordered adapter source sequences, but
-means this gateway does **not** support concurrent worktree observation. Its
+means this gateway does **not** support concurrent executor-window observation. Its
 published capability is always `concurrentWorktreeObservation: false`; a host
 contract that declares it `true` is rejected with
 `PATCHMESH_SITE_CONCURRENT_WORKTREE_OBSERVATION_UNSUPPORTED`. Supporting true
-concurrent worktree observation requires a later, separately designed gateway
-concurrency model and is not implemented by PR4.
+concurrent executor windows require a later, separately designed gateway model.
+PR5 can still record authoritative overlapping task lifetimes, which are distinct
+from overlapping gateway dispatches.
 
 ## Existing PatchMesh Path
 

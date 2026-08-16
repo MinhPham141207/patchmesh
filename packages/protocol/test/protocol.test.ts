@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
   ProtocolValidationError,
@@ -28,6 +29,17 @@ import {
 } from "./fixtures.js";
 
 const acceptsProtocolEvent = (_event: ProtocolEvent): void => undefined;
+const canonicalJson = (value: unknown): string => Array.isArray(value)
+  ? `[${value.map(canonicalJson).join(",")}]`
+  : value !== null && typeof value === "object"
+    ? `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(",")}}`
+    : JSON.stringify(value);
+
+function v3Snapshot(repositoryId: string) {
+  const input = { integrationTargetId: "target_main", repositoryId, kind: "branch", locator: "refs/heads/main", baseCommit: "a".repeat(40), candidateIds: [] } as const;
+  const digest = createHash("sha256").update(canonicalJson(input)).digest("hex");
+  return { targetSnapshotId: `snapshot_${digest}`, ...input, digest };
+}
 
 test("typed fixtures cover the full closed V1 event union", () => {
   const events = makeAllTypedEvents();
@@ -87,7 +99,7 @@ test("rejects a payload for the wrong event type", () => {
 });
 
 test("rejects an unsupported schema version", () => {
-  const result = parseEvent({ ...makeToolRequested(), schemaVersion: 3 });
+  const result = parseEvent({ ...makeToolRequested(), schemaVersion: 4 });
   assert.equal(result.value, null);
   assert.equal(result.diagnostics[0]?.code, "PHASE0_SCHEMA_UNSUPPORTED");
 });
@@ -544,4 +556,139 @@ test("requires a symbol comparison integration target to match sufficient derive
   };
   assert.equal(validateEventSet([request, read, dependency, change, write]).some((entry) =>
     entry.code === "PHASE2_SCHEMA_INVALID" && entry.path.endsWith("/comparison/integrationTarget")), true);
+});
+
+test("accepts a closed V3 derived-evidence proof and rejects a noncanonical target snapshot", () => {
+  const source = {
+    kind: "analyzer" as const,
+    sourceId: "source_analyzer",
+    instanceId: "11111111-1111-4111-8111-111111111111",
+  };
+  const target = makeSymbolChanged();
+  const read = { ...makeFileRead(), sourceSequence: null };
+  const snapshotInput = {
+    integrationTargetId: "target_main",
+    repositoryId: target.repositoryId,
+    kind: "branch",
+    locator: "refs/heads/main",
+    baseCommit: "a".repeat(40),
+    candidateIds: [],
+  } as const;
+  const digest = createHash("sha256").update(canonicalJson(snapshotInput)).digest("hex");
+  const snapshot = { targetSnapshotId: `snapshot_${digest}`, ...snapshotInput, digest };
+  const evidence = {
+    schemaVersion: 3 as const,
+    eventId: `evt_${"c".repeat(32)}`,
+    eventType: "evidence.derived" as const,
+    source,
+    timestamp: target.timestamp,
+    repositoryId: target.repositoryId,
+    workspaceId: target.workspaceId,
+    worktreeId: target.worktreeId,
+    agentId: target.agentId,
+    taskId: target.taskId,
+    correlationId: target.correlationId,
+    causationId: target.eventId,
+    sourceSequence: 1,
+    payload: {
+      evidence: {
+        targetEventId: target.eventId,
+        factKind: "symbol" as const,
+        analyzer: { analyzerId: "symbol_analyzer", version: "1" },
+        configuration: {},
+        configurationDigest: `sha256:${createHash("sha256").update("{}").digest("hex")}`,
+        sourceEventIds: [read.eventId],
+        integrationTarget: snapshot.integrationTargetId,
+        coverage: { status: "sufficient" as const, reason: "complete proof input" },
+        coverageId: `coverage_${"c".repeat(32)}`,
+        stableFactId: target.payload.resource.resourceId,
+        exported: true,
+        normalizedSignature: "example(): void",
+        targetSnapshot: snapshot,
+        proof: {
+          kind: "hash_bound_symbol_contract" as const,
+          sourceAnalysis: {
+            sourceEventId: read.eventId,
+            sourceResourceId: read.payload.resource.resourceId,
+            sourceVersion: read.payload.version,
+            analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: read.payload.resource.resourceId, sourceVersion: read.payload.version })).digest("hex")}`,
+          },
+        },
+      },
+    },
+  };
+  assert.deepEqual(parseEvent(evidence).diagnostics, []);
+  assert.deepEqual(validateEventSet([read, target, evidence]), []);
+  const invalid = { ...evidence, eventId: `evt_${"d".repeat(32)}`, payload: { evidence: { ...evidence.payload.evidence, targetSnapshot: { ...snapshot, digest: "0".repeat(64) } } } };
+  assert.equal(validateEventSet([read, target, invalid]).some((entry) => entry.code === "PHASE3_SCHEMA_INVALID" && entry.path.endsWith("/targetSnapshot/digest")), true);
+  const changedSource = { ...makeFileChanged(), sourceSequence: null };
+  const changedEvidence = {
+    ...evidence,
+    eventId: `evt_${"e".repeat(32)}`,
+    payload: { evidence: {
+      ...evidence.payload.evidence,
+      sourceEventIds: [changedSource.eventId],
+      proof: { kind: "hash_bound_symbol_contract" as const, sourceAnalysis: {
+        sourceEventId: changedSource.eventId,
+        sourceResourceId: changedSource.payload.resource.resourceId,
+        sourceVersion: changedSource.payload.afterVersion,
+        analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: changedSource.payload.resource.resourceId, sourceVersion: changedSource.payload.afterVersion })).digest("hex")}`,
+      } },
+    } },
+  };
+  assert.deepEqual(validateEventSet([changedSource, target, changedEvidence]), []);
+});
+
+test("accepts cross-workspace same-repository V3 concurrency only with distinct authoritative lifecycles", () => {
+  const first = { ...makeSymbolChanged(), eventId: `evt_${"1".repeat(32)}`, taskId: "task_a" as const, agentId: "agent_a" as const, sourceSequence: null };
+  const second = {
+    ...makeSymbolChanged(), eventId: `evt_${"2".repeat(32)}`, taskId: "task_b" as const, agentId: "agent_b" as const,
+    workspaceId: "ws_44444444-4444-4444-8444-444444444444" as const,
+    worktreeId: "wt_55555555-5555-4555-8555-555555555555" as const,
+    correlationId: "corr_22222222222222222222222222222222" as const,
+    sourceSequence: null,
+    payload: {
+      ...makeSymbolChanged().payload,
+      beforeVersion: null,
+      afterVersion: {
+        ...makeSymbolChanged().payload.afterVersion,
+        domain: {
+          repositoryId: makeSymbolChanged().repositoryId,
+          workspaceId: "ws_44444444-4444-4444-8444-444444444444" as const,
+          worktreeId: "wt_55555555-5555-4555-8555-555555555555" as const,
+        },
+      },
+    },
+  };
+  const snapshot = v3Snapshot(first.repositoryId);
+  const observation = {
+    schemaVersion: 3 as const, eventId: `evt_${"3".repeat(32)}`, eventType: "task.concurrency.observed" as const,
+    source: { kind: "gateway" as const, sourceId: "source_gateway", instanceId: "11111111-1111-4111-8111-111111111111" }, timestamp: first.timestamp,
+    repositoryId: first.repositoryId, workspaceId: first.workspaceId, worktreeId: first.worktreeId, agentId: "agent_a" as const, taskId: "task_a" as const,
+    correlationId: "corr_33333333333333333333333333333333" as const, causationId: null, sourceSequence: null,
+    payload: { observation: { firstTaskId: first.taskId, secondTaskId: second.taskId, firstAgentId: first.agentId, secondAgentId: second.agentId, firstWorktreeId: first.worktreeId, secondWorktreeId: second.worktreeId, firstChangeEventId: first.eventId, secondChangeEventId: second.eventId, integrationTarget: snapshot.integrationTargetId, coverageId: `coverage_${"3".repeat(32)}`, targetSnapshot: snapshot, overlapProof: { kind: "authoritative_task_lifetimes" as const, firstLifecycleId: "life_a", secondLifecycleId: "life_b" } } },
+  };
+  assert.deepEqual(parseEvent(observation).diagnostics, []);
+  assert.deepEqual(validateEventSet([first, second, observation]), []);
+  const sameAgent = { ...observation, payload: { observation: { ...observation.payload.observation, secondAgentId: first.agentId } } };
+  const wrongTarget = { ...observation, payload: { observation: { ...observation.payload.observation, integrationTarget: "target_other" } } };
+  const sameLifecycle = { ...observation, payload: { observation: { ...observation.payload.observation, overlapProof: { kind: "authoritative_task_lifetimes" as const, firstLifecycleId: "life_a", secondLifecycleId: "life_a" } } } };
+  const sameSymbolEvent = { ...observation, payload: { observation: { ...observation.payload.observation, secondChangeEventId: first.eventId } } };
+  for (const invalid of [sameAgent, wrongTarget, sameLifecycle, sameSymbolEvent]) {
+    assert.equal(validateEventSet([first, second, invalid]).some((entry) => entry.code === "PHASE3_SCHEMA_INVALID"), true);
+  }
+});
+
+test("rejects V3 proof-kind mismatch, resolver endpoint mismatch, and conflicting duplicate event bodies", () => {
+  const dependency = makeDependencyChanged();
+  const snapshot = v3Snapshot(dependency.repositoryId);
+  const evidence = {
+    schemaVersion: 3 as const, eventId: `evt_${"4".repeat(32)}`, eventType: "evidence.derived" as const,
+    source: { kind: "analyzer" as const, sourceId: "source_analyzer", instanceId: "11111111-1111-4111-8111-111111111111" }, timestamp: dependency.timestamp,
+    repositoryId: dependency.repositoryId, workspaceId: dependency.workspaceId, worktreeId: dependency.worktreeId, agentId: "agent_a" as const, taskId: "task_a" as const, correlationId: dependency.correlationId, causationId: dependency.eventId, sourceSequence: null,
+    payload: { evidence: { targetEventId: dependency.eventId, factKind: "dependency" as const, analyzer: { analyzerId: "analyzer", version: "1" }, configuration: {}, configurationDigest: `sha256:${createHash("sha256").update("{}").digest("hex")}`, sourceEventIds: [dependency.eventId], integrationTarget: snapshot.integrationTargetId, coverage: { status: "sufficient" as const, reason: "supported" }, coverageId: `coverage_${"4".repeat(32)}`, stableFactId: dependency.payload.dependency.dependencyId, exported: true, normalizedSignature: null, targetSnapshot: snapshot, proof: { kind: "hash_bound_symbol_contract" as const, sourceAnalysis: { sourceEventId: dependency.eventId, sourceResourceId: dependency.payload.dependency.dependencyResourceId, sourceVersion: dependency.payload.dependency.dependencyVersion, analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: dependency.payload.dependency.dependencyResourceId, sourceVersion: dependency.payload.dependency.dependencyVersion })).digest("hex")}` } } } },
+  };
+  assert.equal(validateEventSet([dependency, evidence]).some((entry) => entry.path.endsWith("/proof/kind")), true);
+  const conflicting = { ...evidence, payload: { evidence: { ...evidence.payload.evidence, exported: false } } };
+  assert.equal(validateEventSet([dependency, evidence, conflicting]).some((entry) => entry.message.includes("conflicting canonical content")), true);
 });

@@ -1,9 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { sanitizeDiagnostic } from "@patchmesh/observation";
+import { parseEvent, validateEventSet } from "@patchmesh/protocol";
+import { projectWorkGraph } from "@patchmesh/storage";
 import type {
+  CoverageId,
   EventId,
   ProtocolEvent,
   Source,
+  TargetSnapshot,
   ToolCompletedEvent,
 } from "@patchmesh/protocol";
 import type { EventAppender } from "./types.js";
@@ -27,6 +31,10 @@ export interface PatchMeshSiteRuntimeIdentity {
   readonly agentId: McpCallContext["agentId"];
   readonly taskId: McpCallContext["taskId"];
   readonly causationId: McpCallContext["causationId"];
+  /** Required for PR5 proof production; host configuration, never MCP payload. */
+  readonly targetSnapshot?: TargetSnapshot;
+  /** Stable host-issued lifetime registered through beginTaskLifecycle. */
+  readonly lifecycleId?: string;
 }
 
 /**
@@ -156,6 +164,37 @@ export class PatchMeshSitePersistedEvidenceError extends Error {
   }
 }
 
+export class PatchMeshSiteLifecycleError extends Error {
+  readonly code = "PATCHMESH_SITE_LIFECYCLE_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "PatchMeshSiteLifecycleError";
+  }
+}
+
+export class PatchMeshSiteProofCapabilityError extends Error {
+  readonly code = "PATCHMESH_SITE_PROOF_CAPABILITY_UNAVAILABLE";
+  constructor(message: string) { super(message); this.name = "PatchMeshSiteProofCapabilityError"; }
+}
+
+export interface PatchMeshSiteTaskLifecycle {
+  readonly lifecycleId: string;
+  readonly source: Source;
+  readonly repositoryId: McpCallContext["repositoryId"];
+  readonly workspaceId: McpCallContext["workspaceId"];
+  readonly worktreeId: McpCallContext["worktreeId"];
+  readonly agentId: NonNullable<McpCallContext["agentId"]>;
+  readonly taskId: NonNullable<McpCallContext["taskId"]>;
+  readonly targetSnapshot: TargetSnapshot;
+}
+
+interface ActiveLifecycle extends PatchMeshSiteTaskLifecycle {
+  readonly overlaps: ReadonlySet<string>;
+  /** Symbol changes emitted by dispatches while this exact lifetime was active. */
+  readonly symbolChangeEventIds: ReadonlySet<EventId>;
+  readonly state: "active" | "ended";
+}
+
 export interface PatchMeshSitePayloadIdentity {
   readonly repositoryId?: McpCallContext["repositoryId"];
   readonly workspaceId?: McpCallContext["workspaceId"];
@@ -249,6 +288,46 @@ function assertRuntimeIdentity(identity: PatchMeshSiteRuntimeIdentity): void {
   }
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function assertCanonicalTargetSnapshot(snapshot: TargetSnapshot, repositoryId: string): void {
+  const digest = createHash("sha256").update(canonicalJson({
+    integrationTargetId: snapshot.integrationTargetId,
+    repositoryId: snapshot.repositoryId,
+    kind: snapshot.kind,
+    locator: snapshot.locator,
+    baseCommit: snapshot.baseCommit,
+    candidateIds: snapshot.candidateIds,
+  })).digest("hex");
+  if (snapshot.repositoryId !== repositoryId || snapshot.digest !== digest || snapshot.targetSnapshotId !== `snapshot_${digest}`) {
+    throw new PatchMeshSiteRuntimeIdentityError("patchmesh-site runtime target snapshot is not canonical for this repository");
+  }
+}
+
+function stripLifecycleState(lifecycle: ActiveLifecycle): PatchMeshSiteTaskLifecycle {
+  const { overlaps: _overlaps, symbolChangeEventIds: _symbolChangeEventIds, state: _state, ...registration } = lifecycle;
+  return registration;
+}
+
+function matchesLifecycle(identity: PatchMeshSiteRuntimeIdentity, lifecycle: ActiveLifecycle): boolean {
+  return identity.source.sourceId === lifecycle.source.sourceId
+    && identity.source.instanceId === lifecycle.source.instanceId
+    && identity.repositoryId === lifecycle.repositoryId
+    && identity.workspaceId === lifecycle.workspaceId
+    && identity.worktreeId === lifecycle.worktreeId
+    && identity.agentId === lifecycle.agentId
+    && identity.taskId === lifecycle.taskId
+    && identity.targetSnapshot !== undefined
+    && canonicalJson(identity.targetSnapshot) === canonicalJson(lifecycle.targetSnapshot);
+}
+
 function sameToolContext(left: ProtocolEvent, right: ProtocolEvent): boolean {
   return left.repositoryId === right.repositoryId
     && left.workspaceId === right.workspaceId
@@ -264,6 +343,26 @@ function terminalCompletion(events: readonly ProtocolEvent[], completedEventId: 
     throw new PatchMeshSitePersistedEvidenceError("terminal completion is absent from the gateway event store");
   }
   return completion;
+}
+
+function sufficientCoverageIdFor(events: readonly ProtocolEvent[], eventId: EventId): CoverageId | null {
+  try {
+    const byId = new Map(events.map((event) => [event.eventId, event] as const));
+    const sufficient = projectWorkGraph(events).snapshot.coverage
+      .filter((entry) => entry.presentation === "sufficient");
+    const visited = new Set<EventId>();
+    let current = byId.get(eventId);
+    while (current !== undefined && !visited.has(current.eventId)) {
+      const event = current;
+      visited.add(event.eventId);
+      const matches = sufficient.filter((entry) => entry.evidenceEventIds.includes(event.eventId));
+      if (matches.length === 1) return matches[0]!.coverageId;
+      current = event.causationId === null ? undefined : byId.get(event.causationId);
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -316,6 +415,8 @@ export class PatchMeshSiteMcpGateway {
   private readonly evidenceRecorder: PatchMeshSiteEvidenceRecorder | undefined;
   private readonly createCorrelationId: () => McpCallContext["correlationId"];
   private readonly sourceSequences = new Map<string, number>();
+  private readonly lifecycles = new Map<string, ActiveLifecycle>();
+  private readonly emittedConcurrency = new Set<string>();
   private dispatchTail: Promise<void> = Promise.resolve();
 
   constructor(options: PatchMeshSiteMcpGatewayOptions) {
@@ -324,7 +425,14 @@ export class PatchMeshSiteMcpGateway {
     this.capabilities = status.capabilities;
     this.capabilityDigest = status.capabilityDigest;
     this.eventStore = options.eventStore;
-    this.proxy = new McpProxy({ ...options.proxyOptions, eventStore: options.eventStore });
+    this.proxy = new McpProxy({ ...options.proxyOptions, eventStore: options.eventStore, proofAuthority: {
+      authoritativeIdentity: status.capabilities.authoritativeIdentity,
+      taskLifecycle: status.capabilities.taskLifecycle,
+      integrationTargetSnapshot: status.capabilities.integrationTargetSnapshot,
+      observedReadVersion: status.capabilities.observedReadVersion,
+      dependentWriteToken: status.capabilities.dependentWriteToken,
+      exactReportedEffects: status.capabilities.exactReportedEffects,
+    } });
     this.evidenceRecorder = options.evidenceRecorder;
     this.createCorrelationId = options.createCorrelationId ?? defaultCorrelationId;
   }
@@ -337,6 +445,37 @@ export class PatchMeshSiteMcpGateway {
     return this.runExclusive(() => this.dispatchSerialized(identity, invocation, signal));
   }
 
+  /** Registers a host-owned task lifetime. Same data is idempotent; conflicts fail closed. */
+  beginTaskLifecycle(lifecycle: PatchMeshSiteTaskLifecycle): void {
+    if (!this.capabilities.authoritativeIdentity || !this.capabilities.taskLifecycle || !this.capabilities.integrationTargetSnapshot) {
+      throw new PatchMeshSiteProofCapabilityError("host capabilities do not authorize authoritative task lifecycle proofs");
+    }
+    if (lifecycle.lifecycleId.trim().length === 0) throw new PatchMeshSiteLifecycleError("lifecycle ID must be non-empty");
+    assertCanonicalTargetSnapshot(lifecycle.targetSnapshot, lifecycle.repositoryId);
+    const existing = this.lifecycles.get(lifecycle.lifecycleId);
+    if (existing !== undefined) {
+      if (existing.state !== "active" || canonicalJson(stripLifecycleState(existing)) !== canonicalJson(lifecycle)) {
+        throw new PatchMeshSiteLifecycleError("conflicting duplicate task lifecycle registration");
+      }
+      return;
+    }
+    const overlaps = new Set([...this.lifecycles.values()]
+      .filter((candidate) => candidate.state === "active" && candidate.repositoryId === lifecycle.repositoryId)
+      .map((candidate) => candidate.lifecycleId));
+    for (const overlapId of overlaps) {
+      const other = this.lifecycles.get(overlapId);
+      if (other !== undefined) this.lifecycles.set(overlapId, { ...other, overlaps: new Set([...other.overlaps, lifecycle.lifecycleId]) });
+    }
+    this.lifecycles.set(lifecycle.lifecycleId, { ...lifecycle, overlaps, symbolChangeEventIds: new Set(), state: "active" });
+  }
+
+  /** Ends exactly one active host-owned lifetime; an already-ended or unknown ID is rejected. */
+  endTaskLifecycle(lifecycleId: string): void {
+    const existing = this.lifecycles.get(lifecycleId);
+    if (existing === undefined || existing.state !== "active") throw new PatchMeshSiteLifecycleError("task lifecycle is not active");
+    this.lifecycles.set(lifecycleId, { ...existing, state: "ended" });
+  }
+
   private async dispatchSerialized<T>(
     identity: PatchMeshSiteRuntimeIdentity,
     invocation: PatchMeshSiteToolInvocation<T>,
@@ -344,6 +483,16 @@ export class PatchMeshSiteMcpGateway {
   ): Promise<PatchMeshSiteGatewayResult<T>> {
     assertRuntimeIdentity(identity);
     assertPayloadIdentity(identity, invocation.payloadIdentity);
+    if (identity.targetSnapshot !== undefined) {
+      if (!this.capabilities.authoritativeIdentity || !this.capabilities.taskLifecycle || !this.capabilities.integrationTargetSnapshot) {
+        throw new PatchMeshSiteProofCapabilityError("host capabilities do not authorize target-bound proof capture");
+      }
+      assertCanonicalTargetSnapshot(identity.targetSnapshot, identity.repositoryId);
+    }
+    const lifecycle = identity.lifecycleId === undefined ? undefined : this.lifecycles.get(identity.lifecycleId);
+    if (identity.lifecycleId !== undefined && (lifecycle === undefined || lifecycle.state !== "active" || !matchesLifecycle(identity, lifecycle))) {
+      throw new PatchMeshSiteLifecycleError("runtime identity does not match an active authoritative task lifecycle");
+    }
     const sourceKey = `${identity.source.kind}:${identity.source.sourceId}:${identity.source.instanceId}`;
     const requestSourceSequence = this.sourceSequences.get(sourceKey) ?? 0;
     const completionSourceSequence = requestSourceSequence + 1;
@@ -360,8 +509,14 @@ export class PatchMeshSiteMcpGateway {
       causationId: identity.causationId,
       requestSourceSequence,
       completionSourceSequence,
+      ...(identity.targetSnapshot === undefined ? {} : { targetSnapshot: identity.targetSnapshot }),
     };
     const proxyResult = await this.proxy.execute(invocation.call, context, invocation.execute, signal);
+    if (lifecycle !== undefined) {
+      this.recordLifecycleSymbolChanges(lifecycle.lifecycleId, proxyResult.completedEventId);
+      const activeLifecycle = this.lifecycles.get(lifecycle.lifecycleId);
+      if (activeLifecycle !== undefined) this.emitConcurrencyProofs(activeLifecycle);
+    }
     let evidence: PatchMeshSitePersistedToolEvidence | null = null;
     let recorderDiagnostic: string | null = null;
     try {
@@ -388,6 +543,74 @@ export class PatchMeshSiteMcpGateway {
       evidence = null;
     }
     return { execution: proxyResult.execution, proxyResult, evidence, recorderDiagnostic };
+  }
+
+  private emitConcurrencyProofs(current: ActiveLifecycle): void {
+    const events = this.eventStore.read();
+    const sufficientEvidence = new Map<EventId, Extract<ProtocolEvent, { eventType: "evidence.derived" }>[] >();
+    for (const event of events) {
+      if (event.eventType === "evidence.derived" && event.schemaVersion === 3
+        && event.payload.evidence.factKind === "symbol" && event.payload.evidence.coverage.status === "sufficient"
+        && canonicalJson(event.payload.evidence.targetSnapshot) === canonicalJson(current.targetSnapshot)) {
+        sufficientEvidence.set(event.payload.evidence.targetEventId, [...(sufficientEvidence.get(event.payload.evidence.targetEventId) ?? []), event]);
+      }
+    }
+    const currentChanges = events.filter((event): event is Extract<ProtocolEvent, { eventType: "symbol.changed" }> => event.eventType === "symbol.changed" && current.symbolChangeEventIds.has(event.eventId));
+    for (const first of currentChanges) for (const second of events) {
+      if (second.eventType !== "symbol.changed" || second.eventId === first.eventId || second.repositoryId !== current.repositoryId || second.payload.resource.resourceId !== first.payload.resource.resourceId || second.taskId === null || second.agentId === null) continue;
+      const matchingLifecycles = [...this.lifecycles.values()].filter((candidate) => candidate.lifecycleId !== current.lifecycleId
+        && candidate.taskId === second.taskId && candidate.agentId === second.agentId
+        && candidate.worktreeId === second.worktreeId && candidate.workspaceId === second.workspaceId
+        && candidate.repositoryId === second.repositoryId && candidate.symbolChangeEventIds.has(second.eventId));
+      if (matchingLifecycles.length !== 1) throw new Error(`debug: matching lifecycles=${matchingLifecycles.length}`);
+      const other = matchingLifecycles[0]!;
+      if (!current.overlaps.has(other.lifecycleId) || canonicalJson(other.targetSnapshot) !== canonicalJson(current.targetSnapshot) || second.worktreeId === current.worktreeId || second.agentId === current.agentId) continue;
+      const firstEvidences = sufficientEvidence.get(first.eventId) ?? [];
+      const secondEvidences = sufficientEvidence.get(second.eventId) ?? [];
+      if (firstEvidences.length !== 1 || secondEvidences.length !== 1) continue;
+      const ordered = [first, second].sort((left, right) => left.eventId.localeCompare(right.eventId));
+      const key = `${ordered[0]!.eventId}:${ordered[1]!.eventId}:${current.targetSnapshot.targetSnapshotId}`;
+      if (this.emittedConcurrency.has(key)) continue;
+      const [left, right] = ordered as [typeof first, typeof second];
+      const leftLifecycle = left.taskId === current.taskId ? current : other;
+      const rightLifecycle = right.taskId === current.taskId ? current : other;
+      const proofId = `evt_${createHash("sha256").update(key).digest("hex").slice(0, 32)}` as EventId;
+      if (events.some((event) => event.eventId === proofId)) { this.emittedConcurrency.add(key); continue; }
+      // The observation itself is caused by the current dispatch's change. The
+      // other worktree is an overlap participant, never a cross-domain cause.
+      const coverageId = sufficientCoverageIdFor(events, first.eventId);
+      if (coverageId === null) continue;
+      const proof: ProtocolEvent = {
+        schemaVersion: 3, eventId: proofId, eventType: "task.concurrency.observed", source: current.source, timestamp: new Date().toISOString(), repositoryId: current.repositoryId, workspaceId: current.workspaceId, worktreeId: current.worktreeId, agentId: current.agentId, taskId: current.taskId, correlationId: first.correlationId, causationId: first.eventId, sourceSequence: null,
+        payload: { observation: { firstTaskId: left.taskId!, secondTaskId: right.taskId!, firstChangeEventId: left.eventId, secondChangeEventId: right.eventId, integrationTarget: current.targetSnapshot.integrationTargetId, coverageId, firstAgentId: left.agentId!, secondAgentId: right.agentId!, firstWorktreeId: left.worktreeId, secondWorktreeId: right.worktreeId, targetSnapshot: current.targetSnapshot, overlapProof: { kind: "authoritative_task_lifetimes", firstLifecycleId: leftLifecycle.lifecycleId, secondLifecycleId: rightLifecycle.lifecycleId } } },
+      };
+      try {
+        const parsed = parseEvent(proof);
+        if (parsed.value === null) continue;
+        if (validateEventSet([...this.eventStore.read(), parsed.value]).length > 0) continue;
+        this.eventStore.append(parsed.value);
+        this.emittedConcurrency.add(key);
+      } catch { /* proof capture is non-authoritative and fails closed */ }
+    }
+  }
+
+  /** Retains only symbol effects linked to one terminal completion of an active lifetime. */
+  private recordLifecycleSymbolChanges(lifecycleId: string, completedEventId: EventId): void {
+    const lifecycle = this.lifecycles.get(lifecycleId);
+    if (lifecycle === undefined || lifecycle.state !== "active") return;
+    const events = this.eventStore.read();
+    const completion = events.find((event) => event.eventId === completedEventId);
+    if (completion?.eventType !== "tool.completed") return;
+    const byId = new Map(events.map((event) => [event.eventId, event] as const));
+    const additions = completion.payload.effectEventIds
+      .map((eventId) => byId.get(eventId))
+      .filter((event): event is Extract<ProtocolEvent, { eventType: "symbol.changed" }> => event?.eventType === "symbol.changed" && sameToolContext(event, completion))
+      .map((event) => event.eventId);
+    if (additions.length === 0) return;
+    this.lifecycles.set(lifecycleId, {
+      ...lifecycle,
+      symbolChangeEventIds: new Set([...lifecycle.symbolChangeEventIds, ...additions]),
+    });
   }
 
   /**

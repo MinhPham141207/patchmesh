@@ -5,6 +5,7 @@ import type {
   ResourceId,
   ResourceVersion,
   TaskId,
+  TargetSnapshot,
 } from "@patchmesh/protocol";
 
 import type { DetectorFinding } from "./types.js";
@@ -16,7 +17,7 @@ export interface ExportedContractChangeEvidence {
   readonly afterVersion: ResourceVersion;
   readonly breaking: boolean;
   readonly coverageId: CoverageId;
-  readonly integrationTarget: string;
+  readonly targetSnapshot: TargetSnapshot;
 }
 
 export interface ConsumerContractDependencyEvidence {
@@ -27,7 +28,7 @@ export interface ConsumerContractDependencyEvidence {
   readonly affectedTaskId: TaskId | null;
   readonly observedContractVersion: ResourceVersion;
   readonly coverageId: CoverageId;
-  readonly integrationTarget: string;
+  readonly targetSnapshot: TargetSnapshot;
 }
 
 export function groupConsumersByContract(
@@ -64,7 +65,8 @@ export function detectExportedContractInvalidation(
 ): DetectorFinding | null {
   if (!change.breaking
     || change.contractResourceId !== consumer.contractResourceId
-    || change.integrationTarget !== consumer.integrationTarget
+    || change.targetSnapshot.targetSnapshotId !== consumer.targetSnapshot.targetSnapshotId
+    || change.targetSnapshot.digest !== consumer.targetSnapshot.digest
     || change.beforeVersion.value === null
     || matchesVersion(change.beforeVersion, change.afterVersion)
     || !matchesVersion(change.beforeVersion, consumer.observedContractVersion)) {

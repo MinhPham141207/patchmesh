@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase2/v2/dependent-write.schema.json",
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "snapshot": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/targetSnapshot" },
+    "token": { "type": "object", "properties": { "schemaVersion": { "const": 1 }, "tokenDigest": { "$ref": "#/$defs/digest" }, "repositoryId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/repositoryId" }, "workspaceId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/workspaceId" }, "worktreeId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/worktreeId" }, "taskId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/taskId" }, "resourceId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/resourceId" }, "observedVersion": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/resourceVersion" }, "readEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "targetSnapshot": { "$ref": "#/$defs/snapshot" } }, "required": ["schemaVersion", "tokenDigest", "repositoryId", "workspaceId", "worktreeId", "taskId", "resourceId", "observedVersion", "readEventId", "targetSnapshot"], "additionalProperties": false }
+  },
+  "type": "object",
+  "properties": {
+    "dependencyId": { "type": "string", "pattern": "^dep_[0-9a-f]{32}$" }, "resourceId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/resourceId" }, "dependsOnReadEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "coverageId": { "$ref": "../../phase0/v1/coverage.schema.json#/$defs/coverageId" },
+    "comparison": { "type": "object", "properties": { "changedEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "coverageId": { "$ref": "../../phase0/v1/coverage.schema.json#/$defs/coverageId" }, "integrationTarget": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" } }, "required": ["changedEventId", "coverageId", "integrationTarget"], "additionalProperties": false },
+    "readToken": { "$ref": "#/$defs/token" }, "targetSnapshot": { "$ref": "#/$defs/snapshot" }, "writeEffectEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "writeEffectCoverageId": { "$ref": "../../phase0/v1/coverage.schema.json#/$defs/coverageId" }, "completionEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }
+  },
+  "required": ["dependencyId", "resourceId", "dependsOnReadEventId", "coverageId", "comparison", "readToken", "targetSnapshot", "writeEffectEventId", "writeEffectCoverageId", "completionEventId"], "additionalProperties": false
+}

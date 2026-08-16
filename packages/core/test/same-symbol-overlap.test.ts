@@ -27,7 +27,16 @@ const evidence = (
   taskId: "task_a",
   worktreeId: "wt_11111111-1111-4111-8111-111111111111",
   coverageId: `coverage_${suffix}`,
-  integrationTarget: "main",
+  targetSnapshot: {
+    targetSnapshotId: `snapshot_${"a".repeat(64)}`,
+    integrationTargetId: "target_main",
+    repositoryId: "repo_11111111-1111-4111-8111-111111111111",
+    kind: "branch",
+    locator: "main",
+    baseCommit: "a".repeat(40),
+    candidateIds: [],
+    digest: "a".repeat(64),
+  },
   concurrencyEventId: "evt_00000000000000000000000000000003",
   concurrencyCoverageId: "coverage_concurrency",
   ...options,
@@ -98,5 +107,14 @@ test("does not report without the concurrency coverage proof", () => {
     ...candidate,
     version: { ...candidate.version, domain: { ...candidate.version.domain, worktreeId: candidate.worktreeId } },
   };
+  assert.equal(detectSameSymbolOverlap(evidence("1"), crossWorktreeCandidate), null);
+});
+
+test("does not report across immutable target snapshots", () => {
+  const candidate = evidence("2", {
+    agentId: "agent_b", taskId: "task_b", worktreeId: "wt_22222222-2222-4222-8222-222222222222",
+    targetSnapshot: { ...evidence("1").targetSnapshot!, targetSnapshotId: `snapshot_${"b".repeat(64)}`, digest: "b".repeat(64) },
+  });
+  const crossWorktreeCandidate = { ...candidate, version: { ...candidate.version, domain: { ...candidate.version.domain, worktreeId: candidate.worktreeId } } };
   assert.equal(detectSameSymbolOverlap(evidence("1"), crossWorktreeCandidate), null);
 });

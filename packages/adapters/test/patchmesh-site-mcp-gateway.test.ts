@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { FSWatcher } from "node:fs";
@@ -18,7 +19,8 @@ import {
   type PatchMeshSiteHostContract,
   type PatchMeshSiteRuntimeIdentity,
 } from "../src/index.js";
-import { fileResourceId, NodeObservationBoundary } from "@patchmesh/observation";
+import { fileResourceId, NodeObservationBoundary, type ObservationBoundary } from "@patchmesh/observation";
+import { validateEventSet } from "@patchmesh/protocol";
 import { SqliteEventStore } from "@patchmesh/storage";
 
 const execFile = promisify(execFileCallback);
@@ -47,6 +49,13 @@ function runtimeIdentity(workspaceRoot: string): PatchMeshSiteRuntimeIdentity {
     taskId: "task_patchmesh_site",
     causationId: null,
   };
+}
+
+function targetSnapshot(repositoryId: PatchMeshSiteRuntimeIdentity["repositoryId"]) {
+  const body = { integrationTargetId: "target_main", repositoryId, kind: "branch" as const, locator: "main", baseCommit: "a".repeat(40), candidateIds: [] as string[] };
+  const canonical = `{${Object.keys(body).sort().map((key) => `${JSON.stringify(key)}:${JSON.stringify(body[key as keyof typeof body])}`).join(",")}}`;
+  const digest = createHash("sha256").update(canonical).digest("hex");
+  return { ...body, digest, targetSnapshotId: `snapshot_${digest}` as const };
 }
 
 function nextCorrelation(): () => `corr_${string}` {
@@ -158,6 +167,33 @@ test("gateway rejects a non-adapter runtime source before execution or persisten
   });
 });
 
+test("host lifecycle registration is immutable and dispatch requires its exact authoritative target", async () => {
+  const store = SqliteEventStore.open(":memory:");
+  const gateway = new PatchMeshSiteMcpGateway({ eventStore: store, hostContract: {
+    ...hostContract, authoritativeIdentity: true, taskLifecycle: true, integrationTargetSnapshot: true,
+  }, createCorrelationId: nextCorrelation() });
+  try {
+    const identity = { ...runtimeIdentity(tmpdir()), targetSnapshot: targetSnapshot(runtimeIdentity(tmpdir()).repositoryId), lifecycleId: "life-a" };
+    gateway.beginTaskLifecycle({
+      lifecycleId: "life-a", source: identity.source, repositoryId: identity.repositoryId, workspaceId: identity.workspaceId,
+      worktreeId: identity.worktreeId, agentId: identity.agentId!, taskId: identity.taskId!, targetSnapshot: identity.targetSnapshot,
+    });
+    gateway.beginTaskLifecycle({
+      lifecycleId: "life-a", source: identity.source, repositoryId: identity.repositoryId, workspaceId: identity.workspaceId,
+      worktreeId: identity.worktreeId, agentId: identity.agentId!, taskId: identity.taskId!, targetSnapshot: identity.targetSnapshot,
+    });
+    await gateway.dispatch(identity, { call: { toolName: "read_file", operation: "read", targetResourceId: null, opaque: false }, execute: async () => ({ outcome: "succeeded", value: true, exitCode: 0 }) });
+    gateway.endTaskLifecycle("life-a");
+    await assert.rejects(
+      gateway.dispatch(identity, { call: { toolName: "read_file", operation: "read", targetResourceId: null, opaque: false }, execute: async () => ({ outcome: "succeeded", value: true, exitCode: 0 }) }),
+      /lifecycle/u,
+    );
+  } finally {
+    await gateway.dispose();
+    store.close();
+  }
+});
+
 test("gateway serializes overlapping dispatches so adapter source sequences remain append-ordered", async () => {
   await withTemporaryDatabase(async (databasePath) => {
     const store = SqliteEventStore.open(databasePath);
@@ -199,6 +235,63 @@ test("gateway serializes overlapping dispatches so adapter source sequences rema
       store.close();
     }
   });
+});
+
+test("emits one target-bound V3 concurrency proof only for two overlapping lifecycle-scoped symbol changes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-pr5-overlap-"));
+  const firstRoot = join(root, "first");
+  const secondRoot = join(root, "second");
+  const source = "export function api(): string { return \"ok\"; }\n";
+  const target = targetSnapshot(runtimeIdentity(firstRoot).repositoryId);
+  const snapshots = new Map<string, string>();
+  const observer: ObservationBoundary = {
+    source: { kind: "watcher", sourceId: "source_pr5", instanceId: "99999999-9999-4999-8999-999999999999" },
+    async captureBefore() {
+      return { snapshot: { repository: { commonDirectory: "C:/repo/.git", revision: "a".repeat(40) }, worktree: { administrativeDirectory: "C:/repo/.git" }, files: new Map() }, gaps: [], outOfBandChanges: [] };
+    },
+    async captureAfter(observationContext) {
+      const content = snapshots.get(observationContext.workspaceRoot);
+      if (content === undefined) throw new Error("missing test workspace source");
+      return { snapshot: { repository: { commonDirectory: "C:/repo/.git", revision: "a".repeat(40) }, worktree: { administrativeDirectory: "C:/repo/.git" }, files: new Map([["src/api.ts", { contentHash: createHash("sha256").update(content).digest("hex"), gitBlob: null, fileKind: "file" as const }]]) }, gaps: [], outOfBandChanges: [] };
+    },
+  };
+  mkdirSync(join(firstRoot, "src"), { recursive: true });
+  mkdirSync(join(secondRoot, "src"), { recursive: true });
+  writeFileSync(join(firstRoot, "src", "api.ts"), source, "utf8");
+  writeFileSync(join(secondRoot, "src", "api.ts"), source, "utf8");
+  snapshots.set(firstRoot, source);
+  snapshots.set(secondRoot, source);
+  const store = SqliteEventStore.open(":memory:");
+  const gateway = new PatchMeshSiteMcpGateway({
+    eventStore: store,
+    hostContract: { ...hostContract, integrationTargetSnapshot: true, observedReadVersion: true, dependentWriteToken: true },
+    createCorrelationId: nextCorrelation(),
+    proxyOptions: {
+      observer,
+      phase2SourceAnalysis: {
+        source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+        analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+        configuration: { parser: "typescript" },
+        integrationTarget: target.integrationTargetId,
+      },
+    },
+  });
+  try {
+    const first = { ...runtimeIdentity(firstRoot), workspaceId: "ws_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as const, worktreeId: "wt_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as const, agentId: "agent_alpha" as const, taskId: "task_alpha" as const, targetSnapshot: target, lifecycleId: "life-alpha" };
+    const second = { ...runtimeIdentity(secondRoot), workspaceId: "ws_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" as const, worktreeId: "wt_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" as const, agentId: "agent_beta" as const, taskId: "task_beta" as const, targetSnapshot: target, lifecycleId: "life-beta" };
+    for (const identity of [first, second]) gateway.beginTaskLifecycle({ lifecycleId: identity.lifecycleId, source: identity.source, repositoryId: identity.repositoryId, workspaceId: identity.workspaceId, worktreeId: identity.worktreeId, agentId: identity.agentId, taskId: identity.taskId, targetSnapshot: identity.targetSnapshot });
+    const call = { toolName: "edit_file" as const, operation: "edit src/api.ts", targetResourceId: fileResourceId(first.repositoryId, "src/api.ts"), opaque: false };
+    await gateway.dispatch(first, { call, execute: async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [call.targetResourceId] }) });
+    await gateway.dispatch(second, { call, execute: async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [call.targetResourceId] }) });
+    const events = store.read();
+    const proofs = events.filter((event) => event.eventType === "task.concurrency.observed" && event.schemaVersion === 3);
+    assert.equal(proofs.length, 1);
+    assert.deepEqual(validateEventSet(events), []);
+  } finally {
+    await gateway.dispose();
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("gateway owns one real file-changing MCP execution and forwards only its persisted linked evidence", async () => {

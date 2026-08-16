@@ -34,13 +34,14 @@ const phase0SchemaNames = [
 
 const phase0SchemaDirectory = new URL("../../../schemas/phase0/v1/", import.meta.url);
 const phase2SchemaDirectory = new URL("../../../schemas/phase2/v1/", import.meta.url);
+const phase3SchemaDirectory = new URL("../../../schemas/phase2/v2/", import.meta.url);
 
 function readSchema(directory: URL, name: string): Record<string, unknown> {
   const path = fileURLToPath(new URL(`${name}.schema.json`, directory));
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
 }
 
-function createValidators(): { readonly phase0: ValidateFunction; readonly phase2: ValidateFunction } {
+function createValidators(): { readonly phase0: ValidateFunction; readonly phase2: ValidateFunction; readonly phase3: ValidateFunction } {
   const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
   const registerFormats = addFormats as unknown as (instance: Ajv2020) => Ajv2020;
   registerFormats(ajv);
@@ -50,10 +51,15 @@ function createValidators(): { readonly phase0: ValidateFunction; readonly phase
   ajv.addSchema(readSchema(phase2SchemaDirectory, "derived-evidence"));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "task-concurrency-observed"));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "event-envelope"));
+  ajv.addSchema(readSchema(phase3SchemaDirectory, "dependent-write"));
+  ajv.addSchema(readSchema(phase3SchemaDirectory, "derived-evidence"));
+  ajv.addSchema(readSchema(phase3SchemaDirectory, "task-concurrency-observed"));
+  ajv.addSchema(readSchema(phase3SchemaDirectory, "event-envelope"));
   const phase0 = ajv.getSchema("https://patchmesh.dev/schemas/phase0/v1/event-envelope.schema.json");
   const phase2 = ajv.getSchema("https://patchmesh.dev/schemas/phase2/v1/event-envelope.schema.json");
-  if (!phase0 || !phase2) throw new Error("event envelope schema was not registered");
-  return { phase0, phase2 };
+  const phase3 = ajv.getSchema("https://patchmesh.dev/schemas/phase2/v2/event-envelope.schema.json");
+  if (!phase0 || !phase2 || !phase3) throw new Error("event envelope schema was not registered");
+  return { phase0, phase2, phase3 };
 }
 
 const validators = createValidators();
@@ -96,10 +102,10 @@ export function parseEvent(input: unknown): ValidationResult<ProtocolEvent> {
   if (!isRecord(input)) {
     return { value: null, diagnostics: [diagnostic("PHASE0_SCHEMA_INVALID", "/", "event must be an object")] };
   }
-  if (Object.hasOwn(input, "schemaVersion") && input.schemaVersion !== 1 && input.schemaVersion !== 2) {
+  if (Object.hasOwn(input, "schemaVersion") && input.schemaVersion !== 1 && input.schemaVersion !== 2 && input.schemaVersion !== 3) {
     return { value: null, diagnostics: [diagnostic("PHASE0_SCHEMA_UNSUPPORTED", "/schemaVersion", "schema version is unsupported")] };
   }
-  const validateEnvelope = input.schemaVersion === 2 ? validators.phase2 : validators.phase0;
+  const validateEnvelope = input.schemaVersion === 3 ? validators.phase3 : input.schemaVersion === 2 ? validators.phase2 : validators.phase0;
   if (!validateEnvelope(input)) {
     return { value: null, diagnostics: sortDiagnostics((validateEnvelope.errors ?? []).map(ajvDiagnostic)) };
   }
@@ -131,6 +137,102 @@ function sameVersionDomain(event: ProtocolEvent, version: { domain: { repository
   return event.repositoryId === version.domain.repositoryId &&
     event.workspaceId === version.domain.workspaceId &&
     event.worktreeId === version.domain.worktreeId;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256(value: unknown): string {
+  return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
+}
+
+function validateTargetSnapshot(snapshot: {
+  targetSnapshotId: string; integrationTargetId: string; repositoryId: string; kind: string; locator: string; baseCommit: string; candidateIds: readonly string[]; digest: string;
+}, repositoryId: string, path: string, diagnostics: ValidationDiagnostic[]): void {
+  const digest = createHash("sha256").update(canonicalJson({
+    integrationTargetId: snapshot.integrationTargetId, repositoryId: snapshot.repositoryId,
+    kind: snapshot.kind, locator: snapshot.locator, baseCommit: snapshot.baseCommit, candidateIds: snapshot.candidateIds,
+  })).digest("hex");
+  if (snapshot.repositoryId !== repositoryId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/repositoryId`, "target snapshot crosses event repository"));
+  if (snapshot.digest !== digest || snapshot.targetSnapshotId !== `snapshot_${digest}`) {
+    diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/digest`, "target snapshot digest is invalid"));
+  }
+}
+
+function validateProofDependentWrite(event: DependentWriteEvent, eventsById: ReadonlyMap<EventId, ProtocolEvent>, diagnostics: ValidationDiagnostic[]): void {
+  if (event.schemaVersion !== 3) return;
+  const write = event.payload.write;
+  const path = `/events/${event.eventId}/payload/write`;
+  validateTargetSnapshot(write.targetSnapshot, event.repositoryId, `${path}/targetSnapshot`, diagnostics);
+  const token = write.readToken;
+  validateTargetSnapshot(token.targetSnapshot, event.repositoryId, `${path}/readToken/targetSnapshot`, diagnostics);
+  const expectedToken = sha256({ schemaVersion: token.schemaVersion, repositoryId: token.repositoryId, workspaceId: token.workspaceId, worktreeId: token.worktreeId, taskId: token.taskId, resourceId: token.resourceId, observedVersion: token.observedVersion, readEventId: token.readEventId, targetSnapshot: token.targetSnapshot });
+  if (token.tokenDigest !== expectedToken) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/readToken/tokenDigest`, "observed-read token digest is invalid"));
+  if (token.readEventId !== write.dependsOnReadEventId || token.taskId !== event.taskId || token.repositoryId !== event.repositoryId || token.workspaceId !== event.workspaceId || token.worktreeId !== event.worktreeId || canonicalJson(token.targetSnapshot) !== canonicalJson(write.targetSnapshot)) {
+    diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/readToken`, "observed-read token does not bind this dependent write"));
+  }
+  const read = eventsById.get(token.readEventId);
+  if (read?.eventType === "file.read" || read?.eventType === "symbol.read") {
+    if (token.resourceId !== read.payload.resource.resourceId || canonicalJson(token.observedVersion) !== canonicalJson(read.payload.version)) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/readToken`, "observed-read token does not match the persisted read"));
+  }
+  const effect = eventsById.get(write.writeEffectEventId);
+  if (effect === undefined) diagnostics.push(diagnostic("PHASE3_REFERENCE_MISSING", `${path}/writeEffectEventId`, "dependent write effect event is absent"));
+  else if (effect.eventType !== "file.changed" || effect.payload.resource.resourceId !== write.resourceId || !sameDomain(event, effect) || effect.taskId !== event.taskId || write.writeEffectCoverageId !== write.coverageId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/writeEffectEventId`, "dependent write effect must be a matching sufficiently covered file change"));
+  const completion = eventsById.get(write.completionEventId);
+  if (completion === undefined) diagnostics.push(diagnostic("PHASE3_REFERENCE_MISSING", `${path}/completionEventId`, "dependent write completion is absent"));
+  else if (completion.eventType !== "tool.completed" || completion.payload.outcome !== "succeeded" || !completion.payload.deterministicallyAttributedEffectEventIds?.includes(write.writeEffectEventId) || !sameDomain(event, completion) || completion.taskId !== event.taskId || completion.correlationId !== event.correlationId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/completionEventId`, "dependent write requires a succeeded completion with a deterministically attributed persisted effect"));
+  if (write.comparison.integrationTarget !== write.targetSnapshot.integrationTargetId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/comparison/integrationTarget`, "dependent write comparison target does not match its target snapshot"));
+}
+
+function validateProofConcurrency(event: TaskConcurrencyObservedEvent, eventsById: ReadonlyMap<EventId, ProtocolEvent>, diagnostics: ValidationDiagnostic[]): void {
+  if (event.schemaVersion !== 3) return;
+  const observation = event.payload.observation;
+  const path = `/events/${event.eventId}/payload/observation`;
+  validateTargetSnapshot(observation.targetSnapshot, event.repositoryId, `${path}/targetSnapshot`, diagnostics);
+  const first = eventsById.get(observation.firstChangeEventId);
+  const second = eventsById.get(observation.secondChangeEventId);
+  if (observation.firstAgentId === observation.secondAgentId || observation.firstTaskId === observation.secondTaskId || observation.firstWorktreeId === observation.secondWorktreeId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", path, "concurrency proof requires distinct agents, tasks, and worktrees"));
+  if (observation.integrationTarget !== observation.targetSnapshot.integrationTargetId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/integrationTarget`, "concurrency target does not match its target snapshot"));
+  if (first?.eventType === "symbol.changed" && second?.eventType === "symbol.changed") {
+    if (first.repositoryId !== event.repositoryId || second.repositoryId !== event.repositoryId || first.agentId !== observation.firstAgentId || second.agentId !== observation.secondAgentId || first.taskId !== observation.firstTaskId || second.taskId !== observation.secondTaskId || first.worktreeId !== observation.firstWorktreeId || second.worktreeId !== observation.secondWorktreeId || first.payload.resource.resourceId !== second.payload.resource.resourceId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", path, "concurrency proof changes do not identify the declared same-symbol participants"));
+  }
+  if (observation.overlapProof.kind === "executor_owned_tool_windows") {
+    for (const [requestId, completionId, taskId, change] of [[observation.overlapProof.firstRequestEventId, observation.overlapProof.firstCompletionEventId, observation.firstTaskId, first], [observation.overlapProof.secondRequestEventId, observation.overlapProof.secondCompletionEventId, observation.secondTaskId, second]] as const) {
+      const request = eventsById.get(requestId); const completion = eventsById.get(completionId);
+      if (request?.eventType !== "tool.requested" || completion?.eventType !== "tool.completed" || change?.eventType !== "symbol.changed" || completion.payload.requestEventId !== requestId || !completion.payload.effectEventIds.includes(change.eventId) || request.taskId !== taskId || completion.taskId !== taskId || !sameDomain(request, change) || !sameDomain(completion, change)) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/overlapProof`, "executor window witness must bind each tool window and effect to its symbol change"));
+    }
+  } else if (observation.overlapProof.firstLifecycleId === observation.overlapProof.secondLifecycleId) {
+    diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/overlapProof`, "task lifetime witness must identify two distinct lifecycles"));
+  }
+}
+
+function validateProofDerivedEvidence(event: DerivedEvidenceEvent, eventsById: ReadonlyMap<EventId, ProtocolEvent>, diagnostics: ValidationDiagnostic[]): void {
+  if (event.schemaVersion !== 3) return;
+  const evidence = event.payload.evidence;
+  const path = `/events/${event.eventId}/payload/evidence`;
+  validateTargetSnapshot(evidence.targetSnapshot, event.repositoryId, `${path}/targetSnapshot`, diagnostics);
+  if (evidence.integrationTarget !== evidence.targetSnapshot.integrationTargetId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/integrationTarget`, "derived evidence target does not match its target snapshot"));
+  if ((evidence.factKind === "symbol") !== (evidence.proof.kind === "hash_bound_symbol_contract")) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/proof/kind`, "derived evidence proof kind does not match fact kind"));
+  const analysis = evidence.proof.sourceAnalysis;
+  const source = eventsById.get(analysis.sourceEventId);
+  if (!evidence.sourceEventIds.includes(analysis.sourceEventId)) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/proof/sourceAnalysis/sourceEventId`, "proof source must be declared in sourceEventIds"));
+  if (source?.eventType === "file.read" || source?.eventType === "symbol.read") {
+    if (source.payload.resource.resourceId !== analysis.sourceResourceId || canonicalJson(source.payload.version) !== canonicalJson(analysis.sourceVersion)) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/proof/sourceAnalysis`, "analysis binding does not match its persisted source event"));
+  } else if (source?.eventType === "file.changed" || source?.eventType === "symbol.changed") {
+    if (source.payload.resource.resourceId !== analysis.sourceResourceId || canonicalJson(source.payload.afterVersion) !== canonicalJson(analysis.sourceVersion)) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/proof/sourceAnalysis`, "analysis binding does not match its persisted source event"));
+  } else if (source === undefined) diagnostics.push(diagnostic("PHASE3_REFERENCE_MISSING", `${path}/proof/sourceAnalysis/sourceEventId`, "analysis source event is absent"));
+  else diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/proof/sourceAnalysis/sourceEventId`, "analysis source must be a persisted resource observation"));
+  if (analysis.analysisInputDigest !== sha256({ sourceResourceId: analysis.sourceResourceId, sourceVersion: analysis.sourceVersion })) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/proof/sourceAnalysis/analysisInputDigest`, "analysis input digest is invalid"));
+  if (evidence.proof.kind === "resolver_confirmed_consumer_dependency") {
+    const target = eventsById.get(evidence.targetEventId);
+    if (target?.eventType !== "dependency.changed" || evidence.proof.dependencyId !== target.payload.dependency.dependencyId || evidence.proof.consumerResourceId !== target.payload.dependency.dependentResourceId || evidence.proof.contractResourceId !== target.payload.dependency.dependencyResourceId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `${path}/proof`, "resolver proof does not match its target dependency"));
+  }
 }
 
 function validateToolCompletion(
@@ -191,6 +293,11 @@ function validateAttributionCorrection(
     diagnostics.push(diagnostic("PHASE0_REFERENCE_MISSING", `/events/${event.eventId}/payload/targetEventId`, "attribution target is absent"));
   } else if (!sameDomain(event, target) || event.correlationId !== target.correlationId) {
     diagnostics.push(diagnostic("PHASE0_SCHEMA_INVALID", `/events/${event.eventId}/payload/targetEventId`, "attribution target crosses repository, domain, or correlation"));
+  } else if (
+    target.schemaVersion === 3
+    && (event.payload.attributedAgentId !== target.agentId || event.payload.attributedTaskId !== target.taskId)
+  ) {
+    diagnostics.push(diagnostic("PHASE0_SCHEMA_INVALID", `/events/${event.eventId}/payload/targetEventId`, "attribution corrections cannot alter immutable V3 proof identities"));
   }
   if (event.payload.attributedAgentId === null && event.payload.attributedTaskId === null) {
     diagnostics.push(diagnostic("PHASE0_SCHEMA_INVALID", `/events/${event.eventId}/payload`, "attribution correction must supply an identity"));
@@ -352,7 +459,7 @@ function validateTaskConcurrencyObservation(event: TaskConcurrencyObservedEvent,
   for (const [name, change, taskId] of [["first", first, observation.firstTaskId], ["second", second, observation.secondTaskId]] as const) {
     if (change === undefined) diagnostics.push(diagnostic("PHASE2_REFERENCE_MISSING", `${path}/${name}ChangeEventId`, "concurrency change event is absent"));
     else if (change.eventType !== "symbol.changed") diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/${name}ChangeEventId`, "concurrency observation must reference a symbol change"));
-    else if (!sameRepositoryWorkspace(event, change) || change.taskId !== taskId) diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}/${name}ChangeEventId`, "concurrency change does not match its task or domain"));
+    else if ((event.schemaVersion === 2 ? !sameRepositoryWorkspace(event, change) : event.repositoryId !== change.repositoryId) || change.taskId !== taskId) diagnostics.push(diagnostic(event.schemaVersion === 2 ? "PHASE2_SCHEMA_INVALID" : "PHASE3_SCHEMA_INVALID", `${path}/${name}ChangeEventId`, "concurrency change does not match its task or repository"));
   }
   if (first?.eventType === "symbol.changed" && second?.eventType === "symbol.changed" && first.worktreeId === second.worktreeId) {
     diagnostics.push(diagnostic("PHASE2_SCHEMA_INVALID", `${path}`, "concurrency observation must reference distinct worktrees"));
@@ -410,7 +517,9 @@ export function validateEventSet(events: readonly ProtocolEvent[]): readonly Val
   const rootsByCorrelation = new Map<string, EventId>();
 
   for (const event of events) {
-    if (!eventsById.has(event.eventId)) eventsById.set(event.eventId, event);
+    const previous = eventsById.get(event.eventId);
+    if (previous === undefined) eventsById.set(event.eventId, event);
+    else if (canonicalJson(previous) !== canonicalJson(event)) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `/events/${event.eventId}`, "event ID has conflicting canonical content"));
   }
 
   for (const event of events) {
@@ -453,6 +562,9 @@ export function validateEventSet(events: readonly ProtocolEvent[]): readonly Val
     if (event.eventType === "write.dependent") validateDependentWrite(event, eventsById, diagnostics);
     if (event.eventType === "task.concurrency.observed") validateTaskConcurrencyObservation(event, eventsById, diagnostics);
     if (event.eventType === "evidence.derived") validateDerivedEvidence(event, eventsById, diagnostics);
+    if (event.eventType === "write.dependent") validateProofDependentWrite(event, eventsById, diagnostics);
+    if (event.eventType === "task.concurrency.observed") validateProofConcurrency(event, eventsById, diagnostics);
+    if (event.eventType === "evidence.derived") validateProofDerivedEvidence(event, eventsById, diagnostics);
     validateResourcePayload(event, diagnostics);
   }
 
@@ -469,6 +581,15 @@ export function validateEventSet(events: readonly ProtocolEvent[]): readonly Val
       if (!parent) break;
       current = parent;
     }
+  }
+
+  const sufficientProofs = new Map<string, EventId>();
+  for (const event of events) {
+    if (event.eventType !== "evidence.derived" || event.schemaVersion !== 3 || event.payload.evidence.coverage.status !== "sufficient") continue;
+    const key = `${event.payload.evidence.targetEventId}:${event.payload.evidence.targetSnapshot.targetSnapshotId}`;
+    const previous = sufficientProofs.get(key);
+    if (previous !== undefined && previous !== event.eventId) diagnostics.push(diagnostic("PHASE3_SCHEMA_INVALID", `/events/${event.eventId}/payload/evidence`, "multiple sufficient derived proofs for one target snapshot are ambiguous"));
+    else sufficientProofs.set(key, event.eventId);
   }
 
   return sortDiagnostics(diagnostics);

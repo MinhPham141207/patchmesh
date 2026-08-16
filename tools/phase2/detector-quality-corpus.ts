@@ -4,7 +4,7 @@ import {
   detectStaleReadBeforeWrite,
   type DetectorCorpusCase,
 } from "../../packages/core/dist/index.js";
-import type { ResourceVersion } from "../../packages/protocol/dist/index.js";
+import type { ResourceVersion, TargetSnapshot } from "../../packages/protocol/dist/index.js";
 
 /** Synthetic, reviewable engineering corpus; it is not field-validation data. */
 export const syntheticDetectorQualityCorpusVersion = "v1";
@@ -31,10 +31,20 @@ function version(
 
 const symbol = "res_quality_symbol" as const;
 const contract = "res_quality_contract" as const;
+const targetSnapshot: TargetSnapshot = {
+  targetSnapshotId: "snapshot_quality",
+  integrationTargetId: "target_quality",
+  repositoryId: domain.repositoryId,
+  kind: "branch",
+  locator: "main",
+  baseCommit: "quality-base",
+  candidateIds: [],
+  digest: "quality-target-digest",
+};
 
 const overlapPositive = detectSameSymbolOverlap(
-  { eventId: "evt_overlap_a", resourceId: symbol, version: version(symbol, "a"), agentId: "agent_a", taskId: "task_a", worktreeId: "wt_quality_a", coverageId: "coverage_overlap_a", concurrencyCoverageId: "coverage_overlap_concurrency", integrationTarget: "main", concurrencyEventId: "evt_overlap_concurrency" },
-  { eventId: "evt_overlap_b", resourceId: symbol, version: version(symbol, "b", "wt_quality_b"), agentId: "agent_b", taskId: "task_b", worktreeId: "wt_quality_b", coverageId: "coverage_overlap_b", concurrencyCoverageId: "coverage_overlap_concurrency", integrationTarget: "main", concurrencyEventId: "evt_overlap_concurrency" },
+  { eventId: "evt_overlap_a", resourceId: symbol, version: version(symbol, "a"), agentId: "agent_a", taskId: "task_a", worktreeId: "wt_quality_a", coverageId: "coverage_overlap_a", concurrencyCoverageId: "coverage_overlap_concurrency", targetSnapshot, concurrencyEventId: "evt_overlap_concurrency" },
+  { eventId: "evt_overlap_b", resourceId: symbol, version: version(symbol, "b", "wt_quality_b"), agentId: "agent_b", taskId: "task_b", worktreeId: "wt_quality_b", coverageId: "coverage_overlap_b", concurrencyCoverageId: "coverage_overlap_concurrency", targetSnapshot, concurrencyEventId: "evt_overlap_concurrency" },
 );
 
 const staleRead = {
@@ -43,6 +53,7 @@ const staleRead = {
   resourceId: symbol,
   version: version(symbol, "a"),
   coverageId: "coverage_stale_read",
+  targetSnapshot,
 } as const;
 const staleWrite = {
   eventId: "evt_stale_write",
@@ -53,7 +64,11 @@ const staleWrite = {
   coverageId: "coverage_stale_write",
   comparisonChangedEventId: "evt_stale_current",
   comparisonCoverageId: "coverage_stale_current",
-  integrationTarget: "main",
+  targetSnapshot,
+  readTokenDigest: "quality-read-token",
+  writeEffectEventId: "evt_stale_effect",
+  writeEffectCoverageId: "coverage_stale_effect",
+  completionEventId: "evt_stale_completion",
 } as const;
 const staleCurrent = { ...version(symbol, "b"), eventId: "evt_stale_current" as const };
 
@@ -66,7 +81,7 @@ const contractChange = {
   afterVersion: version(contract, "v2"),
   breaking: true,
   coverageId: "coverage_contract_change",
-  integrationTarget: "main",
+  targetSnapshot,
 } as const;
 const contractConsumer = {
   eventId: "evt_contract_consumer",
@@ -76,7 +91,7 @@ const contractConsumer = {
   affectedTaskId: "task_consumer",
   observedContractVersion: version(contract, "v1"),
   coverageId: "coverage_contract_consumer",
-  integrationTarget: "main",
+  targetSnapshot,
 } as const;
 const contractPositive = detectExportedContractInvalidation(contractChange, contractConsumer);
 

@@ -14,6 +14,10 @@ const domain = {
   workspaceId: "ws_11111111-1111-4111-8111-111111111111",
   worktreeId: "wt_11111111-1111-4111-8111-111111111111",
 };
+const targetSnapshot = {
+  targetSnapshotId: `snapshot_${"a".repeat(64)}` as const, integrationTargetId: "target_main" as const,
+  repositoryId: domain.repositoryId, kind: "branch" as const, locator: "main", baseCommit: "a".repeat(40), candidateIds: [], digest: "a".repeat(64),
+};
 
 const read: ResourceReadEvidence = {
   eventId: "evt_00000000000000000000000000000001",
@@ -27,6 +31,7 @@ const read: ResourceReadEvidence = {
     evidenceEventIds: ["evt_00000000000000000000000000000001"],
   },
   coverageId: "coverage_read",
+  targetSnapshot,
 };
 
 const current = (value: string) => ({
@@ -47,7 +52,11 @@ const write = (dependsOnReadEventId = read.eventId): DependentWriteEvidence => (
   coverageId: "coverage_write",
   comparisonChangedEventId: "evt_00000000000000000000000000000002",
   comparisonCoverageId: "coverage_current",
-  integrationTarget: "main",
+  targetSnapshot,
+  readTokenDigest: "sha256:token",
+  writeEffectEventId: "evt_00000000000000000000000000000004",
+  writeEffectCoverageId: "coverage_effect",
+  completionEventId: "evt_00000000000000000000000000000005",
 });
 
 test("reports a write that explicitly depends on a stale read", () => {
@@ -81,4 +90,10 @@ test("does not report current reads or writes without an explicit read dependenc
     detectStaleReadBeforeWrite(read, current("sha256:after"), write("evt_00000000000000000000000000000009")),
     null,
   );
+});
+
+test("does not report a token-bound write for another target snapshot", () => {
+  assert.equal(detectStaleReadBeforeWrite(read, current("sha256:after"), {
+    ...write(), targetSnapshot: { ...targetSnapshot, targetSnapshotId: `snapshot_${"b".repeat(64)}`, digest: "b".repeat(64) },
+  }), null);
 });

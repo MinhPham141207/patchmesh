@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -15,7 +16,7 @@ import {
   NodeObservationBoundary,
 } from "@patchmesh/observation";
 import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
-import type { RepositoryId, WorktreeId } from "@patchmesh/protocol";
+import type { RepositoryId, TargetSnapshot, WorktreeId } from "@patchmesh/protocol";
 import { withTemporaryDatabase, withTemporaryDirectory } from "./test-support.js";
 
 const execFile = promisify(execFileCallback);
@@ -23,6 +24,32 @@ const execFile = promisify(execFileCallback);
 const repositoryId = "repo_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as RepositoryId;
 const workspaceId = "ws_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const apiResourceId = fileResourceId(repositoryId, "src/api.ts");
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function targetSnapshot(): TargetSnapshot {
+  const binding = {
+    integrationTargetId: "target_phase2" as const,
+    repositoryId,
+    kind: "branch" as const,
+    locator: "main",
+    baseCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    candidateIds: [] as readonly string[],
+  };
+  const digest = createHash("sha256").update(canonicalJson(binding)).digest("hex");
+  return {
+    ...binding,
+    targetSnapshotId: `snapshot_${digest}`,
+    digest,
+  };
+}
 
 async function runGit(cwd: string, ...args: string[]): Promise<string> {
   const result = await execFile("git", args, { cwd, encoding: "utf8", windowsHide: true });
@@ -58,6 +85,7 @@ function createProxy(store: SqliteEventStore, ids: number[]): McpProxy {
         sourceId: "source_phase2_watcher",
         instanceId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       },
+      quiescenceMs: 100,
     }),
     phase2SourceAnalysis: {
       source: {
@@ -68,6 +96,14 @@ function createProxy(store: SqliteEventStore, ids: number[]): McpProxy {
       analyzer: { analyzerId: "analyzer_typescript", version: "1" },
       configuration: { parser: "typescript" },
       integrationTarget: "main",
+    },
+    proofAuthority: {
+      authoritativeIdentity: true,
+      taskLifecycle: true,
+      integrationTargetSnapshot: true,
+      observedReadVersion: true,
+      dependentWriteToken: true,
+      exactReportedEffects: true,
     },
     createEventId: () => eventId(ids.shift() ?? 99),
     now: () => "2026-08-10T00:00:00.000Z",
@@ -98,6 +134,7 @@ function createContext(
     causationId: null,
     requestSourceSequence: sourceSequence,
     completionSourceSequence: sourceSequence + 1,
+    targetSnapshot: targetSnapshot(),
   };
 }
 
@@ -244,6 +281,9 @@ test("real linked worktrees produce a durable exported-contract invalidation", a
         );
         assert.equal(consumer.coverage?.presentation, "sufficient");
 
+        // Bind the breaking change to the exact content hash that the
+        // persisted V3 predecessor proved in the linked checkout.
+        await writeFile(join(producerWorktree, "src", "api.ts"), "export function calculateTotal(value: number, tax?: number): number { return value + (tax ?? 0); }\n");
         producerProxy = createProxy(store, [50, 51, 52, 53, 54]);
         const producer = await producerProxy.execute(
           { ...editCall, targetResourceId: apiResourceId },

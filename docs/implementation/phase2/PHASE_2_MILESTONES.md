@@ -23,10 +23,10 @@ automatically revalidate work.
 | --- | --- | --- |
 | M0 budget | Versioned M0 v1 contract and strict evidence schema; deterministic local-Git/SQLite fixture generator; paired direct-vs-`McpProxy` raw benchmark; fail-closed raw-evidence verifier | Deferred — implementation and reduced smoke coverage pass, but no independent clean-revision controlled artifact has been generated or verified |
 | M1 contracts | Immutable V2 feedback; replayed finding/decision/delivery/feedback views; deterministic feedback/delivery writes; replay-time V2 reference checks | Partial — append-time out-of-order buffering and a complete compatibility audit remain |
-| M2 evidence | Hash-bound TypeScript/JavaScript source facts, durable V2 analyzer provenance, symbol events, resolver-confirmed dependency events, degraded unsupported/opaque handling | Partial — broader analyzer history, supported-language coverage, and real adapter emission of the new relationship proofs remain |
-| M3 overlap | Deterministic same-symbol detector requiring sufficient derived metadata, matching target, and explicit adapter/gateway concurrency proof across worktrees | Partial — production concurrency observation and a reviewed labeled corpus remain |
-| M4 stale read | Explicit `write.dependent` comparison reference, integration target, durable-reference guard, replay reconstruction, and report-only path | Partial — production comparison capture, corrected-attribution corpus cases, and labeled acceptance remain |
-| M5 contracts | Cross-worktree resolver, strict sufficient/exported target metadata, multiple-consumer retention, deterministic supported-function compatibility classification, durable history | Partial — complete contract history, broader signatures, and reviewed corpus remain |
+| M2 evidence | Hash-bound TypeScript/JavaScript source facts, durable V2/V3 analyzer provenance, symbol events, resolver-confirmed dependency events, immutable target binding, degraded unsupported/opaque handling | Partial — PR5 host-authoritative relationship-proof emission is implemented; broader analyzer history and supported-language coverage remain |
+| M3 overlap | Deterministic same-symbol detector requiring sufficient derived metadata, matching target, and explicit adapter/gateway lifecycle proof across worktrees | Partial — PR5 captures authoritative task-lifetime proofs; a reviewed labeled corpus and external-host evidence remain |
+| M4 stale read | Canonical observed-read token, completion-linked `write.dependent` proof, immutable target, durable-reference guard, replay reconstruction, and report-only path | Partial — PR5 captures supported host proofs; corrected-attribution corpus cases and labeled acceptance remain |
+| M5 contracts | Cross-worktree resolver, strict sufficient/exported target metadata, explicit source-version predecessor history, deterministic supported-function compatibility classification, durable history | Partial — PR5 validates supported breaking transitions; broader signatures and reviewed corpus remain |
 | M6 report-only | Policy, explanation, append-only feedback CLI, and daemon delivery/feedback writers | Partial — delivery command UX and full CLI scenario coverage remain |
 | M7 quality | Deterministic metrics/gate functions; versioned synthetic corpus; fail-closed field corpus/evaluator that recomputes trace and artifact digests; internal-ready [`patchmesh-site` transparent MCP gateway](M7_HOST_ADAPTER_BOUNDARY.md) | Blocked externally — the gateway is tested and capability-detectable, but no actual `patchmesh-site` runtime has yet owned a tool execution through it or produced reviewed detector-quality holdouts |
 
@@ -273,9 +273,10 @@ once, uses authoritative runtime/session identity, rejects payload identity conf
 and forwards only same-store persisted completion-linked events to the recorder with a
 versioned capability digest. This is not evidence of a real production host run: the
 external `patchmesh-site` runtime must still wire the gateway around actual execution
-before the production-host checkpoint becomes unblocked. Relationship-proof capture,
-field export/dispatcher, and holdout collection remain PR5–PR7 work and are not
-implied by this adapter.
+before the production-host checkpoint becomes unblocked. PR5 relationship-proof capture
+is implemented for host-authoritative task lifetimes, immutable targets, observed reads,
+and completion-linked writes. Field export/dispatcher and holdout collection remain PR6–PR7
+work and are not implied by this adapter.
 
 **Exit evidence:**
 

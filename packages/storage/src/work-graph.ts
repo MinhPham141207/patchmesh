@@ -90,7 +90,9 @@ function effectiveEvent(
   corrections: ReadonlyMap<EventId, AttributionOverride>,
 ): ProtocolEvent {
   const correction = corrections.get(event.eventId)?.correction.payload;
-  return correction === undefined
+  // V3 relationship proofs require immutable non-null authoritative attribution.
+  // A later V1/V2 correction must never weaken their closed proof envelope.
+  return correction === undefined || event.schemaVersion === 3
     ? event
     : { ...event, agentId: correction.attributedAgentId, taskId: correction.attributedTaskId };
 }

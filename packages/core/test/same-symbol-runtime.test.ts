@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import type {
   DependentWriteEvent,
@@ -10,6 +11,7 @@ import type {
   ToolCompletedEvent,
   ToolRequestedEvent,
 } from "@patchmesh/protocol";
+import { validateEventSet } from "@patchmesh/protocol";
 import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
 
 import {
@@ -85,6 +87,34 @@ const completion: ToolCompletedEvent = {
 const overlapCoverageId = projectWorkGraph([request, first, second, completion]).snapshot.coverage
   .find((coverage) => coverage.presentation === "sufficient" && coverage.evidenceEventIds.includes(first.eventId))!.coverageId;
 
+const canonicalJson = (value: unknown): string => Array.isArray(value)
+  ? `[${value.map(canonicalJson).join(",")}]`
+  : value !== null && typeof value === "object"
+    ? `{${Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`
+    : JSON.stringify(value);
+const targetSnapshot = (() => {
+  const input = { integrationTargetId: "target_main" as const, repositoryId: domain.repositoryId, kind: "branch" as const, locator: "main", baseCommit: "a".repeat(40), candidateIds: [] as readonly string[] };
+  const digest = createHash("sha256").update(canonicalJson(input)).digest("hex");
+  return { targetSnapshotId: `snapshot_${digest}` as const, ...input, digest };
+})();
+function v3SymbolEvidence(
+  target: SymbolChangedEvent,
+  id: `evt_${string}`,
+  signature: string,
+  exported = true,
+  source: SymbolChangedEvent | FileChangedEvent = target,
+) {
+  const sourceVersion = source.payload.afterVersion;
+  return { ...target, schemaVersion: 3 as const, eventId: id, eventType: "evidence.derived" as const, source: { kind: "analyzer" as const, sourceId: "source_typescript", instanceId: "22222222-2222-4222-8222-222222222222" }, causationId: target.eventId,
+    payload: { evidence: { targetEventId: target.eventId, factKind: "symbol" as const, analyzer: { analyzerId: "analyzer_typescript", version: "1" }, configuration: {}, configurationDigest: `sha256:${createHash("sha256").update("{}").digest("hex")}`, sourceEventIds: [source.eventId], integrationTarget: targetSnapshot.integrationTargetId, coverage: { status: "sufficient" as const, reason: "proof" }, coverageId: overlapCoverageId, stableFactId: target.payload.resource.resourceId, exported, normalizedSignature: signature, targetSnapshot, proof: { kind: "hash_bound_symbol_contract" as const, sourceAnalysis: { sourceEventId: source.eventId, sourceResourceId: source.payload.resource.resourceId, sourceVersion, analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: source.payload.resource.resourceId, sourceVersion })).digest("hex")}` } } } } };
+}
+
+function v3DependencyEvidence(target: DependencyChangedEvent, id: `evt_${string}`, source: SymbolChangedEvent) {
+  const sourceVersion = source.payload.afterVersion;
+  return { ...target, schemaVersion: 3 as const, eventId: id, eventType: "evidence.derived" as const, source: { kind: "analyzer" as const, sourceId: "source_typescript", instanceId: "22222222-2222-4222-8222-222222222222" }, causationId: target.eventId,
+    payload: { evidence: { targetEventId: target.eventId, factKind: "dependency" as const, analyzer: { analyzerId: "analyzer_typescript", version: "1" }, configuration: {}, configurationDigest: `sha256:${createHash("sha256").update("{}").digest("hex")}`, sourceEventIds: [source.eventId], integrationTarget: targetSnapshot.integrationTargetId, coverage: { status: "sufficient" as const, reason: "proof" }, coverageId: overlapCoverageId, stableFactId: target.payload.dependency.dependencyId, exported: false, normalizedSignature: null, targetSnapshot, proof: { kind: "resolver_confirmed_consumer_dependency" as const, sourceAnalysis: { sourceEventId: source.eventId, sourceResourceId: source.payload.resource.resourceId, sourceVersion, analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: source.payload.resource.resourceId, sourceVersion })).digest("hex")}` }, resolver: { resolverId: "local-contract-resolver", version: "1" }, dependencyId: target.payload.dependency.dependencyId, consumerResourceId: target.payload.dependency.dependentResourceId, contractResourceId: target.payload.dependency.dependencyResourceId, resolution: "confirmed" as const } } } };
+}
+
 function derivedSymbolEvidence(target: SymbolChangedEvent, eventId: `evt_${string}`) {
   return {
     ...target,
@@ -116,29 +146,164 @@ const concurrencyObservation = {
   payload: { observation: { firstTaskId: "task_alpha" as const, secondTaskId: "task_beta" as const, firstChangeEventId: first.eventId, secondChangeEventId: second.eventId, integrationTarget: "main", coverageId: overlapCoverageId } },
 };
 
-test("derives, persists, and deduplicates report-only same-symbol records from replayable evidence", () => {
+test("replays V2 same-symbol evidence without treating it as sufficient proof", () => {
   const events: readonly ProtocolEvent[] = [request, first, second, completion, firstEvidence, secondEvidence, concurrencyObservation];
   const reversed = [concurrencyObservation, secondEvidence, firstEvidence, completion, second, first, request];
-  assert.equal(deriveSameSymbolEvidence(events).length, 2);
+  assert.equal(deriveSameSymbolEvidence(events).length, 0);
   const records = createSameSymbolRuntimeRecords(events);
   assert.deepEqual(createSameSymbolRuntimeRecords(reversed), records);
-  assert.equal(records.length, 1);
-  assert.equal(records[0]!.decision.payload.decision.gatewayDirective, "allow_with_notice");
+  assert.equal(records.length, 0);
 
   const store = SqliteEventStore.open(":memory:");
   try {
     for (const event of events) store.append(event);
-    for (const record of records) {
-      assert.equal(store.append(record.finding).status, "inserted");
-      assert.equal(store.append(record.decision).status, "inserted");
-    }
-    for (const record of createSameSymbolRuntimeRecords(store.read())) {
-      assert.equal(store.append(record.finding).status, "duplicate");
-      assert.equal(store.append(record.decision).status, "duplicate");
-    }
+    assert.deepEqual(createSameSymbolRuntimeRecords(store.read()), []);
   } finally {
     store.close();
   }
+});
+
+test("derives a V3 authoritative same-symbol proof and fails closed for target or proof conflicts", () => {
+  const firstProof = v3SymbolEvidence(first, "evt_00000000000000000000000000000009", "export function account(): string");
+  const secondProof = v3SymbolEvidence(second, "evt_0000000000000000000000000000000a", "export function account(): string");
+  const observed = { ...first, schemaVersion: 3 as const, eventId: "evt_0000000000000000000000000000000b" as const, eventType: "task.concurrency.observed" as const, source: request.source, taskId: null, causationId: first.eventId,
+    payload: { observation: { firstTaskId: first.taskId!, secondTaskId: second.taskId!, firstAgentId: first.agentId!, secondAgentId: second.agentId!, firstWorktreeId: first.worktreeId, secondWorktreeId: second.worktreeId, firstChangeEventId: first.eventId, secondChangeEventId: second.eventId, integrationTarget: targetSnapshot.integrationTargetId, targetSnapshot, coverageId: overlapCoverageId, overlapProof: { kind: "authoritative_task_lifetimes" as const, firstLifecycleId: "lifecycle_a", secondLifecycleId: "lifecycle_b" } } } };
+  const events = [request, first, second, completion, firstProof, secondProof, observed] as const;
+  assert.deepEqual(validateEventSet(events), []);
+  assert.equal(deriveSameSymbolEvidence(events).length, 2);
+  assert.equal(createSameSymbolRuntimeRecords(events).length, 1);
+  assert.deepEqual(deriveSameSymbolEvidence([...events, { ...observed, eventId: "evt_0000000000000000000000000000000c" as const, payload: { observation: { ...observed.payload.observation, targetSnapshot: { ...targetSnapshot, digest: "b".repeat(64) } } } }]), []);
+});
+
+test("requires one unambiguous V3 assertion for independently attributed cross-workspace symbol overlap", () => {
+  const firstProof = v3SymbolEvidence(first, "evt_00000000000000000000000000000021", "export function account(): string");
+  const secondProof = v3SymbolEvidence(second, "evt_00000000000000000000000000000022", "export function account(): string");
+  const observed = {
+    ...first,
+    schemaVersion: 3 as const,
+    eventId: "evt_00000000000000000000000000000023" as const,
+    eventType: "task.concurrency.observed" as const,
+    source: request.source,
+    taskId: "task_alpha" as const,
+    agentId: "agent_alpha" as const,
+    causationId: first.eventId,
+    payload: { observation: {
+      firstTaskId: first.taskId!, secondTaskId: second.taskId!, firstAgentId: first.agentId!, secondAgentId: second.agentId!,
+      firstWorktreeId: first.worktreeId, secondWorktreeId: second.worktreeId,
+      firstChangeEventId: first.eventId, secondChangeEventId: second.eventId,
+      integrationTarget: targetSnapshot.integrationTargetId, targetSnapshot, coverageId: overlapCoverageId,
+      overlapProof: { kind: "authoritative_task_lifetimes" as const, firstLifecycleId: "lifecycle_alpha", secondLifecycleId: "lifecycle_beta" },
+    } },
+  };
+  const valid = [request, first, second, completion, firstProof, secondProof, observed] as const;
+  assert.deepEqual(validateEventSet(valid), []);
+  assert.equal(deriveSameSymbolEvidence(valid).length, 2);
+
+  const sameAgent = { ...observed, eventId: "evt_00000000000000000000000000000024" as const, payload: { observation: { ...observed.payload.observation, secondAgentId: first.agentId! } } };
+  const sameWorktree = { ...observed, eventId: "evt_00000000000000000000000000000025" as const, payload: { observation: { ...observed.payload.observation, secondWorktreeId: first.worktreeId } } };
+  const differentSymbol = { ...second, eventId: "evt_00000000000000000000000000000026" as const, payload: { ...second.payload, resource: { ...second.payload.resource, resourceId: `res_${"d".repeat(64)}` as const } } };
+  const differentSymbolProof = v3SymbolEvidence(differentSymbol, "evt_00000000000000000000000000000027", "export function account(): string");
+  const wrongSymbol = { ...observed, eventId: "evt_00000000000000000000000000000028" as const, payload: { observation: { ...observed.payload.observation, secondChangeEventId: differentSymbol.eventId } } };
+  const missingProof = valid.filter((event) => event.eventId !== secondProof.eventId);
+  const conflictingProof = { ...secondProof, eventId: "evt_00000000000000000000000000000029" as const, payload: { evidence: { ...secondProof.payload.evidence, normalizedSignature: "export function account(): number" } } };
+  const duplicate = { ...secondProof };
+  const replaceObserved = <T extends ProtocolEvent>(replacement: T): readonly ProtocolEvent[] => valid.map((event) => event.eventId === observed.eventId ? replacement : event);
+
+  for (const stream of [
+    replaceObserved(sameAgent),
+    replaceObserved(sameWorktree),
+    [request, first, differentSymbol, completion, firstProof, differentSymbolProof, wrongSymbol],
+    missingProof,
+    [...valid, conflictingProof],
+    [...valid, duplicate],
+  ]) assert.deepEqual(deriveSameSymbolEvidence(stream), []);
+});
+
+test("derives an exported-contract finding from an explicit V3 symbol-version predecessor", () => {
+  const fileResourceId = `res_${"d".repeat(64)}` as const;
+  const priorSource: FileChangedEvent = {
+    ...request,
+    eventId: "evt_0000000000000000000000000000002e",
+    eventType: "file.changed",
+    source: { kind: "watcher", sourceId: "source_watcher", instanceId: "33333333-3333-4333-8333-333333333333" },
+    agentId: null,
+    taskId: null,
+    causationId: request.eventId,
+    sourceSequence: null,
+    payload: {
+      resource: { resourceId: fileResourceId, repositoryId: domain.repositoryId, kind: "file", locator: "src/api.ts" },
+      beforeVersion: null,
+      afterVersion: { resourceId: fileResourceId, domain, kind: "content_hash", value: "sha256:source-prior", evidenceEventIds: ["evt_0000000000000000000000000000002e"] },
+      changeKind: "created",
+    },
+  };
+  const currentSource: FileChangedEvent = {
+    ...priorSource,
+    eventId: "evt_0000000000000000000000000000002f",
+    agentId: null,
+    taskId: null,
+    payload: {
+      ...priorSource.payload,
+      beforeVersion: priorSource.payload.afterVersion,
+      afterVersion: { ...priorSource.payload.afterVersion, value: "sha256:source-current", evidenceEventIds: ["evt_0000000000000000000000000000002f"] },
+      changeKind: "modified",
+    },
+  };
+  const priorBase = changed("evt_00000000000000000000000000000031", "agent_alpha", "task_alpha", "sha256:prior");
+  const prior: SymbolChangedEvent = {
+    ...priorBase,
+    causationId: priorSource.eventId,
+    payload: { ...priorBase.payload, beforeVersion: null, changeKind: "created" },
+  };
+  const currentBase: SymbolChangedEvent = { ...changed("evt_00000000000000000000000000000032", "agent_beta", "task_beta", "sha256:current"), causationId: currentSource.eventId };
+  const current: SymbolChangedEvent = {
+    ...currentBase,
+    payload: { ...currentBase.payload, beforeVersion: prior.payload.afterVersion, changeKind: "modified" },
+  };
+  const contractCompletion: ToolCompletedEvent = {
+    ...completion,
+    eventId: "evt_00000000000000000000000000000033",
+    payload: {
+      ...completion.payload,
+      effectEventIds: [priorSource.eventId, currentSource.eventId],
+      deterministicallyAttributedEffectEventIds: [priorSource.eventId, currentSource.eventId],
+    },
+  };
+  const consumerResourceId = `res_${"e".repeat(64)}` as const;
+  const dependency: DependencyChangedEvent = {
+    ...current,
+    eventId: "evt_00000000000000000000000000000034",
+    eventType: "dependency.changed",
+    causationId: current.eventId,
+    payload: { dependency: {
+      dependencyId: `dep_${"f".repeat(32)}`,
+      dependentResourceId: consumerResourceId,
+      dependencyResourceId: prior.payload.resource.resourceId,
+      dependentVersion: { resourceId: consumerResourceId, domain: current.payload.afterVersion.domain, kind: "content_hash", value: "sha256:consumer", evidenceEventIds: ["evt_00000000000000000000000000000034"] },
+      dependencyVersion: prior.payload.afterVersion,
+      observations: [{ kind: "statically_observed", producer: { sourceId: "source_typescript", version: "1" }, rule: null, evidenceEventIds: [current.eventId] }],
+      evidenceEventIds: [current.eventId],
+    } },
+  };
+  assert.deepEqual(validateEventSet([request, priorSource, currentSource, prior, current, contractCompletion]), []);
+  const withCoverage = <T extends { payload: { evidence: { coverageId: typeof overlapCoverageId } } }>(proof: T): T => ({ ...proof, payload: { ...proof.payload, evidence: { ...proof.payload.evidence, coverageId: overlapCoverageId } } });
+  const priorProof = withCoverage(v3SymbolEvidence(prior, "evt_00000000000000000000000000000035", "export function api(value: number): number", true, priorSource));
+  const currentProof = withCoverage(v3SymbolEvidence(current, "evt_00000000000000000000000000000036", "export function api(value: string): number", true, currentSource));
+  const dependencyProof = withCoverage(v3DependencyEvidence(dependency, "evt_00000000000000000000000000000037", current));
+  const events = [request, priorSource, currentSource, prior, current, contractCompletion, dependency, priorProof, currentProof, dependencyProof] as const;
+  assert.deepEqual(validateEventSet(events), []);
+  assert.equal(deriveExportedContractInvalidationEvidence(events).changes.length, 1);
+  assert.equal(createPhase2RuntimeRecords(events).filter((record) => record.finding.payload.finding.findingType === "exported_contract_invalidation").length, 1);
+  assert.deepEqual(deriveExportedContractInvalidationEvidence([...events].reverse()), deriveExportedContractInvalidationEvidence(events));
+
+  const compatible = withCoverage(v3SymbolEvidence(current, "evt_00000000000000000000000000000038", "export function api(renamed: number): number"));
+  const nonExported = withCoverage(v3SymbolEvidence(current, "evt_00000000000000000000000000000039", "export function api(value: string): number", false));
+  const ambiguous = withCoverage(v3SymbolEvidence(current, "evt_0000000000000000000000000000003a", "export function api(value: boolean): number"));
+  for (const stream of [
+    [request, priorSource, currentSource, prior, current, contractCompletion, dependency, priorProof, compatible, dependencyProof],
+    [request, priorSource, currentSource, prior, current, contractCompletion, dependency, priorProof, nonExported, dependencyProof],
+    [...events, ambiguous],
+  ]) assert.equal(deriveExportedContractInvalidationEvidence(stream).changes.length, 0);
 });
 
 test("rejects mismatched or competing concurrency coverage observations deterministically", () => {
@@ -323,14 +488,12 @@ test("reconstructs and persists stale-read findings from causally covered V2 wri
   ];
 
   const stale = deriveStaleReadEvidence(events);
-  assert.equal(stale.reads.length, 1);
-  assert.equal(stale.writes.length, 1);
-  assert.equal(stale.currentVersions.some((candidate) => candidate.resourceId === readResourceId && candidate.value === "sha256:after"), true);
-  assert.equal(runStaleReadBeforeWriteDetector(stale.reads, stale.currentVersions, stale.writes).length, 1);
+  assert.equal(stale.reads.length, 0);
+  assert.equal(stale.writes.length, 0);
+  assert.equal(stale.currentVersions.length, 0);
+  assert.equal(runStaleReadBeforeWriteDetector(stale.reads, stale.currentVersions, stale.writes).length, 0);
   const records = createPhase2RuntimeRecords(events);
-  assert.equal(records.length, 1);
-  assert.equal(records[0]?.finding.payload.finding.findingType, "stale_read_before_write");
-  assert.equal(records[0]?.finding.payload.finding.evidenceEventIds.includes(historicalChange.eventId), false);
+  assert.equal(records.length, 0);
 
   const mismatchedComparison = {
     ...dependentWrite,
@@ -435,10 +598,10 @@ test("reconstructs contract invalidation from durable cross-worktree history", (
   const events: readonly ProtocolEvent[] = [request, first, second, completion, dependency, priorEvidence, currentEvidence, dependencyEvidence];
 
   const evidence = deriveExportedContractInvalidationEvidence(events);
-  assert.equal(evidence.consumers.length, 1);
-  assert.equal(evidence.changes.length, 1);
+  assert.equal(evidence.consumers.length, 0);
+  assert.equal(evidence.changes.length, 0);
   assert.equal(
     createPhase2RuntimeRecords(events).filter((record) => record.finding.payload.finding.findingType === "exported_contract_invalidation").length,
-    1,
+    0,
   );
 });

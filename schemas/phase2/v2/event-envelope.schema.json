@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase2/v2/event-envelope.schema.json",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 3 },
+    "eventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" },
+    "eventType": { "enum": ["write.dependent", "evidence.derived", "task.concurrency.observed"] },
+    "source": { "type": "object", "properties": { "kind": { "enum": ["gateway", "adapter", "watcher", "analyzer", "core"] }, "sourceId": { "type": "string", "pattern": "^source_[a-z0-9][a-z0-9._-]{0,63}$" }, "instanceId": { "type": "string", "format": "uuid" } }, "required": ["kind", "sourceId", "instanceId"], "additionalProperties": false },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "repositoryId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/repositoryId" },
+    "workspaceId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/workspaceId" },
+    "worktreeId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/worktreeId" },
+    "agentId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/agentId" },
+    "taskId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/taskId" },
+    "correlationId": { "type": "string", "pattern": "^corr_[0-9a-f]{32}$" },
+    "causationId": { "oneOf": [{ "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, { "type": "null" }] },
+    "sourceSequence": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "payload": { "type": "object" }
+  },
+  "required": ["schemaVersion", "eventId", "eventType", "source", "timestamp", "repositoryId", "workspaceId", "worktreeId", "agentId", "taskId", "correlationId", "causationId", "sourceSequence", "payload"],
+  "additionalProperties": false,
+  "oneOf": [
+    { "properties": { "eventType": { "const": "write.dependent" }, "payload": { "type": "object", "properties": { "write": { "$ref": "./dependent-write.schema.json" } }, "required": ["write"], "additionalProperties": false } } },
+    { "properties": { "eventType": { "const": "evidence.derived" }, "payload": { "type": "object", "properties": { "evidence": { "$ref": "./derived-evidence.schema.json" } }, "required": ["evidence"], "additionalProperties": false } } },
+    { "properties": { "eventType": { "const": "task.concurrency.observed" }, "payload": { "type": "object", "properties": { "observation": { "$ref": "./task-concurrency-observed.schema.json" } }, "required": ["observation"], "additionalProperties": false } } }
+  ]
+}

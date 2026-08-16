@@ -21,7 +21,7 @@ import {
   type ObservationSnapshot,
 } from "@patchmesh/observation";
 import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
-import { ProtocolValidationError, validateEventSet, type EventId } from "@patchmesh/protocol";
+import { ProtocolValidationError, validateEventSet, type EventId, type ProtocolEvent } from "@patchmesh/protocol";
 
 async function withTemporaryDatabase(run: (databasePath: string) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-m3-"));
@@ -67,6 +67,28 @@ function contentHash(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function immutableTargetSnapshot() {
+  const body = {
+    integrationTargetId: "target_main" as const,
+    repositoryId: context.repositoryId,
+    kind: "branch" as const,
+    locator: "main",
+    baseCommit: "a".repeat(40),
+    candidateIds: [] as readonly string[],
+  };
+  const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
+  return { ...body, digest, targetSnapshotId: `snapshot_${digest}` as const };
+}
+
 function snapshot(files: ReadonlyMap<string, { readonly contentHash: string }>): ObservationSnapshot {
   return {
     repository: { commonDirectory: "C:/repo/.git", revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
@@ -110,7 +132,7 @@ function changedObserver(options: {
 function createProxy(eventStore: EventAppender, ids: EventId[] = [
   "evt_00000000000000000000000000000001",
   "evt_00000000000000000000000000000002",
-], options: Pick<McpProxyOptions, "observer" | "createCorrelationId" | "phase2SourceAnalysis"> = {}): McpProxy {
+], options: Pick<McpProxyOptions, "observer" | "createCorrelationId" | "phase2SourceAnalysis" | "proofAuthority"> = {}): McpProxy {
   return new McpProxy({
     eventStore,
     createEventId: () => ids.shift() ?? "evt_00000000000000000000000000000003",
@@ -270,6 +292,160 @@ test("derives persisted symbol changes from an observed TypeScript source file",
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("materializes a target-bound modified symbol only from an explicit prior source version", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-pr5-contract-"));
+  const databasePath = join(directory, "events.sqlite");
+  const sourceDirectory = join(directory, "src");
+  const oldSource = "export function api(value: number): number { return value; }\n";
+  const newSource = "export function api(value: string): number { return value.length; }\n";
+  try {
+    mkdirSync(sourceDirectory);
+    const sourcePath = join(sourceDirectory, "api.ts");
+    const targetSnapshot = immutableTargetSnapshot();
+    const proofAuthority = {
+      authoritativeIdentity: true,
+      taskLifecycle: true,
+      integrationTargetSnapshot: true,
+      observedReadVersion: true,
+      dependentWriteToken: true,
+      exactReportedEffects: true,
+    };
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      writeFileSync(sourcePath, oldSource, "utf8");
+      const proxy = createProxy(store, [
+        "evt_000000000000000000000000000000a1", "evt_000000000000000000000000000000a2", "evt_000000000000000000000000000000a3", "evt_000000000000000000000000000000a4", "evt_000000000000000000000000000000a5",
+        "evt_000000000000000000000000000000b1", "evt_000000000000000000000000000000b2", "evt_000000000000000000000000000000b3", "evt_000000000000000000000000000000b4", "evt_000000000000000000000000000000b5",
+      ], {
+        observer: changedObserver({ after: capture(snapshot(new Map([["src/api.ts", { contentHash: contentHash(oldSource) }]]))) }),
+        proofAuthority,
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: targetSnapshot.integrationTargetId,
+        },
+      });
+      const proofContext = {
+        ...context,
+        workspaceRoot: directory,
+        agentId: "agent_alpha" as const,
+        taskId: "task_alpha" as const,
+        targetSnapshot,
+      };
+      const edit = { ...call, toolName: "edit_file" as const, operation: "edit src/api.ts", targetResourceId: fileResourceId(context.repositoryId, "src/api.ts") };
+      await proxy.execute(edit, proofContext, async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [edit.targetResourceId] }));
+
+      writeFileSync(sourcePath, newSource, "utf8");
+      const secondProxy = createProxy(store, [
+        "evt_000000000000000000000000000000c1", "evt_000000000000000000000000000000c2", "evt_000000000000000000000000000000c3", "evt_000000000000000000000000000000c4", "evt_000000000000000000000000000000c5",
+      ], {
+        observer: changedObserver({
+          before: capture(snapshot(new Map([["src/api.ts", { contentHash: contentHash(oldSource) }]]))),
+          after: capture(snapshot(new Map([["src/api.ts", { contentHash: contentHash(newSource) }]]))),
+        }),
+        proofAuthority,
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: targetSnapshot.integrationTargetId,
+        },
+      });
+      await secondProxy.execute(edit, { ...proofContext, correlationId: "corr_00000000000000000000000000000002", requestSourceSequence: 3, completionSourceSequence: 4 }, async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [edit.targetResourceId] }));
+
+      const symbols = store.read().filter((event): event is Extract<ProtocolEvent, { eventType: "symbol.changed" }> => event.eventType === "symbol.changed");
+      const evidence = store.read().filter((event) => event.eventType === "evidence.derived");
+      assert.equal(symbols.length, 2);
+      assert.equal(symbols[0]?.payload.changeKind, "created");
+      assert.equal(symbols[1]?.payload.changeKind, "modified");
+      assert.deepEqual(symbols[1]?.payload.beforeVersion, symbols[0]?.payload.afterVersion);
+      assert.equal(symbols[1]?.causationId === symbols[0]?.eventId, false, "file-change provenance remains intact");
+      assert.equal(evidence.every((event) => event.schemaVersion === 3), true);
+      assert.deepEqual(validateEventSet(store.read()), []);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("issues and consumes a target-bound observed-read token only for a persisted stale dependent write", async () => {
+  await withTemporaryDatabase(async (databasePath) => {
+    const store = SqliteEventStore.open(databasePath);
+    const targetSnapshot = immutableTargetSnapshot();
+    const proofAuthority = {
+      authoritativeIdentity: true, taskLifecycle: true, integrationTargetSnapshot: true,
+      observedReadVersion: true, dependentWriteToken: true, exactReportedEffects: true,
+    };
+    const readResourceId = fileResourceId(context.repositoryId, "src/api.ts");
+    const writeResourceId = fileResourceId(context.repositoryId, "src/output.ts");
+    const proofContext = { ...context, workspaceRoot: tmpdir(), agentId: "agent_alpha" as const, taskId: "task_alpha" as const, targetSnapshot };
+    try {
+      const readResult = await createProxy(store, [
+        "evt_000000000000000000000000000000d1", "evt_000000000000000000000000000000d2", "evt_000000000000000000000000000000d3",
+      ], { proofAuthority }).execute({
+        toolName: "read_file", operation: "read src/api.ts", targetResourceId: readResourceId, opaque: false,
+        observedRead: { resource: { resourceId: readResourceId, repositoryId: context.repositoryId, kind: "file", locator: "src/api.ts" }, version: { kind: "content_hash", value: "sha256:old" } },
+      }, proofContext, async () => ({ outcome: "succeeded", value: true, exitCode: 0 }));
+      const token = readResult.observedReadTokens[0];
+      assert.ok(token, "successful authoritative reads issue one durable token");
+
+      await createProxy(store, [
+        "evt_000000000000000000000000000000d4", "evt_000000000000000000000000000000d5", "evt_000000000000000000000000000000d6",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/api.ts", { contentHash: "b".repeat(64) }]]))) }), proofAuthority }).execute(
+        { toolName: "edit_file", operation: "candidate change", targetResourceId: readResourceId, opaque: false },
+        { ...proofContext, agentId: "agent_beta" as const, taskId: "task_beta" as const, correlationId: "corr_00000000000000000000000000000002", requestSourceSequence: 3, completionSourceSequence: 4 },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [readResourceId] }),
+      );
+      const candidate = store.read().find((event) => event.eventType === "file.changed" && event.taskId === "task_beta");
+      if (candidate?.eventType !== "file.changed") throw new Error("expected persisted candidate change");
+      const candidateCoverage = projectWorkGraph(store.read()).snapshot.coverage
+        .find((entry) => entry.presentation === "sufficient" && entry.evidenceEventIds.includes(candidate.eventId))?.coverageId;
+      assert.ok(candidateCoverage, "candidate has persisted sufficient coverage");
+
+      const dependencyEvent: ProtocolEvent = {
+        schemaVersion: 1, eventId: "evt_000000000000000000000000000000d7", eventType: "dependency.changed", source: proofContext.source,
+        timestamp: "2026-08-08T00:00:00.000Z", repositoryId: context.repositoryId, workspaceId: context.workspaceId, worktreeId: context.worktreeId,
+        agentId: proofContext.agentId, taskId: proofContext.taskId, correlationId: proofContext.correlationId, causationId: token!.readEventId, sourceSequence: null,
+        payload: { dependency: {
+          dependencyId: `dep_${"a".repeat(32)}`, dependentResourceId: writeResourceId, dependencyResourceId: readResourceId,
+          dependentVersion: { resourceId: writeResourceId, domain: token!.observedVersion.domain, kind: "content_hash", value: "sha256:output", evidenceEventIds: ["evt_000000000000000000000000000000d7"] },
+          dependencyVersion: token!.observedVersion, observations: [{ kind: "dynamically_observed", producer: { sourceId: proofContext.source.sourceId, version: "1" }, rule: null, evidenceEventIds: [token!.readEventId] }], evidenceEventIds: [token!.readEventId],
+        } },
+      };
+      assert.deepEqual(validateEventSet([...store.read(), dependencyEvent]), []);
+      store.append(dependencyEvent);
+      const dependentCall = {
+        toolName: "edit_file" as const, operation: "write output", targetResourceId: writeResourceId, opaque: false,
+        dependentWrite: { dependencyId: dependencyEvent.payload.dependency.dependencyId, resourceId: writeResourceId, dependsOnReadEventId: token!.readEventId, readToken: token!, comparison: { changedEventId: candidate.eventId, coverageId: candidateCoverage!, integrationTarget: targetSnapshot.integrationTargetId } },
+      };
+      await createProxy(store, [
+        "evt_000000000000000000000000000000d8", "evt_000000000000000000000000000000d9", "evt_000000000000000000000000000000da", "evt_000000000000000000000000000000db",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "c".repeat(64) }]]))) }), proofAuthority }).execute(
+        dependentCall, { ...proofContext, correlationId: "corr_00000000000000000000000000000003", requestSourceSequence: 5, completionSourceSequence: 6 },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] }),
+      );
+      const writes = store.read().filter((event) => event.eventType === "write.dependent");
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0]?.schemaVersion, 3);
+      assert.deepEqual(validateEventSet(store.read()), []);
+
+      await createProxy(store, [
+        "evt_000000000000000000000000000000dc", "evt_000000000000000000000000000000dd", "evt_000000000000000000000000000000de", "evt_000000000000000000000000000000df",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "d".repeat(64) }]]))) }), proofAuthority }).execute(
+        { ...dependentCall, dependentWrite: { ...dependentCall.dependentWrite, readToken: { ...token!, tokenDigest: `sha256:${"0".repeat(64)}` } } },
+        { ...proofContext, correlationId: "corr_00000000000000000000000000000004", requestSourceSequence: 7, completionSourceSequence: 8 },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] }),
+      );
+      assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "invalid token must not create another proof write");
+    } finally {
+      store.close();
+    }
+  });
 });
 
 test("derives a persisted dependency from real changed local TypeScript sources", async () => {

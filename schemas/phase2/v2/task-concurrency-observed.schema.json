@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchmesh.dev/schemas/phase2/v2/task-concurrency-observed.schema.json",
+  "type": "object",
+  "properties": {
+    "firstTaskId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/taskId" }, "secondTaskId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/taskId" }, "firstAgentId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/agentId" }, "secondAgentId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/agentId" }, "firstWorktreeId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/worktreeId" }, "secondWorktreeId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/worktreeId" }, "firstChangeEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "secondChangeEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "integrationTarget": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "coverageId": { "$ref": "../../phase0/v1/coverage.schema.json#/$defs/coverageId" }, "targetSnapshot": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/targetSnapshot" },
+    "overlapProof": { "oneOf": [
+      { "type": "object", "properties": { "kind": { "const": "authoritative_task_lifetimes" }, "firstLifecycleId": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "secondLifecycleId": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" } }, "required": ["kind", "firstLifecycleId", "secondLifecycleId"], "additionalProperties": false },
+      { "type": "object", "properties": { "kind": { "const": "executor_owned_tool_windows" }, "firstWindowId": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "secondWindowId": { "type": "string", "pattern": "^\\S(?:.*\\S)?$" }, "firstRequestEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "firstCompletionEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "secondRequestEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" }, "secondCompletionEventId": { "$ref": "../../phase0/v1/identities.schema.json#/$defs/eventId" } }, "required": ["kind", "firstWindowId", "secondWindowId", "firstRequestEventId", "firstCompletionEventId", "secondRequestEventId", "secondCompletionEventId"], "additionalProperties": false }
+    ] }
+  },
+  "required": ["firstTaskId", "secondTaskId", "firstAgentId", "secondAgentId", "firstWorktreeId", "secondWorktreeId", "firstChangeEventId", "secondChangeEventId", "integrationTarget", "coverageId", "targetSnapshot", "overlapProof"], "additionalProperties": false
+}

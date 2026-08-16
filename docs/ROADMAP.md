@@ -126,7 +126,8 @@ runtime observation, storage, projections, or CLI commands.
 It keeps `McpProxy.execute` as the canonical execution boundary and has verified
 same-store completion-linked effect handoff. The Phase 2 production-host gate remains
 blocked until a real `patchmesh-site` runtime owns an execution through that gateway;
-this repository does not claim that external run, and PR5–PR7 remain separate work.
+this repository does not claim that external run. PR5 relationship-proof capture is
+implemented within the host-authoritative gateway boundary; PR6–PR7 remain separate work.
 
 **Deliverables:**
 

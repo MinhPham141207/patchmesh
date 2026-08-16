@@ -171,10 +171,9 @@ test("daemon persists immutable finding feedback only through a writable store",
       reason: "resolved by the task",
     }).status, "inserted");
     assert.deepEqual(daemon.runSameSymbolDetection(), []);
-    assert.throws(
-      () => daemon.runPhase2Detection(),
-      (error: unknown) => error instanceof ReadServiceError && error.code === "unavailable",
-    );
+    // Legacy V1/V2 records remain replayable but cannot be treated as
+    // sufficient PR5 evidence, so detection safely produces no new records.
+    assert.deepEqual(daemon.runPhase2Detection(), []);
 
     readOnly = createDaemon({ reader: fixtureReader });
     assert.throws(

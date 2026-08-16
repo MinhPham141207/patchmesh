@@ -17,6 +17,7 @@ import {
 import {
   parseEvent,
   ProtocolValidationError,
+  validateEventSet,
   type CoverageId,
   type DependentWriteEvent,
   type EventId,
@@ -24,11 +25,13 @@ import {
   type DerivedEvidenceEvent,
   type FileReadEvent,
   type LogicalResource,
+  type ObservedReadToken,
   type ProtocolEvent,
   type ResourceVersion,
   type ToolCompletedEvent,
   type ToolRequestedEvent,
 } from "@patchmesh/protocol";
+import { projectWorkGraph } from "@patchmesh/storage";
 import {
   deriveCoverage,
   diffSnapshots,
@@ -57,6 +60,7 @@ interface DerivedSourceAnalysis {
   readonly facts: DerivedEvidenceFacts;
   readonly context: SymbolEventContext;
   readonly symbolEventIds: readonly EventId[];
+  readonly targetSnapshot: McpCallContext["targetSnapshot"];
 }
 
 function isIncrementalObserver(value: McpProxyOptions["observer"]): value is IncrementalObservationBoundary {
@@ -69,12 +73,74 @@ function appendValidated(event: ProtocolEvent, eventStore: EventAppender): Proto
   return eventStore.append(parsed.value).event;
 }
 
+function appendProofValidated(event: ProtocolEvent, eventStore: EventAppender): ProtocolEvent {
+  const parsed = parseEvent(event);
+  if (parsed.value === null) throw new ProtocolValidationError(parsed.diagnostics);
+  if (eventStore.read !== undefined) {
+    const diagnostics = validateEventSet([...eventStore.read(), parsed.value]);
+    if (diagnostics.length > 0) throw new ProtocolValidationError(diagnostics);
+  }
+  return eventStore.append(parsed.value).event;
+}
+
 function randomHexId(): string {
   return randomUUID().replaceAll("-", "");
 }
 
 function contentHash(content: Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sufficientPersistedCoverageId(events: readonly ProtocolEvent[], eventId: EventId): CoverageId | null {
+  try {
+    const byId = new Map(events.map((event) => [event.eventId, event] as const));
+    const sufficient = projectWorkGraph(events).snapshot.coverage
+      .filter((entry) => entry.presentation === "sufficient");
+    const visited = new Set<EventId>();
+    let current = byId.get(eventId);
+    while (current !== undefined && !visited.has(current.eventId)) {
+      const event = current;
+      visited.add(event.eventId);
+      const matches = sufficient.filter((entry) => entry.evidenceEventIds.includes(event.eventId));
+      if (matches.length === 1) return matches[0]!.coverageId;
+      current = event.causationId === null ? undefined : byId.get(event.causationId);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function issueObservedReadToken(
+  context: McpCallContext,
+  readEvent: FileReadEvent,
+  enabled: boolean,
+): ObservedReadToken | null {
+  if (!enabled || context.taskId === null || context.targetSnapshot === undefined) return null;
+  const tokenWithoutDigest = {
+    schemaVersion: 1 as const,
+    repositoryId: context.repositoryId,
+    workspaceId: context.workspaceId,
+    worktreeId: context.worktreeId,
+    taskId: context.taskId,
+    resourceId: readEvent.payload.resource.resourceId,
+    observedVersion: readEvent.payload.version,
+    readEventId: readEvent.eventId,
+    targetSnapshot: context.targetSnapshot,
+  };
+  return {
+    ...tokenWithoutDigest,
+    tokenDigest: `sha256:${createHash("sha256").update(canonicalJson(tokenWithoutDigest)).digest("hex")}`,
+  };
 }
 
 function asToolRequested(event: ProtocolEvent): ToolRequestedEvent {
@@ -297,7 +363,46 @@ function createDerivedEvidenceEvent(
   exported: boolean,
   coverageId: string,
   normalizedSignature: string | null,
+  targetSnapshot?: McpCallContext["targetSnapshot"],
+  sourceVersion?: ResourceVersion,
+  contractResourceId?: import("@patchmesh/protocol").ResourceId,
 ): DerivedEvidenceEvent {
+  if (targetSnapshot !== undefined && sourceVersion !== undefined && target.agentId !== null && target.taskId !== null) {
+    const sourceEventId = sourceEventIds[0];
+    if (sourceEventId !== undefined) {
+      return {
+        schemaVersion: 3,
+        eventId,
+        eventType: "evidence.derived",
+        source: target.source,
+        timestamp: target.timestamp,
+        repositoryId: target.repositoryId,
+        workspaceId: target.workspaceId,
+        worktreeId: target.worktreeId,
+        agentId: target.agentId,
+        taskId: target.taskId,
+        correlationId: target.correlationId,
+        causationId: target.eventId,
+        sourceSequence: null,
+        payload: { evidence: {
+          targetEventId: target.eventId, factKind, analyzer: sourceFacts.analyzer,
+          configuration: sourceFacts.configuration, configurationDigest: configurationDigest(sourceFacts.configuration),
+          sourceEventIds: [...new Set(sourceEventIds)].sort((left, right) => left.localeCompare(right)),
+          integrationTarget: targetSnapshot.integrationTargetId, coverage: sourceFacts.coverage,
+          coverageId: coverageId as DerivedEvidenceEvent["payload"]["evidence"]["coverageId"],
+          stableFactId: stableFactId as DerivedEvidenceEvent["payload"]["evidence"]["stableFactId"], exported, normalizedSignature,
+          targetSnapshot,
+          proof: factKind === "symbol" ? { kind: "hash_bound_symbol_contract", sourceAnalysis: {
+            sourceEventId, sourceResourceId: sourceFacts.resource.resourceId, sourceVersion,
+            analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: sourceFacts.resource.resourceId, sourceVersion })).digest("hex")}`,
+          } } : { kind: "resolver_confirmed_consumer_dependency", sourceAnalysis: {
+            sourceEventId, sourceResourceId: sourceFacts.resource.resourceId, sourceVersion,
+            analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: sourceFacts.resource.resourceId, sourceVersion })).digest("hex")}`,
+          }, resolver: { resolverId: "local-contract-resolver", version: "1" }, dependencyId: stableFactId as import("@patchmesh/protocol").DependencyId, consumerResourceId: sourceFacts.resource.resourceId, contractResourceId: contractResourceId ?? sourceFacts.resource.resourceId, resolution: "confirmed" },
+        } },
+      };
+    }
+  }
   return {
     schemaVersion: 2,
     eventId,
@@ -368,6 +473,62 @@ function persistedContractFacts(events: readonly ProtocolEvent[]): readonly Symb
   return facts.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 }
 
+/**
+ * A target-bound source proof can be reused by a linked worktree only when it
+ * proves the same logical resource content. Workspace/worktree IDs describe
+ * the capture location, not the immutable source hash being replaced.
+ */
+function sameHashBoundSourceVersion(left: ResourceVersion, right: ResourceVersion): boolean {
+  return left.resourceId === right.resourceId
+    && left.domain.repositoryId === right.domain.repositoryId
+    && left.kind === right.kind
+    && left.value !== null
+    && left.value === right.value;
+}
+
+/**
+ * Materializes a symbol modification only when a persisted, target-bound source
+ * analysis proves the exact file version being replaced. This is an explicit
+ * version edge, never a replay/order inference.
+ */
+function priorSymbolVersions(
+  events: readonly ProtocolEvent[],
+  changed: FileChangedEvent,
+  targetSnapshot: McpCallContext["targetSnapshot"],
+  facts: DerivedEvidenceFacts,
+): ReadonlyMap<import("@patchmesh/protocol").ResourceId, ResourceVersion> {
+  if (targetSnapshot === undefined || changed.payload.beforeVersion === null) return new Map();
+  const byId = new Map(events.map((event) => [event.eventId, event] as const));
+  const expectedConfigurationDigest = configurationDigest(facts.source.configuration);
+  const expectedSymbols = new Set(facts.symbols.map((fact) => fact.resource.resourceId));
+  const candidates = new Map<import("@patchmesh/protocol").ResourceId, ResourceVersion[]>();
+  for (const evidence of events) {
+    if (evidence.eventType !== "evidence.derived" || evidence.schemaVersion !== 3
+      || evidence.payload.evidence.factKind !== "symbol"
+      || evidence.payload.evidence.proof.kind !== "hash_bound_symbol_contract"
+      || evidence.payload.evidence.analyzer.analyzerId !== facts.source.analyzer.analyzerId
+      || evidence.payload.evidence.analyzer.version !== facts.source.analyzer.version
+      || evidence.payload.evidence.configurationDigest !== expectedConfigurationDigest
+      || evidence.payload.evidence.targetSnapshot.targetSnapshotId !== targetSnapshot.targetSnapshotId
+      || evidence.payload.evidence.targetSnapshot.digest !== targetSnapshot.digest) continue;
+    const source = evidence.payload.evidence.proof.sourceAnalysis;
+    if (source.sourceResourceId !== changed.payload.resource.resourceId
+      || !sameHashBoundSourceVersion(source.sourceVersion, changed.payload.beforeVersion)) continue;
+    const symbol = byId.get(evidence.payload.evidence.targetEventId);
+    if (symbol?.eventType !== "symbol.changed"
+      || !expectedSymbols.has(symbol.payload.resource.resourceId)
+      || symbol.payload.afterVersion.resourceId !== symbol.payload.resource.resourceId
+      || symbol.payload.afterVersion.domain.repositoryId !== facts.source.version.domain.repositoryId) continue;
+    candidates.set(symbol.payload.resource.resourceId, [
+      ...(candidates.get(symbol.payload.resource.resourceId) ?? []),
+      symbol.payload.afterVersion,
+    ]);
+  }
+  return new Map([...candidates].flatMap(([resourceId, versions]) => {
+    return versions.length === 1 ? [[resourceId, versions[0]!] as const] : [];
+  }));
+}
+
 function createDependentWriteEvent(
   call: McpToolCall,
   context: McpCallContext,
@@ -375,9 +536,41 @@ function createDependentWriteEvent(
   coverageId: CoverageId,
   eventId: EventId,
   timestamp: string,
+  completionEventId: EventId,
 ): DependentWriteEvent | null {
   const dependentWrite = call.dependentWrite;
   if (dependentWrite === undefined || context.taskId === null) return null;
+  if (context.targetSnapshot !== undefined && context.agentId !== null && dependentWrite.readToken !== undefined && dependentWrite.comparison !== undefined) {
+    return {
+      schemaVersion: 3,
+      eventId,
+      eventType: "write.dependent",
+      source: context.source,
+      timestamp,
+      repositoryId: context.repositoryId,
+      workspaceId: context.workspaceId,
+      worktreeId: context.worktreeId,
+      agentId: context.agentId,
+      taskId: context.taskId,
+      correlationId: context.correlationId,
+      causationId: changedEvent.eventId,
+      sourceSequence: null,
+      payload: {
+        write: {
+          dependencyId: dependentWrite.dependencyId,
+          resourceId: dependentWrite.resourceId,
+          dependsOnReadEventId: dependentWrite.dependsOnReadEventId,
+          coverageId,
+          comparison: dependentWrite.comparison,
+          readToken: dependentWrite.readToken,
+          targetSnapshot: context.targetSnapshot,
+          writeEffectEventId: changedEvent.eventId,
+          writeEffectCoverageId: coverageId,
+          completionEventId,
+        },
+      },
+    };
+  }
   return {
     schemaVersion: 2,
     eventId,
@@ -414,6 +607,7 @@ export class McpProxy {
   private readonly observer: McpProxyOptions["observer"];
   private readonly createCorrelationId: () => ProtocolEvent["correlationId"];
   private readonly phase2SourceAnalysis: McpProxyOptions["phase2SourceAnalysis"];
+  private readonly proofAuthority: NonNullable<McpProxyOptions["proofAuthority"]>;
 
   constructor(options: McpProxyOptions) {
     this.eventStore = options.eventStore;
@@ -422,6 +616,10 @@ export class McpProxy {
     this.observer = options.observer;
     this.createCorrelationId = options.createCorrelationId ?? (() => `corr_${randomHexId()}`);
     this.phase2SourceAnalysis = options.phase2SourceAnalysis;
+    this.proofAuthority = options.proofAuthority ?? {
+      authoritativeIdentity: false, taskLifecycle: false, integrationTargetSnapshot: false,
+      observedReadVersion: false, dependentWriteToken: false, exactReportedEffects: false,
+    };
   }
 
   /** Releases observer-owned watcher sessions when the host shuts this proxy down. */
@@ -432,6 +630,7 @@ export class McpProxy {
   private async deriveChangedSourceEvents(
     event: FileChangedEvent,
     workspaceRoot: string | undefined,
+    targetSnapshot: McpCallContext["targetSnapshot"],
   ): Promise<DerivedSourceAnalysis | string | null> {
     const options = this.phase2SourceAnalysis;
     if (options === undefined) return null;
@@ -464,7 +663,9 @@ export class McpProxy {
       sourceEventIds: [event.eventId],
       analyzer: options.analyzer,
       configuration: options.configuration,
-      integrationTarget: options.integrationTarget,
+      // V3 dependency resolution must share the immutable target binding used
+      // by persisted contract facts; legacy contexts keep their supplied name.
+      integrationTarget: targetSnapshot?.integrationTargetId ?? options.integrationTarget,
     });
     if (facts.source.coverage.status === "degraded") return facts.source.coverage.reason;
     const symbolContext: SymbolEventContext = {
@@ -478,17 +679,34 @@ export class McpProxy {
       timestamp: this.now(),
       sourceSequenceStart: null,
     };
+    const priorVersions = priorSymbolVersions(this.eventStore.read?.() ?? [], event, targetSnapshot, facts);
     const symbolEvents = deriveSymbolChangedEvents(
       facts,
       facts.symbols.map(() => this.createEventId()),
       symbolContext,
-    );
+    ).map((symbolEvent) => {
+      const beforeVersion = priorVersions.get(symbolEvent.payload.resource.resourceId);
+      return beforeVersion === undefined ? symbolEvent : {
+        ...symbolEvent,
+        // The predecessor is hash-bound across worktrees; materialize that
+        // signature in this current symbol event's version domain.
+        payload: {
+          ...symbolEvent.payload,
+          beforeVersion: {
+            ...symbolEvent.payload.afterVersion,
+            value: beforeVersion.value,
+            evidenceEventIds: beforeVersion.evidenceEventIds,
+          },
+          changeKind: "modified" as const,
+        },
+      };
+    });
      try {
        for (const [index, symbolEvent] of symbolEvents.entries()) {
          appendValidated(symbolEvent, this.eventStore);
          const fact = facts.symbols[index];
          if (fact === undefined) return "derived symbol fact is missing its event";
-         appendValidated(createDerivedEvidenceEvent(
+         const evidence = createDerivedEvidenceEvent(
            symbolEvent,
            this.createEventId(),
            facts.source,
@@ -497,13 +715,17 @@ export class McpProxy {
             fact.sourceFacts.sourceEventIds,
             fact.exported,
             fact.coverageId,
-            fact.signature,
-         ), this.eventStore);
+           fact.signature,
+           targetSnapshot,
+           event.payload.afterVersion,
+         );
+         if (evidence.schemaVersion === 3) appendProofValidated(evidence, this.eventStore);
+         else appendValidated(evidence, this.eventStore);
        }
     } catch {
       return "derived symbol event persistence failed";
     }
-    return { facts, context: symbolContext, symbolEventIds: symbolEvents.map((symbolEvent) => symbolEvent.eventId) };
+    return { facts, context: symbolContext, symbolEventIds: symbolEvents.map((symbolEvent) => symbolEvent.eventId), targetSnapshot };
   }
 
   private persistResolvedDependencies(
@@ -530,17 +752,24 @@ export class McpProxy {
          const event = deriveDependencyChangedEvents([dependency], [this.createEventId()], analysis.context)[0];
         if (event === undefined) return "resolver did not produce a dependency event";
         appendValidated(event, this.eventStore);
-        appendValidated(createDerivedEvidenceEvent(
+        const evidence = createDerivedEvidenceEvent(
           event,
           this.createEventId(),
           dependency.consumer.sourceFacts,
           "dependency",
           event.payload.dependency.dependencyId,
-           event.payload.dependency.evidenceEventIds,
+          // The proof's hash-bound analysis input is the consumer source.
+          // The dependency event retains both consumer and contract evidence.
+          dependency.consumer.sourceFacts.sourceEventIds,
            false,
            dependency.consumer.coverageId,
-           dependency.contract.signature,
-        ), this.eventStore);
+          dependency.contract.signature,
+          analysis.targetSnapshot,
+          analysis.facts.source.version,
+          dependency.contract.resource.resourceId,
+        );
+        if (evidence.schemaVersion === 3) appendProofValidated(evidence, this.eventStore);
+        else appendValidated(evidence, this.eventStore);
       }
     } catch {
       return "derived dependency event persistence failed";
@@ -574,6 +803,7 @@ export class McpProxy {
     const executionSignal = signal ?? new AbortController().signal;
     const observationGaps: ObservationGap[] = [];
     const readEventIds: EventId[] = [];
+    const observedReadTokens: ObservedReadToken[] = [];
     const readEvent = call.observedRead === undefined
       ? null
       : createFileReadEvent(call, context, requestEvent.eventId, this.createEventId(), this.now());
@@ -630,6 +860,12 @@ export class McpProxy {
       execution = executionSignal.aborted || isAbortError(error)
         ? { outcome: "interrupted", exitCode: null }
         : { outcome: "failed", error, exitCode: null };
+    }
+    if (execution.outcome === "succeeded" && readEvent !== null) {
+      const readToken = issueObservedReadToken(context, readEvent,
+        this.proofAuthority.authoritativeIdentity && this.proofAuthority.taskLifecycle
+        && this.proofAuthority.integrationTargetSnapshot && this.proofAuthority.observedReadVersion);
+      if (readToken !== null) observedReadTokens.push(readToken);
     }
 
     let afterCapture: ObservationCapture | null = null;
@@ -689,7 +925,8 @@ export class McpProxy {
             effectEventIds.push(eventId);
             const changedEvent = persisted as FileChangedEvent;
             interceptedChanges.push(changedEvent);
-            const analysis = await this.deriveChangedSourceEvents(changedEvent, context.workspaceRoot);
+            const analysis = await this.deriveChangedSourceEvents(changedEvent, context.workspaceRoot,
+              this.proofAuthority.authoritativeIdentity && this.proofAuthority.taskLifecycle && this.proofAuthority.integrationTargetSnapshot ? context.targetSnapshot : undefined);
             if (typeof analysis === "string") {
               analysisDiagnostics.push({ path: change.path, reason: analysis });
               observationGaps.push({ kind: "unverified", scope: `source:${change.path}`, reason: analysis });
@@ -740,7 +977,8 @@ export class McpProxy {
               this.eventStore,
             );
             outOfBandEventIds.push(eventId);
-            const analysis = await this.deriveChangedSourceEvents(persisted as FileChangedEvent, context.workspaceRoot);
+            const analysis = await this.deriveChangedSourceEvents(persisted as FileChangedEvent, context.workspaceRoot,
+              this.proofAuthority.authoritativeIdentity && this.proofAuthority.taskLifecycle && this.proofAuthority.integrationTargetSnapshot ? context.targetSnapshot : undefined);
             if (typeof analysis === "string") {
               analysisDiagnostics.push({ path: change.path, reason: analysis });
               observationGaps.push({ kind: "unverified", scope: `source:${change.path}`, reason: analysis });
@@ -847,18 +1085,62 @@ export class McpProxy {
           evidenceEventIds,
         });
 
-    if (coverage !== null && dependentWriteChange !== null && hasDependentWriteDependency) {
+    const persistedEvents = this.eventStore.read?.() ?? [];
+    const presentedToken = call.dependentWrite?.readToken;
+    const tokenRead = presentedToken === undefined ? undefined : persistedEvents.find((event) => event.eventId === presentedToken.readEventId);
+    const expectedTokenDigest = presentedToken === undefined ? null : `sha256:${createHash("sha256").update(canonicalJson({
+      schemaVersion: presentedToken.schemaVersion, repositoryId: presentedToken.repositoryId,
+      workspaceId: presentedToken.workspaceId, worktreeId: presentedToken.worktreeId, taskId: presentedToken.taskId,
+      resourceId: presentedToken.resourceId, observedVersion: presentedToken.observedVersion,
+      readEventId: presentedToken.readEventId, targetSnapshot: presentedToken.targetSnapshot,
+    })).digest("hex")}`;
+    const proofTokenMatches = presentedToken !== undefined
+      && observedReadTokens.length === 0
+      && presentedToken.tokenDigest === expectedTokenDigest
+      && presentedToken.repositoryId === context.repositoryId && presentedToken.workspaceId === context.workspaceId
+      && presentedToken.worktreeId === context.worktreeId && presentedToken.taskId === context.taskId
+      && presentedToken.readEventId === call.dependentWrite?.dependsOnReadEventId
+      && canonicalJson(presentedToken.targetSnapshot) === canonicalJson(context.targetSnapshot)
+      && (tokenRead?.eventType === "file.read" || tokenRead?.eventType === "symbol.read")
+      && tokenRead.payload.resource.resourceId === presentedToken.resourceId
+      && canonicalJson(tokenRead.payload.version) === canonicalJson(presentedToken.observedVersion);
+    const candidate = call.dependentWrite?.comparison === undefined ? undefined
+      : persistedEvents.find((event) => event.eventId === call.dependentWrite?.comparison?.changedEventId);
+    const candidateCoverageId = candidate === undefined ? null : sufficientPersistedCoverageId(persistedEvents, candidate.eventId);
+    const writeEffectCoverageId = dependentWriteChange === null ? null : sufficientPersistedCoverageId(persistedEvents, dependentWriteChange.eventId);
+    const proofCandidateMatches = call.dependentWrite?.comparison !== undefined
+      && (candidate?.eventType === "file.changed" || candidate?.eventType === "symbol.changed")
+      && candidate.payload.resource.resourceId === call.dependentWrite?.readToken?.resourceId
+      && candidateCoverageId !== null
+      && candidateCoverageId === call.dependentWrite.comparison.coverageId;
+    const proofAuthorityAvailable = this.proofAuthority.authoritativeIdentity && this.proofAuthority.taskLifecycle
+      && this.proofAuthority.integrationTargetSnapshot && this.proofAuthority.observedReadVersion && this.proofAuthority.dependentWriteToken && this.proofAuthority.exactReportedEffects;
+    const useProofPath = context.targetSnapshot !== undefined && presentedToken !== undefined;
+    if (useProofPath && (!proofTokenMatches || !proofCandidateMatches || writeEffectCoverageId === null || coverage?.presentation !== "sufficient" || execution.outcome !== "succeeded")) {
+      observationGaps.push({
+        kind: "unverified",
+        scope: "write.dependent",
+        reason: "proof-bearing dependent write lacks a matching token, candidate, succeeded completion, or sufficient coverage",
+      });
+    }
+
+    const completionLinkedAttributed = completedEvent.eventType === "tool.completed"
+      && completedEvent.payload.deterministicallyAttributedEffectEventIds?.includes(dependentWriteChange?.eventId as EventId) === true;
+    if (coverage !== null && dependentWriteChange !== null && hasDependentWriteDependency
+      && (!useProofPath || (proofAuthorityAvailable && proofTokenMatches && proofCandidateMatches && writeEffectCoverageId !== null && completionLinkedAttributed && coverage.presentation === "sufficient" && execution.outcome === "succeeded"))) {
       const dependentWriteEvent = createDependentWriteEvent(
         call,
         context,
         dependentWriteChange,
-        coverage.coverageId,
+        useProofPath ? writeEffectCoverageId! : coverage.coverageId,
         this.createEventId(),
         this.now(),
+        completedEvent.eventId,
       );
       if (dependentWriteEvent !== null) {
         try {
-          appendValidated(dependentWriteEvent, this.eventStore);
+          if (dependentWriteEvent.schemaVersion === 3) appendProofValidated(dependentWriteEvent, this.eventStore);
+          else appendValidated(dependentWriteEvent, this.eventStore);
         } catch (error) {
           if (error instanceof ProtocolValidationError) throw error;
           throw new McpProxyStorageError(
@@ -877,6 +1159,7 @@ export class McpProxy {
       requestEventId: requestEvent.eventId,
       completedEventId: completedEvent.eventId,
       readEventIds,
+      observedReadTokens,
       coverage,
       observationDiagnostics: resolvedObservationGaps,
       analysisDiagnostics,

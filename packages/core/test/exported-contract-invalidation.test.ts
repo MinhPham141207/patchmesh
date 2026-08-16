@@ -14,6 +14,10 @@ const domain = {
   workspaceId: "ws_11111111-1111-4111-8111-111111111111",
   worktreeId: "wt_11111111-1111-4111-8111-111111111111",
 };
+const targetSnapshot = {
+  targetSnapshotId: `snapshot_${"a".repeat(64)}` as const, integrationTargetId: "target_main" as const,
+  repositoryId: domain.repositoryId, kind: "branch" as const, locator: "main", baseCommit: "a".repeat(40), candidateIds: [], digest: "a".repeat(64),
+};
 
 const version = (value: string, eventId: string) => ({
   resourceId: contractResourceId,
@@ -30,7 +34,7 @@ const change = (breaking = true): ExportedContractChangeEvidence => ({
   afterVersion: version("sha256:after", "evt_00000000000000000000000000000002"),
   breaking,
   coverageId: "coverage_contract",
-  integrationTarget: "main",
+  targetSnapshot,
 });
 
 const consumer = (observed = "sha256:before"): ConsumerContractDependencyEvidence => ({
@@ -41,7 +45,7 @@ const consumer = (observed = "sha256:before"): ConsumerContractDependencyEvidenc
   affectedTaskId: "task_consumer",
   observedContractVersion: version(observed, "evt_00000000000000000000000000000003"),
   coverageId: "coverage_consumer",
-  integrationTarget: "main",
+  targetSnapshot,
 });
 
 test("reports a known consumer of a broken exported contract", () => {
@@ -71,6 +75,12 @@ test("reports a known consumer that observed the contract in another worktree", 
 test("does not report compatible changes or consumers on a different version", () => {
   assert.equal(detectExportedContractInvalidation(change(false), consumer()), null);
   assert.equal(detectExportedContractInvalidation(change(), consumer("sha256:other")), null);
+});
+
+test("does not report consumers bound to another immutable target snapshot", () => {
+  assert.equal(detectExportedContractInvalidation(change(), {
+    ...consumer(), targetSnapshot: { ...targetSnapshot, targetSnapshotId: `snapshot_${"b".repeat(64)}`, digest: "b".repeat(64) },
+  }), null);
 });
 
 test("retains every consumer when grouping contract dependencies", () => {

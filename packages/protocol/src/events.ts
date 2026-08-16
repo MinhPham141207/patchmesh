@@ -15,6 +15,7 @@ import type {
   ResourceId,
   ResourceVersion,
   Source,
+  TargetSnapshot,
   TargetSnapshotId,
   TaskId,
   VersionDomain,
@@ -40,6 +41,12 @@ export interface BaseEvent {
 
 export interface BaseEventV2 extends Omit<BaseEvent, "schemaVersion"> {
   readonly schemaVersion: 2;
+}
+
+export interface BaseEventV3 extends Omit<BaseEvent, "schemaVersion" | "agentId" | "taskId"> {
+  readonly schemaVersion: 3;
+  readonly agentId: AgentId;
+  readonly taskId: TaskId;
 }
 
 export type ToolName = "read_file" | "edit_file" | "run_shell" | "run_test" | "git_commit";
@@ -169,6 +176,49 @@ export interface DependentWritePayload {
   };
 }
 
+export type Sha256Digest = `sha256:${string}`;
+
+/** A complete immutable integration-target snapshot carried by PR5 proof events. */
+/**
+ * The canonical Phase 0 snapshot contract. Its digest is the plain hexadecimal
+ * SHA-256 of the closed snapshot object and its ID is `snapshot_${digest}`.
+ */
+export type ImmutableTargetSnapshot = TargetSnapshot;
+
+/**
+ * Canonical host-issued proof that a task observed one persisted resource version.
+ * The token is presented by a later dependent write; it is not a separate event.
+ */
+export interface ObservedReadToken {
+  readonly schemaVersion: 1;
+  readonly tokenDigest: Sha256Digest;
+  readonly repositoryId: RepositoryId;
+  readonly workspaceId: WorkspaceId;
+  readonly worktreeId: WorktreeId;
+  readonly taskId: TaskId;
+  readonly resourceId: ResourceId;
+  readonly observedVersion: ResourceVersion;
+  readonly readEventId: EventId;
+  readonly targetSnapshot: ImmutableTargetSnapshot;
+}
+
+/** PR5 proof that a dependent write used a target-bound observed-read token. */
+export type ProofBearingDependentWrite = Omit<
+  DependentWritePayload["write"],
+  "comparison"
+> & {
+  readonly comparison: NonNullable<DependentWritePayload["write"]["comparison"]>;
+  readonly readToken: ObservedReadToken;
+  readonly targetSnapshot: ImmutableTargetSnapshot;
+  readonly writeEffectEventId: EventId;
+  readonly writeEffectCoverageId: CoverageId;
+  readonly completionEventId: EventId;
+};
+
+export interface DependentWriteProofPayload {
+  readonly write: ProofBearingDependentWrite;
+}
+
 /** Immutable observation that two independently-attributed task changes overlapped. */
 export interface TaskConcurrencyObservedPayload {
   readonly observation: {
@@ -179,6 +229,37 @@ export interface TaskConcurrencyObservedPayload {
     readonly integrationTarget: string;
     readonly coverageId: CoverageId;
   };
+}
+
+/** Immutable witness emitted from an authoritative host-owned overlap registry. */
+export type AuthoritativeOverlapProof =
+  | {
+      readonly kind: "authoritative_task_lifetimes";
+      readonly firstLifecycleId: string;
+      readonly secondLifecycleId: string;
+    }
+  | {
+      readonly kind: "executor_owned_tool_windows";
+      readonly firstWindowId: string;
+      readonly secondWindowId: string;
+      readonly firstRequestEventId: EventId;
+      readonly firstCompletionEventId: EventId;
+      readonly secondRequestEventId: EventId;
+      readonly secondCompletionEventId: EventId;
+    };
+
+export type ProofBearingTaskConcurrencyObservation =
+  TaskConcurrencyObservedPayload["observation"] & {
+    readonly firstAgentId: AgentId;
+    readonly secondAgentId: AgentId;
+    readonly firstWorktreeId: WorktreeId;
+    readonly secondWorktreeId: WorktreeId;
+    readonly targetSnapshot: ImmutableTargetSnapshot;
+    readonly overlapProof: AuthoritativeOverlapProof;
+  };
+
+export interface TaskConcurrencyProofPayload {
+  readonly observation: ProofBearingTaskConcurrencyObservation;
 }
 
 export interface DerivedEvidencePayload {
@@ -196,6 +277,41 @@ export interface DerivedEvidencePayload {
     readonly exported: boolean;
     readonly normalizedSignature: string | null;
   };
+}
+
+/** Hash-bound source input used by a deterministic analyzer or resolver. */
+export interface SourceAnalysisBinding {
+  readonly sourceEventId: EventId;
+  readonly sourceResourceId: ResourceId;
+  readonly sourceVersion: ResourceVersion;
+  readonly analysisInputDigest: Sha256Digest;
+}
+
+export type DerivedRelationshipProof =
+  | {
+      readonly kind: "hash_bound_symbol_contract";
+      readonly sourceAnalysis: SourceAnalysisBinding;
+    }
+  | {
+      readonly kind: "resolver_confirmed_consumer_dependency";
+      readonly sourceAnalysis: SourceAnalysisBinding;
+      readonly resolver: {
+        readonly resolverId: string;
+        readonly version: string;
+      };
+      readonly dependencyId: DependencyId;
+      readonly consumerResourceId: ResourceId;
+      readonly contractResourceId: ResourceId;
+      readonly resolution: "confirmed";
+    };
+
+export type ProofBearingDerivedEvidence = DerivedEvidencePayload["evidence"] & {
+  readonly targetSnapshot: ImmutableTargetSnapshot;
+  readonly proof: DerivedRelationshipProof;
+};
+
+export interface DerivedEvidenceProofPayload {
+  readonly evidence: ProofBearingDerivedEvidence;
 }
 
 export interface DecisionTarget {
@@ -334,20 +450,43 @@ export interface FindingFeedbackCreatedEvent extends BaseEventV2 {
   readonly payload: FindingFeedbackCreatedPayload;
 }
 
-export interface DependentWriteEvent extends BaseEventV2 {
+export interface DependentWriteEventV2 extends BaseEventV2 {
   readonly eventType: "write.dependent";
   readonly payload: DependentWritePayload;
 }
 
-export interface DerivedEvidenceEvent extends BaseEventV2 {
+export interface DependentWriteEventV3 extends BaseEventV3 {
+  readonly eventType: "write.dependent";
+  readonly payload: DependentWriteProofPayload;
+}
+
+export type DependentWriteEvent = DependentWriteEventV2 | DependentWriteEventV3;
+
+export interface DerivedEvidenceEventV2 extends BaseEventV2 {
   readonly eventType: "evidence.derived";
   readonly payload: DerivedEvidencePayload;
 }
 
-export interface TaskConcurrencyObservedEvent extends BaseEventV2 {
+export interface DerivedEvidenceEventV3 extends BaseEventV3 {
+  readonly eventType: "evidence.derived";
+  readonly payload: DerivedEvidenceProofPayload;
+}
+
+export type DerivedEvidenceEvent = DerivedEvidenceEventV2 | DerivedEvidenceEventV3;
+
+export interface TaskConcurrencyObservedEventV2 extends BaseEventV2 {
   readonly eventType: "task.concurrency.observed";
   readonly payload: TaskConcurrencyObservedPayload;
 }
+
+export interface TaskConcurrencyObservedEventV3 extends BaseEventV3 {
+  readonly eventType: "task.concurrency.observed";
+  readonly payload: TaskConcurrencyProofPayload;
+}
+
+export type TaskConcurrencyObservedEvent =
+  | TaskConcurrencyObservedEventV2
+  | TaskConcurrencyObservedEventV3;
 
 export interface DecisionCreatedEvent extends BaseEvent {
   readonly eventType: "decision.created";

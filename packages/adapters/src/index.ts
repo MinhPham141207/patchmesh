@@ -5,6 +5,8 @@ export {
   detectPatchMeshSiteCapabilities,
   PatchMeshSiteCapabilityError,
   PatchMeshSiteIdentityMismatchError,
+  PatchMeshSiteLifecycleError,
+  PatchMeshSiteProofCapabilityError,
   PatchMeshSiteMcpGateway,
   PatchMeshSitePersistedEvidenceError,
   PatchMeshSiteRuntimeIdentityError,
@@ -30,5 +32,6 @@ export type {
   PatchMeshSitePayloadIdentity,
   PatchMeshSitePersistedToolEvidence,
   PatchMeshSiteRuntimeIdentity,
+  PatchMeshSiteTaskLifecycle,
   PatchMeshSiteToolInvocation,
 } from "./patchmesh-site-mcp-gateway.js";

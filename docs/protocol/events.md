@@ -1,7 +1,8 @@
-# PatchMesh Event Protocol V1 and Phase 2 V2 Extensions
+# PatchMesh Event Protocol V1 and Phase 2 Extensions
 
 > **Status:** V1 is the Phase 0 normative contract. Phase 2 adds four backward-
 > compatible schema-version-2 event types; V1 readers continue to replay V1 streams.
+> Schema version 3 adds proof-bearing forms of three existing Phase 2 event families.
 
 ## Envelope
 
@@ -69,3 +70,40 @@ task-attributed symbol changes in distinct worktrees from an adapter or gateway.
 symbol/dependency event, use an analyzer source, and reference existing source events
 in the same repository/workspace. Producers must leave evidence degraded rather than
 emit an unresolved V2 reference.
+
+## Phase 2 V3 proof-bearing event forms
+
+[`schemas/phase2/v2/event-envelope.schema.json`](../../schemas/phase2/v2/event-envelope.schema.json)
+keeps the existing `write.dependent`, `task.concurrency.observed`, and
+`evidence.derived` names while requiring replayable proof fields. V2 remains closed
+and replayable without those fields; V3 events are selected only by schema version `3`.
+
+Every V3 proof carries the canonical immutable `TargetSnapshot` from the identity
+contract. Its digest is the plain hexadecimal SHA-256 of the closed canonical object
+`{ integrationTargetId, repositoryId, kind, locator, baseCommit, candidateIds }`, and
+its ID is `snapshot_` plus that digest. A branch name alone is never a target proof.
+
+- A V3 `write.dependent` carries a digest-validated observed-read token binding the
+  repository, workspace, worktree, task, resource, complete observed version, read
+  event, and target snapshot. It also names a candidate comparison, persisted write
+  effect, and succeeded completion that deterministically attributes that effect. Its
+  comparison target must equal `targetSnapshot.integrationTargetId`.
+- A V3 `task.concurrency.observed` carries both agents, tasks, worktrees, same-symbol
+  changes, one target snapshot, and either authoritative task-lifetime identities or
+  executor-owned tool-window references. References may be from distinct workspace
+  contexts but must share the repository; its integration target must equal the snapshot
+  target. Timestamps and ordering are not proof.
+- A V3 `evidence.derived` carries exactly one proof basis: hash-bound source analysis
+  or a resolver-confirmed consumer dependency. Source event/version, input digest,
+  target binding, and coverage are validated. Symbol facts require the symbol-contract
+  basis; dependency facts require the resolver basis, whose resources must match the
+  target dependency. Duplicate sufficient proof records for
+  one target event and snapshot are rejected as ambiguous.
+
+An exported-contract signature transition is causal only when a `symbol.changed`
+event is explicitly `modified` and its complete `beforeVersion` identifies exactly
+one persisted target-bound prior symbol version. Replay never derives prior/current
+history from timestamps, source sequence, event IDs, or input order.
+
+V3 validation is fail-closed: incomplete or degraded observations cannot satisfy a
+sufficient relationship proof.
