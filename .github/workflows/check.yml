@@ -1,0 +1,25 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # node:sqlite is what the event store is built on, so the Node version is a
+      # correctness constraint here rather than a preference.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+
+      # One command, the same one a developer runs locally: build, typecheck, the full
+      # test suite, the Phase 0 contract corpus, and evidence trace validation.
+      - run: corepack pnpm check
