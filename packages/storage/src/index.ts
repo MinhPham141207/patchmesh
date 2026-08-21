@@ -3,8 +3,9 @@ export {
   canonicalDigest,
   canonicalJson,
 } from "./canonical-json.js";
+export { SQLITE_BUSY_TIMEOUT_MS } from "./database.js";
 export { StorageError } from "./errors.js";
-export type { AppendResult, EventQuery } from "./event-store.js";
+export type { AppendResult, AtomicAppendOptions, EventQuery } from "./event-store.js";
 export { replayEvents } from "./replay.js";
 export type { ReplayReducer, ReplayResult, SourceSequenceGap } from "./replay.js";
 export { SqliteEventStore } from "./event-store.js";

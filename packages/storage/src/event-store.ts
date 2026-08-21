@@ -7,6 +7,7 @@ import {
   type EventId,
   type EventType,
   type ProtocolEvent,
+  validateEventSet,
 } from "@patchmesh/protocol";
 import { canonicalBytes, canonicalDigest } from "./canonical-json.js";
 import { openDatabase } from "./database.js";
@@ -27,7 +28,20 @@ export interface EventQuery {
 
 export type AppendResult =
   | { readonly status: "inserted"; readonly event: ProtocolEvent }
-  | { readonly status: "duplicate"; readonly event: ProtocolEvent };
+  | { readonly status: "duplicate"; readonly event: ProtocolEvent }
+  | { readonly status: "buffered"; readonly event: ProtocolEvent };
+
+export interface AtomicAppendOptions {
+  /** Validates the locked durable snapshot and all genuinely new candidates as one set. */
+  readonly requireValidEventSet?: boolean;
+  /**
+   * Holds a candidate whose causal parent is not yet durable in the pending buffer
+   * instead of committing it, and promotes buffered events once their parent lands.
+   * Without this, an out-of-order child is inserted directly and the durable log
+   * carries a dangling causation reference until its parent arrives.
+   */
+  readonly bufferUnresolvedCausalParents?: boolean;
+}
 
 export type { ReplayReducer, ReplayResult, SourceSequenceGap } from "./replay.js";
 
@@ -35,6 +49,20 @@ interface StoredRow {
   readonly event_id: string;
   readonly content_digest: string;
   readonly canonical_event: Uint8Array | string;
+}
+
+interface CanonicalEvent {
+  readonly event: ProtocolEvent;
+  readonly bytes: Uint8Array;
+  readonly digest: string;
+  readonly inputIndex: number;
+}
+
+interface PendingRow {
+  readonly event_id: string;
+  readonly content_digest: string;
+  readonly canonical_event: Uint8Array | string;
+  readonly causation_id: string;
 }
 
 function storedBytes(value: Uint8Array | string): Uint8Array {
@@ -61,6 +89,17 @@ function parseStoredEvent(row: StoredRow): ProtocolEvent {
   }
 }
 
+function parseCanonicalEvent(input: unknown, inputIndex: number): CanonicalEvent {
+  const parsed = parseEvent(input);
+  if (parsed.value === null) throw new ProtocolValidationError(parsed.diagnostics);
+  return {
+    event: parsed.value,
+    bytes: canonicalBytes(parsed.value),
+    digest: canonicalDigest(parsed.value),
+    inputIndex,
+  };
+}
+
 export class SqliteEventStore {
   private closed = false;
 
@@ -72,65 +111,251 @@ export class SqliteEventStore {
 
   append(input: unknown): AppendResult {
     this.assertOpen();
-    const parsed = parseEvent(input);
-    if (parsed.value === null) throw new ProtocolValidationError(parsed.diagnostics);
+    return this.appendAtomic([input])[0]!;
+  }
 
-    const event = parsed.value;
-    const bytes = canonicalBytes(event);
-    const digest = canonicalDigest(event);
+  appendAtomic(inputs: readonly unknown[], options: AtomicAppendOptions = {}): readonly AppendResult[] {
+    this.assertOpen();
+    if (inputs.length === 0) return [];
+
+    const candidates = inputs.map((input, inputIndex) => parseCanonicalEvent(input, inputIndex));
+    const firstCandidatesById = new Map<EventId, CanonicalEvent>();
+    for (const candidate of candidates) {
+      const first = firstCandidatesById.get(candidate.event.eventId);
+      if (first === undefined) {
+        firstCandidatesById.set(candidate.event.eventId, candidate);
+        continue;
+      }
+      if (first.digest !== candidate.digest) {
+        throw new StorageError("PHASE0_ID_CONFLICT", "event ID has conflicting content", {
+          eventId: candidate.event.eventId,
+        });
+      }
+    }
+
     const lookup = this.database.prepare(
       "SELECT event_id, content_digest, canonical_event FROM events WHERE event_id = ?",
     );
+    const insert = this.database.prepare(`
+      INSERT INTO events (
+        event_id, content_digest, canonical_event, schema_version, event_type,
+        source_kind, source_id, source_instance_id, source_sequence, timestamp,
+        repository_id, workspace_id, worktree_id, agent_id, task_id,
+        correlation_id, causation_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const buffering = options.bufferUnresolvedCausalParents === true;
     let transactionOpen = false;
     try {
       this.database.exec("BEGIN IMMEDIATE");
       transactionOpen = true;
-      const existing = lookup.get(event.eventId) as StoredRow | undefined;
-      if (existing) {
-        if (existing.content_digest !== digest) {
+      const existingEvents = new Map<EventId, ProtocolEvent>();
+      const newCandidates: CanonicalEvent[] = [];
+      for (const candidate of firstCandidatesById.values()) {
+        const existing = lookup.get(candidate.event.eventId) as StoredRow | undefined;
+        if (existing === undefined) {
+          newCandidates.push(candidate);
+          continue;
+        }
+        if (existing.content_digest !== candidate.digest) {
           throw new StorageError("PHASE0_ID_CONFLICT", "event ID has conflicting content", {
-            eventId: event.eventId,
+            eventId: candidate.event.eventId,
           });
         }
-        const stored = parseStoredEvent(existing);
-        this.database.exec("COMMIT");
-        transactionOpen = false;
-        return { status: "duplicate", event: stored };
+        existingEvents.set(candidate.event.eventId, parseStoredEvent(existing));
       }
 
-      this.database.prepare(`
-        INSERT INTO events (
-          event_id, content_digest, canonical_event, schema_version, event_type,
-          source_kind, source_id, source_instance_id, source_sequence, timestamp,
-          repository_id, workspace_id, worktree_id, agent_id, task_id,
-          correlation_id, causation_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        event.eventId,
-        digest,
-        Buffer.from(bytes),
-        event.schemaVersion,
-        event.eventType,
-        event.source.kind,
-        event.source.sourceId,
-        event.source.instanceId,
-        event.sourceSequence,
-        event.timestamp,
-        event.repositoryId,
-        event.workspaceId,
-        event.worktreeId,
-        event.agentId,
-        event.taskId,
-        event.correlationId,
-        event.causationId,
-      );
+      // Without buffering every new candidate is admitted directly, preserving the
+      // pre-existing tolerance for an out-of-order child (invariant 4).
+      const admitted: CanonicalEvent[] = [];
+      const deferred: CanonicalEvent[] = [];
+      const promoted: PendingRow[] = [];
+      /** Buffered rows made redundant because the same event was admitted from the input. */
+      const supersededPendingIds = new Set<EventId>();
+      if (!buffering) {
+        admitted.push(...newCandidates);
+      } else {
+        const durableIds = new Set(this.durableEventIds());
+        const resolved = new Set(durableIds);
+        // A candidate is admissible when its parent is already durable or is itself an
+        // admissible candidate in this batch. Iterating to a fixpoint admits a whole
+        // chain that arrived in reverse order within one call.
+        let changed = true;
+        const undecided = [...newCandidates];
+        while (changed) {
+          changed = false;
+          for (let index = undecided.length - 1; index >= 0; index -= 1) {
+            const candidate = undecided[index]!;
+            const parent = candidate.event.causationId;
+            if (parent !== null && !resolved.has(parent)) continue;
+            resolved.add(candidate.event.eventId);
+            admitted.push(candidate);
+            undecided.splice(index, 1);
+            changed = true;
+          }
+        }
+        deferred.push(...undecided);
+
+        // Anything already buffered whose parent is now resolved joins the durable log.
+        // Promotion cascades, because a promoted event can unblock its own children.
+        //
+        // A resubmitted event must be excluded whichever side it landed on. Deferred was
+        // always excluded, but an event buffered earlier and resubmitted alongside the parent
+        // that unblocks it is ADMITTED from the input while its pending row still qualifies
+        // for promotion - inserting the same event_id twice in one transaction, which the
+        // uniqueness constraint rejects and which rolls back the whole batch.
+        const deferredIds = new Set<EventId>(deferred.map((candidate) => candidate.event.eventId));
+        const resubmittedIds = new Set<EventId>([
+          ...deferredIds,
+          ...admitted.map((candidate) => candidate.event.eventId),
+        ]);
+        const allPendingRows = this.pendingRows();
+        // An admitted candidate that also has a buffered row is the same event arriving by a
+        // second route. It is inserted once, from the input, and its now-redundant buffered
+        // row is retired in the same transaction so the two tables cannot disagree.
+        for (const row of allPendingRows) {
+          const eventId = row.event_id as EventId;
+          if (resubmittedIds.has(eventId) && !deferredIds.has(eventId)) supersededPendingIds.add(eventId);
+        }
+        const pendingRows = allPendingRows.filter((row) => !resubmittedIds.has(row.event_id as EventId));
+        let promotedAny = true;
+        while (promotedAny) {
+          promotedAny = false;
+          for (let index = pendingRows.length - 1; index >= 0; index -= 1) {
+            const row = pendingRows[index]!;
+            if (!resolved.has(row.causation_id as EventId)) continue;
+            resolved.add(row.event_id as EventId);
+            promoted.push(row);
+            pendingRows.splice(index, 1);
+            promotedAny = true;
+          }
+        }
+      }
+
+      if (options.requireValidEventSet === true) {
+        const diagnostics = validateEventSet([
+          ...this.read(),
+          ...admitted.map((candidate) => candidate.event),
+          ...promoted.map((row) => parseStoredEvent(row)),
+        ]);
+        if (diagnostics.length > 0) throw new ProtocolValidationError(diagnostics);
+      }
+
+      for (const candidate of admitted) this.insertEvent(insert, candidate.event, candidate.digest, candidate.bytes);
+      for (const row of promoted) {
+        this.insertEvent(insert, parseStoredEvent(row), row.content_digest, storedBytes(row.canonical_event));
+      }
+      if (promoted.length > 0 || supersededPendingIds.size > 0) {
+        const remove = this.database.prepare("DELETE FROM pending_events WHERE event_id = ?");
+        for (const row of promoted) remove.run(row.event_id);
+        for (const eventId of supersededPendingIds) remove.run(eventId);
+      }
+      if (deferred.length > 0) {
+        const buffer = this.database.prepare(`
+          INSERT INTO pending_events (event_id, content_digest, canonical_event, causation_id, buffered_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT (event_id) DO NOTHING
+        `);
+        const bufferedAt = new Date().toISOString();
+        for (const candidate of deferred) {
+          const pending = this.pendingRow(candidate.event.eventId);
+          if (pending !== undefined && pending.content_digest !== candidate.digest) {
+            throw new StorageError("PHASE0_ID_CONFLICT", "event ID has conflicting content", {
+              eventId: candidate.event.eventId,
+            });
+          }
+          buffer.run(
+            candidate.event.eventId,
+            candidate.digest,
+            Buffer.from(candidate.bytes),
+            candidate.event.causationId,
+            bufferedAt,
+          );
+        }
+      }
       this.database.exec("COMMIT");
       transactionOpen = false;
-      return { status: "inserted", event };
+
+      const deferredIds = new Set(deferred.map((candidate) => candidate.event.eventId));
+      return candidates.map((candidate) => {
+        const existing = existingEvents.get(candidate.event.eventId);
+        if (existing !== undefined) return { status: "duplicate", event: existing };
+        const first = firstCandidatesById.get(candidate.event.eventId)!;
+        if (deferredIds.has(first.event.eventId)) return { status: "buffered", event: first.event };
+        return candidate.inputIndex === first.inputIndex
+          ? { status: "inserted", event: first.event }
+          : { status: "duplicate", event: first.event };
+      });
     } catch (error) {
-      if (transactionOpen) this.database.exec("ROLLBACK");
+      if (transactionOpen) {
+        try {
+          this.database.exec("ROLLBACK");
+        } catch {
+          // SQLite already rolled the transaction back itself (RAISE(ROLLBACK), SQLITE_FULL,
+          // SQLITE_IOERR, a failed COMMIT). The explicit ROLLBACK then fails, and its error
+          // MUST NOT displace the failure the caller needs to diagnose.
+        }
+      }
       throw error;
     }
+  }
+
+  /**
+   * Events held by append-time buffering because their causal parent is not durable,
+   * in arrival order. These are deliberately excluded from `read` and `replay`: they
+   * are not yet part of the log, and a parent that never arrives leaves them here
+   * rather than making replay unresolvable.
+   */
+  readPending(): readonly ProtocolEvent[] {
+    this.assertOpen();
+    return this.pendingRows().map((row) => parseStoredEvent(row));
+  }
+
+  private pendingRows(): readonly PendingRow[] {
+    return this.database.prepare(`
+      SELECT event_id, content_digest, canonical_event, causation_id
+      FROM pending_events
+      ORDER BY buffered_position ASC
+    `).all() as unknown as PendingRow[];
+  }
+
+  private pendingRow(eventId: EventId): PendingRow | undefined {
+    return this.database.prepare(`
+      SELECT event_id, content_digest, canonical_event, causation_id
+      FROM pending_events WHERE event_id = ?
+    `).get(eventId) as PendingRow | undefined;
+  }
+
+  private durableEventIds(): readonly EventId[] {
+    const rows = this.database.prepare("SELECT event_id FROM events").all() as Array<{ readonly event_id: string }>;
+    return rows.map((row) => row.event_id as EventId);
+  }
+
+  private insertEvent(
+    insert: ReturnType<DatabaseSync["prepare"]>,
+    event: ProtocolEvent,
+    digest: string,
+    bytes: Uint8Array,
+  ): void {
+    insert.run(
+      event.eventId,
+      digest,
+      Buffer.from(bytes),
+      event.schemaVersion,
+      event.eventType,
+      event.source.kind,
+      event.source.sourceId,
+      event.source.instanceId,
+      event.sourceSequence,
+      event.timestamp,
+      event.repositoryId,
+      event.workspaceId,
+      event.worktreeId,
+      event.agentId,
+      event.taskId,
+      event.correlationId,
+      event.causationId,
+    );
   }
 
   read(query: EventQuery = {}): readonly ProtocolEvent[] {

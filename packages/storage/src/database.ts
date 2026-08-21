@@ -2,10 +2,16 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
 const migrations = [
   {
     id: "001_events",
     path: new URL("./migrations/001_events.sql", import.meta.url),
+  },
+  {
+    id: "002_pending_events",
+    path: new URL("./migrations/002_pending_events.sql", import.meta.url),
   },
 ] as const;
 
@@ -50,6 +56,7 @@ export function openDatabase(filename: string): DatabaseSync {
   const database = new DatabaseSync(filename);
   try {
     database.exec("PRAGMA foreign_keys = ON");
+    database.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
     applyMigrations(database);
     return database;
   } catch (error) {
