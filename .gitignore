@@ -13,8 +13,6 @@ opencode.json
 
 .vscode/
 
-.mcp.json
-
 # Node workspace outputs
 node_modules/
 packages/*/dist/
