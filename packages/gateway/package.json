@@ -1,0 +1,30 @@
+{
+  "name": "@patchmesh/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "patchmesh-mcp": "dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@patchmesh/protocol": "workspace:*",
+    "@patchmesh/recorder": "workspace:*",
+    "@patchmesh/storage": "workspace:*",
+    "zod": "^4.4.3"
+  }
+}

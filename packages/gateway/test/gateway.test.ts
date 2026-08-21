@@ -1,0 +1,166 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { appendJournalEntry, ingestJournal, journalPathFor } from "@patchmesh/recorder";
+import { recallRecentActivity, renderRecall } from "../src/index.js";
+
+const SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
+const DELEGATE = "a79bd1f2dafad824a";
+
+interface Fixture {
+  readonly root: string;
+  readonly ledgerPath: string;
+}
+
+/** A repository whose ledger holds a parent read, a subagent edit, and the spawn between them. */
+function recordedRepository(at = "2026-08-21T12:00:00.000Z"): Fixture {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-gateway-"));
+  mkdirSync(join(root, ".git"));
+  const journalPath = journalPathFor(root, ".patchmesh");
+  const calls: Record<string, unknown>[] = [
+    { tool_name: "Read", tool_input: { file_path: "src/server.ts" }, tool_response: {} },
+    {
+      tool_name: "Edit",
+      tool_input: { file_path: "src/auth.ts" },
+      tool_response: {},
+      agent_id: DELEGATE,
+      agent_type: "Explore",
+    },
+    { tool_name: "Agent", tool_input: { description: "probe" }, tool_response: { agentId: DELEGATE } },
+  ];
+  for (const call of calls) {
+    appendJournalEntry(journalPath, { session_id: SESSION, ...call }, at);
+  }
+  const ledgerPath = join(root, ".patchmesh", "ledger.db");
+  ingestJournal({ worktreeRoot: root, journalPath, ledgerPath });
+  return { root, ledgerPath };
+}
+
+const NOW = () => new Date("2026-08-21T12:05:00.000Z");
+
+test("recall narrowed to a file reports who touched it and under which task", () => {
+  const { root, ledgerPath } = recordedRepository();
+  try {
+    const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, path: "src/auth.ts", now: NOW });
+
+    assert.equal(result.calls.length, 1);
+    assert.equal(result.logicalPath, "src/auth.ts");
+    const call = result.calls[0]!;
+    assert.equal(call.toolName, "edit_file");
+    // The whole reason attribution was built: the answer names the subagent, not the session.
+    assert.ok(call.agentId.includes(".sub."), `expected a subagent, got ${call.agentId}`);
+    assert.equal(call.taskId, `task_${DELEGATE}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recall without a path covers the repository and names every agent", () => {
+  const { root, ledgerPath } = recordedRepository();
+  try {
+    const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, now: NOW });
+    assert.equal(result.calls.length, 3);
+    assert.equal(result.agents.length, 2, "the session and its subagent are different agents");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a caller can exclude its own calls so it does not rediscover its own work", () => {
+  const { root, ledgerPath } = recordedRepository();
+  try {
+    const result = recallRecentActivity({
+      worktreeRoot: root,
+      ledgerPath,
+      excludeAgentId: `agent_${SESSION}`,
+      now: NOW,
+    });
+    assert.equal(result.agents.length, 1);
+    assert.ok(result.agents[0]!.includes(".sub."));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the time window excludes work that is no longer relevant", () => {
+  const { root, ledgerPath } = recordedRepository("2026-08-20T00:00:00.000Z");
+  try {
+    assert.equal(recallRecentActivity({ worktreeRoot: root, ledgerPath, now: NOW }).calls.length, 0);
+    const wide = recallRecentActivity({ worktreeRoot: root, ledgerPath, withinMinutes: 60 * 48, now: NOW });
+    assert.equal(wide.calls.length, 3);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a recall answer is bounded and says how much it withheld", () => {
+  const { root, ledgerPath } = recordedRepository();
+  try {
+    const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, limit: 1, now: NOW });
+    assert.equal(result.calls.length, 1);
+    assert.equal(result.truncated, 2, "a page must not read as the whole truth");
+    assert.ok(renderRecall(result, undefined).includes("2 older matching call(s) not shown"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a path outside the repository returns nothing and says why", () => {
+  const { root, ledgerPath } = recordedRepository();
+  try {
+    const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, path: "../elsewhere.ts", now: NOW });
+    assert.equal(result.calls.length, 0);
+    assert.equal(result.logicalPath, null);
+    assert.ok(renderRecall(result, "../elsewhere.ts").includes("outside this repository"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the rendered answer states that same file does not mean same work", () => {
+  const { root, ledgerPath } = recordedRepository();
+  try {
+    const rendered = renderRecall(
+      recallRecentActivity({ worktreeRoot: root, ledgerPath, path: "src/auth.ts", now: NOW }),
+      "src/auth.ts",
+    );
+    // The ledger records paths, not diffs. An answer that let a reader forget that would
+    // invite exactly the false duplicate-work conclusion the detector design already rejected.
+    assert.ok(rendered.includes("not a judgement"));
+    assert.ok(rendered.includes("Same file does not mean same work"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the server answers over stdio as a real MCP client sees it", async () => {
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+  const { root } = recordedRepository();
+  try {
+    const transport = new StdioClientTransport({
+      command: "node",
+      args: [join(process.cwd(), "dist", "bin.js"), root],
+    });
+    const client = new Client({ name: "gateway-test", version: "0.0.0" });
+    await client.connect(transport);
+    try {
+      const tools = await client.listTools();
+      assert.deepEqual(tools.tools.map((tool) => tool.name), ["patchmesh_recent_activity"]);
+
+      const called = await client.callTool({
+        name: "patchmesh_recent_activity",
+        arguments: { path: "src/auth.ts", withinMinutes: 60 * 24 * 365 * 100 },
+      });
+      const text = (called.content as { type: string; text: string }[])[0]!.text;
+      assert.ok(text.includes("src/auth.ts"));
+      assert.ok(text.includes(".sub."), "the answer must name the subagent that made the edit");
+    } finally {
+      await client.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
