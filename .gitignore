@@ -24,3 +24,6 @@ tools/*/dist/
 # Agent evidence runtime state
 .evidence/.locks/
 .evidence/.state/
+
+# recorded agent ledger (local, per-checkout)
+.patchmesh/

@@ -50,6 +50,17 @@
             "statusMessage": ""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/bin.js\"",
+            "timeout": 10,
+            "statusMessage": ""
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -86,6 +97,17 @@
             "type": "command",
             "command": "knowl.cmd agent-hook claude Stop --json",
             "timeout": 30,
+            "statusMessage": ""
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/ingest-bin.js\"",
+            "timeout": 60,
             "statusMessage": ""
           }
         ]
@@ -128,6 +150,17 @@
             "statusMessage": ""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/ingest-bin.js\"",
+            "timeout": 60,
+            "statusMessage": ""
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -142,5 +175,8 @@
         ]
       }
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "knowl"
+  ]
 }

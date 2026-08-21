@@ -1,0 +1,29 @@
+{
+  "name": "@patchmesh/recorder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "patchmesh-record": "dist/bin.js",
+    "patchmesh-ingest": "dist/ingest-bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@patchmesh/observation": "workspace:*",
+    "@patchmesh/protocol": "workspace:*",
+    "@patchmesh/storage": "workspace:*"
+  }
+}
