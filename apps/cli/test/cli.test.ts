@@ -56,6 +56,106 @@ test("rejects unscheduled commands with usage exit code", async () => {
   assert.match(result.stderr, /unsupported command/i);
 });
 
+test("an unsupported command names the available commands instead of dead-ending", async () => {
+  const result = await runCli(["watch"], dependencies);
+
+  assert.equal(result.exitCode, 2);
+  for (const command of ["status", "overlaps", "stale", "contracts", "explain", "feedback", "delivery"]) {
+    assert.match(result.stderr, new RegExp(`\\b${command}\\b`), `usage should mention ${command}`);
+  }
+});
+
+test("help is a successful command and states the report-only boundary", async () => {
+  for (const argv of [["help"], ["--help"], ["-h"]]) {
+    const result = await runCli(argv, dependencies);
+    assert.equal(result.exitCode, 0, `${argv[0]} should succeed`);
+    assert.match(result.stdout, /Usage: patchmesh/);
+    assert.match(result.stdout, /report-only/i);
+    assert.equal(result.stderr, "");
+  }
+});
+
+test("every detector finding type is reachable from a CLI command", async () => {
+  const requested: string[] = [];
+  const recordingServices = {
+    ...services,
+    listFindings: (filters: { readonly findingType: string }) => {
+      requested.push(filters.findingType);
+      return { findings: [], coverageWarnings: [] };
+    },
+  } as unknown as ReadServices;
+
+  for (const command of ["overlaps", "stale", "contracts"]) {
+    const result = await runCli([command], { services: recordingServices });
+    assert.equal(result.exitCode, 0, `${command} should succeed`);
+  }
+
+  // The three detector finding types must each have a command; a detector whose
+  // output no command surfaces is unreachable coordination output.
+  assert.deepEqual(requested, [
+    "same_symbol_overlap",
+    "stale_read_before_write",
+    "exported_contract_invalidation",
+  ]);
+});
+
+test("write commands report what was recorded and name an idempotent replay", async () => {
+  const inserted = { status: "inserted", event: { eventId: "evt_new" } };
+  const duplicate = { status: "duplicate", event: { eventId: "evt_new" } };
+
+  const first = await runCli(["delivery", "decision_a", "--state", "delivered"], {
+    services,
+    deliveryWriter: { respondToDecisionDelivery: () => inserted },
+  } as never);
+  assert.equal(first.exitCode, 0);
+  assert.match(first.stdout, /DECISION DELIVERY/);
+  assert.match(first.stdout, /decision_a/);
+  assert.match(first.stdout, /State: delivered/);
+  assert.match(first.stdout, /Outcome: recorded/);
+  assert.match(first.stdout, /evt_new/);
+
+  const replay = await runCli(["delivery", "decision_a", "--state", "delivered"], {
+    services,
+    deliveryWriter: { respondToDecisionDelivery: () => duplicate },
+  } as never);
+  assert.equal(replay.exitCode, 0, "an identical replay is not a failure");
+  assert.match(replay.stdout, /already recorded/);
+
+  const feedback = await runCli(["feedback", "finding_a", "--disposition", "dismissed"], {
+    services,
+    feedbackWriter: { respondToFinding: () => inserted },
+  } as never);
+  assert.equal(feedback.exitCode, 0);
+  assert.match(feedback.stdout, /FINDING FEEDBACK/);
+  assert.match(feedback.stdout, /Disposition: dismissed/);
+});
+
+test("write commands keep machine output unchanged under --json", async () => {
+  const result = await runCli(["delivery", "decision_a", "--state", "failed", "--json"], {
+    services,
+    deliveryWriter: { respondToDecisionDelivery: () => ({ status: "inserted", event: { eventId: "evt_j" } }) },
+  } as never);
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(result.stdout), { status: "inserted", event: { eventId: "evt_j" } });
+});
+
+test("findings commands surface coverage warnings alongside an empty result", async () => {
+  const degradedServices = {
+    ...services,
+    listFindings: () => ({
+      findings: [],
+      coverageWarnings: [{ kind: "unverified", scope: "write.dependent" }],
+    }),
+  } as unknown as ReadServices;
+
+  const result = await runCli(["contracts"], { services: degradedServices });
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /No findings/);
+  assert.match(result.stdout, /Coverage gap: unverified write\.dependent/);
+});
+
 test("graph JSON output is stable and contains no Phase 2 fields", async () => {
   const first = await runCli(["graph", "--json"], dependencies);
   const second = await runCli(["graph", "--json"], dependencies);
@@ -115,13 +215,16 @@ test("feedback records an immutable response through the supplied writer", async
     feedbackWriter: {
       respondToFinding(input) {
         received = input;
-        return { status: "inserted", event: {} as never };
+        return { status: "inserted", event: { eventId: "evt_feedback" } as never };
       },
     },
   });
 
   assert.equal(result.exitCode, 0);
-  assert.equal(result.stdout, "inserted\n");
+  assert.equal(
+    result.stdout,
+    "FINDING FEEDBACK\nFinding: finding_cli\nDisposition: dismissed\nOutcome: recorded\nEvent: evt_feedback\n",
+  );
   assert.deepEqual(received, {
     findingId: "finding_cli",
     decisionId: null,

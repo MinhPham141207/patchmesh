@@ -1,6 +1,6 @@
 import type { EventId, LogicalResource, ResourceVersion } from "@patchmesh/protocol";
 
-export type SupportedLanguage = "typescript" | "javascript";
+export type SupportedLanguage = "typescript" | "javascript" | "python";
 
 export interface SourceAnalysisInput {
   readonly resource: LogicalResource;

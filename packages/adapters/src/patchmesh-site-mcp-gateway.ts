@@ -562,7 +562,7 @@ export class PatchMeshSiteMcpGateway {
         && candidate.taskId === second.taskId && candidate.agentId === second.agentId
         && candidate.worktreeId === second.worktreeId && candidate.workspaceId === second.workspaceId
         && candidate.repositoryId === second.repositoryId && candidate.symbolChangeEventIds.has(second.eventId));
-      if (matchingLifecycles.length !== 1) throw new Error(`debug: matching lifecycles=${matchingLifecycles.length}`);
+      if (matchingLifecycles.length !== 1) continue;
       const other = matchingLifecycles[0]!;
       if (!current.overlaps.has(other.lifecycleId) || canonicalJson(other.targetSnapshot) !== canonicalJson(current.targetSnapshot) || second.worktreeId === current.worktreeId || second.agentId === current.agentId) continue;
       const firstEvidences = sufficientEvidence.get(first.eventId) ?? [];

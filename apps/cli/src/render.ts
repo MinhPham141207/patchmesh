@@ -1,3 +1,4 @@
+import type { DecisionDelivery, DecisionId, FindingFeedback, FindingId } from "@patchmesh/protocol";
 import type {
   AgentsView,
   DecisionExplanation,
@@ -6,6 +7,55 @@ import type {
   GraphView,
   StatusView,
 } from "@patchmesh/query";
+/**
+ * Structural shape of a storage append result. Declared here rather than imported so
+ * the CLI keeps depending only on the daemon and query packages.
+ */
+interface AppendResult {
+  readonly status: "inserted" | "duplicate" | "buffered";
+  readonly event: { readonly eventId: string };
+}
+
+/**
+ * A write command reports what was recorded, not just that something was. `duplicate`
+ * is a successful idempotent replay of an identical response, not a failure, so it is
+ * named explicitly rather than shown as a bare status word.
+ */
+function renderWriteResponse(result: AppendResult, lines: readonly string[], json: boolean): string {
+  if (json) return `${JSON.stringify(result)}\n`;
+  const outcome = result.status === "inserted"
+    ? "recorded"
+    : result.status === "duplicate"
+      ? "already recorded (identical response, no new event)"
+      : "buffered until its causal parent is durable";
+  return `${[...lines, `Outcome: ${outcome}`, `Event: ${result.event.eventId}`].join("\n")}\n`;
+}
+
+export function renderFeedbackResponse(
+  result: AppendResult,
+  findingId: FindingId,
+  disposition: FindingFeedback["disposition"],
+  json: boolean,
+): string {
+  return renderWriteResponse(result, [
+    "FINDING FEEDBACK",
+    `Finding: ${findingId}`,
+    `Disposition: ${disposition}`,
+  ], json);
+}
+
+export function renderDeliveryResponse(
+  result: AppendResult,
+  decisionId: DecisionId,
+  state: DecisionDelivery["state"],
+  json: boolean,
+): string {
+  return renderWriteResponse(result, [
+    "DECISION DELIVERY",
+    `Decision: ${decisionId}`,
+    `State: ${state}`,
+  ], json);
+}
 
 export function renderStatus(status: StatusView, json: boolean): string {
   if (json) return `${JSON.stringify(status)}\n`;

@@ -79,6 +79,11 @@ export type ToolExecutor<T> = (signal: AbortSignal) => Promise<ToolExecutionResu
 
 export interface EventAppender {
   append(input: unknown): AppendResult;
+  /** Required for causally bound proof and derived-evidence writes. */
+  readonly appendAtomic?: (
+    inputs: readonly unknown[],
+    options?: { readonly requireValidEventSet?: boolean },
+  ) => readonly AppendResult[];
   /** Required to verify cross-event references before emitting V2 dependent writes. */
   read?(): readonly ProtocolEvent[];
 }

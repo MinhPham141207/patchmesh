@@ -1,7 +1,7 @@
 import type { DecisionDelivery, DecisionId, EventType, FindingId, FindingFeedback } from "@patchmesh/protocol";
 import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters } from "@patchmesh/query";
 
-export type CommandName = "status" | "agents" | "events" | "graph" | "overlaps" | "stale" | "explain" | "feedback" | "delivery";
+export type CommandName = "status" | "agents" | "events" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "help";
 
 export interface ParsedArgs {
   readonly command: CommandName;
@@ -26,7 +26,7 @@ export interface ParsedArgs {
   } | null;
 }
 
-const commands = new Set<CommandName>(["status", "agents", "events", "graph", "overlaps", "stale", "explain", "feedback", "delivery"]);
+const commands = new Set<CommandName>(["status", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "help"]);
 const eventTypes = new Set<EventType>([
   "tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read",
   "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected",
@@ -36,6 +36,39 @@ const eventTypes = new Set<EventType>([
 const dispositions = new Set<FindingFeedback["disposition"]>(["dismissed", "acknowledged", "not_affected", "already_handled", "needs_more_information"]);
 const deliveryStates = new Set<DecisionDelivery["state"]>(["pending", "delivered", "acknowledged", "failed"]);
 
+export function usageText(): string {
+  return [
+    "Usage: patchmesh <command> [options]",
+    "",
+    "Report-only commands:",
+    "  status                     Store health, counts, and observation coverage",
+    "  agents                     Observed agents and their tasks",
+    "  events                     Durable event page (--raw, --follow, --type, --since,",
+    "                             --until, --limit, --cursor)",
+    "  graph                      Work-graph projection (--resource)",
+    "  overlaps                   Same-symbol overlap findings",
+    "  stale                      Stale-read-before-write findings",
+    "  contracts                  Exported-contract invalidation findings",
+    "  explain <decision-id>      Full explanation for one decision",
+    "",
+    "Append-only response commands:",
+    "  feedback <finding-id> --disposition <d> [--decision <id>] [--useful true|false]",
+    "                             [--reason <text>]",
+    "  delivery <decision-id> --state <pending|delivered|acknowledged|failed>",
+    "",
+    "Common options:",
+    "  --database <path>          Event store to read (required by the binary)",
+    "  --json                     Machine-readable output",
+    "  --agent <id>, --task <id|null>",
+    "  --help, -h                 Show this message",
+    "",
+    "Dispositions: dismissed, acknowledged, not_affected, already_handled,",
+    "              needs_more_information",
+    "",
+    "PatchMesh is report-only. No command pauses, rejects, or redirects an agent.",
+  ].join("\n");
+}
+
 function value(argv: readonly string[], index: number, option: string): string {
   const result = argv[index + 1];
   if (result === undefined || result.startsWith("--")) throw new ReadServiceError("usage", `${option} requires a value`);
@@ -43,11 +76,31 @@ function value(argv: readonly string[], index: number, option: string): string {
 }
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
-  const commandValue = argv[0];
+  const commandValue = argv[0] === "--help" || argv[0] === "-h" ? "help" : argv[0];
   if (commandValue === undefined || !commands.has(commandValue as CommandName)) {
-    throw new ReadServiceError("usage", `unsupported command: ${commandValue ?? ""}`);
+    // Naming the available commands is the difference between a dead end and a
+    // recoverable mistake; the exit code stays `usage` either way.
+    throw new ReadServiceError(
+      "usage",
+      `unsupported command: ${commandValue ?? ""}\n${usageText()}`,
+    );
   }
   const command = commandValue as CommandName;
+  if (command === "help") {
+    return {
+      command,
+      databasePath: null,
+      json: false,
+      raw: false,
+      follow: false,
+      agentFilters: {},
+      eventQuery: {},
+      graphFilters: {},
+      decisionId: null,
+      feedback: null,
+      delivery: null,
+    };
+  }
   let databasePath: string | null = null;
   let json = false;
   let raw = false;

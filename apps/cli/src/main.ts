@@ -1,11 +1,13 @@
 import { pathToFileURL } from "node:url";
 import { createDaemon, type PatchMeshDaemon } from "@patchmesh/daemon";
 import { ReadServiceError, type ReadServices } from "@patchmesh/query";
-import { parseArgs, type ParsedArgs } from "./args.js";
+import { parseArgs, usageText, type ParsedArgs } from "./args.js";
 import {
   renderAgents,
   renderDecisionExplanation,
+  renderDeliveryResponse,
   renderEvents,
+  renderFeedbackResponse,
   renderFindings,
   renderGraph,
   renderStatus,
@@ -35,11 +37,13 @@ async function renderCommand(
   deliveryWriter: CliDependencies["deliveryWriter"],
   signal?: AbortSignal,
 ): Promise<string> {
+  if (parsed.command === "help") return `${usageText()}\n`;
   if (parsed.command === "status") return renderStatus(services.getStatus(), parsed.json);
   if (parsed.command === "agents") return renderAgents(services.listAgents(parsed.agentFilters), parsed.json);
   if (parsed.command === "graph") return renderGraph(services.getGraph(parsed.graphFilters), parsed.json);
   if (parsed.command === "overlaps") return renderFindings(services.listFindings({ findingType: "same_symbol_overlap" }), parsed.json);
   if (parsed.command === "stale") return renderFindings(services.listFindings({ findingType: "stale_read_before_write" }), parsed.json);
+  if (parsed.command === "contracts") return renderFindings(services.listFindings({ findingType: "exported_contract_invalidation" }), parsed.json);
   if (parsed.command === "explain") return renderDecisionExplanation(services.explainDecision(parsed.decisionId!), parsed.json);
   if (parsed.command === "feedback") {
     if (feedbackWriter === undefined) throw new ReadServiceError("unavailable", "finding feedback writer is unavailable");
@@ -51,12 +55,13 @@ async function renderCommand(
         taskId: parsed.agentFilters.taskId ?? null,
       },
     });
-    return parsed.json ? `${JSON.stringify(result)}\n` : `${result.status}\n`;
+    return renderFeedbackResponse(result, feedback.findingId, feedback.disposition, parsed.json);
   }
   if (parsed.command === "delivery") {
     if (deliveryWriter === undefined) throw new ReadServiceError("unavailable", "decision delivery writer is unavailable");
-    const result = deliveryWriter.respondToDecisionDelivery(parsed.delivery!);
-    return parsed.json ? `${JSON.stringify(result)}\n` : `${result.status}\n`;
+    const delivery = parsed.delivery!;
+    const result = deliveryWriter.respondToDecisionDelivery(delivery);
+    return renderDeliveryResponse(result, delivery.decisionId, delivery.state, parsed.json);
   }
   if (!parsed.follow) return renderEvents(services.listEvents(parsed.eventQuery), parsed.json);
   let output = "";
