@@ -148,7 +148,12 @@ test("the server answers over stdio as a real MCP client sees it", async () => {
     await client.connect(transport);
     try {
       const tools = await client.listTools();
-      assert.deepEqual(tools.tools.map((tool) => tool.name), ["patchmesh_recent_activity"]);
+      // Pinned deliberately: the surface stays small on purpose, so adding a tool is a
+      // decision this assertion forces someone to make rather than a drift nobody notices.
+      assert.deepEqual(tools.tools.map((tool) => tool.name), [
+        "patchmesh_recent_activity",
+        "patchmesh_overlapping_work",
+      ]);
 
       const called = await client.callTool({
         name: "patchmesh_recent_activity",

@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LEDGER_DIRECTORY, ledgerPathFor } from "@patchmesh/recorder";
+import { findOverlappingWork, renderOverlap } from "./overlap.js";
 import { recallRecentActivity, renderRecall } from "./recall.js";
 
 export interface GatewayOptions {
@@ -60,6 +61,54 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       } catch (error) {
         // Advisory tools fail soft. A recall that cannot answer must not become an error the
         // calling agent has to reason about - it just means it learned nothing this time.
+        const reason = error instanceof Error ? error.message : "unknown failure";
+        return {
+          content: [{ type: "text" as const, text: `No PatchMesh ledger available (${reason}).` }],
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_overlapping_work",
+    {
+      title: "Overlapping work",
+      description:
+        "Files that more than one task changed recently, based on observed filesystem changes " +
+        "rather than on what a tool call named. Use before continuing work another task may " +
+        "already have moved. Reports history only - two tasks touching one file may be " +
+        "collaboration, a rebase, or divergence, and the ledger holds paths and content hashes, " +
+        "not intent, so it does not decide which.",
+      inputSchema: {
+        path: z
+          .string()
+          .optional()
+          .describe("Repository-relative or absolute file path. Omit for the whole repository."),
+        withinMinutes: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("How far back to look. Defaults to 240."),
+        limit: z.number().int().positive().optional().describe("Maximum files to return, capped at 100."),
+        taskId: z
+          .string()
+          .optional()
+          .describe("Only report overlaps this task is part of, to ask about your own work."),
+      },
+    },
+    ({ path, withinMinutes, limit, taskId }) => {
+      try {
+        const result = findOverlappingWork({
+          worktreeRoot: options.worktreeRoot,
+          ledgerPath,
+          path,
+          withinMinutes,
+          limit,
+          taskId,
+        });
+        return { content: [{ type: "text" as const, text: renderOverlap(result, path) }] };
+      } catch (error) {
         const reason = error instanceof Error ? error.message : "unknown failure";
         return {
           content: [{ type: "text" as const, text: `No PatchMesh ledger available (${reason}).` }],
