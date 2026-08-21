@@ -49,13 +49,34 @@ export interface BaseEventV3 extends Omit<BaseEvent, "schemaVersion" | "agentId"
   readonly taskId: TaskId;
 }
 
-export type ToolName = "read_file" | "edit_file" | "run_shell" | "run_test" | "git_commit";
+/**
+ * Normalized tool vocabulary. Detectors match on this closed set; `other` carries every
+ * host tool that has no coordination meaning (search, listing, todo, fetch).
+ *
+ * `spawn_subagent` is not merely another host tool: it is the only call that creates a new
+ * actor, so it is the edge that turns a flat event log into an agent tree. A detector asking
+ * whether two agents collided has to be able to find it without string-matching host names.
+ */
+export type ToolName =
+  | "read_file"
+  | "edit_file"
+  | "run_shell"
+  | "run_test"
+  | "git_commit"
+  | "spawn_subagent"
+  | "other";
 
 export interface ToolRequestedPayload {
   readonly toolName: ToolName;
   readonly operation: string;
   readonly targetResourceId: ResourceId | null;
   readonly opaque: boolean;
+  /**
+   * Raw tool name as the host named it, retained so a recorded session stays auditable
+   * against the host transcript after normalization into `toolName`. Optional: events
+   * produced before host recording existed do not carry it.
+   */
+  readonly hostToolName?: string;
 }
 
 export interface ToolCompletedPayload {
