@@ -130,6 +130,9 @@ export function redactHookPayload(payload: unknown): Record<string, unknown> | n
     // Present only on a subagent's calls: the host names the delegate that made them.
     "agent_id",
     "agent_type",
+    // Present on a turn boundary: the host's opaque name for the request that opened it.
+    // The prompt text itself is not whitelisted and never reaches disk.
+    "prompt_id",
   ]) {
     const value = payload[key];
     if (typeof value === "string") safe[key] = value;

@@ -30,7 +30,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       journalPath: journalPathFor(worktreeRoot, LEDGER_DIRECTORY),
       ledgerPath: ledgerPathFor(worktreeRoot),
     });
-    debug(`ingested ${result.ingested}, skipped ${result.skipped}`);
+    debug(`ingested ${result.ingested}, skipped ${result.skipped}, turns ${result.turns}`);
     return 0;
   } catch (error) {
     debug(error instanceof Error ? error.message : "unknown ingest failure");

@@ -34,14 +34,23 @@ export interface AttributionInput {
   readonly agentId: string | null;
   /** `tool_response.agentId`, present only on the spawn that created that subagent. */
   readonly spawnedAgentId: string | null;
+  /**
+   * The task opened by the turn this call falls inside, replayed from the last
+   * `UserPromptSubmit` marker. Used only when the host declared no delegated task.
+   */
+  readonly turnTaskId?: TaskId | null;
 }
 
 /**
- * Resolve attribution from one hook payload alone.
+ * Resolve attribution from one hook payload plus the turn it fell inside.
  *
- * The host declares both halves of the link and neither is inferred. A subagent's calls carry
- * its `agent_id`; the spawning call's response carries that same id as `agentId`. Everything
- * else is the session's own work.
+ * The host declares both halves of the delegation link and neither is inferred. A subagent's
+ * calls carry its `agent_id`; the spawning call's response carries that same id as `agentId`.
+ * Everything else is the session's own work, attributed to the turn that opened it.
+ *
+ * A delegated task always wins over the turn task. It is the more specific claim - the turn
+ * says which request the work serves, the delegate says which run performed it - and losing
+ * it would collapse a subagent back into its parent, which is the whole point of attribution.
  *
  * This replaces an earlier design that reconstructed lineage from the host transcript. Real
  * subagent traffic disproved it: a subagent's calls reach `PostToolUse` under the *parent's*
@@ -64,7 +73,10 @@ export function resolveAttribution(input: AttributionInput): CallAttribution {
     return { agentId: sessionAgentId, taskId: taskIdForDelegate(input.spawnedAgentId) };
   }
 
-  return { agentId: sessionAgentId, taskId: null };
+  // Ordinary top-level work: it belongs to the turn the user opened, and only falls back to
+  // no task at all when no marker has been seen - a session whose first turn predates this
+  // build, or a host that does not publish the boundary.
+  return { agentId: sessionAgentId, taskId: input.turnTaskId ?? null };
 }
 
 /** Read the attribution fields out of a redacted hook payload. */

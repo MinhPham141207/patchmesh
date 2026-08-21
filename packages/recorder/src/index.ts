@@ -11,6 +11,7 @@ export {
   resourceIdForPath,
   subagentIdFor,
   taskIdForDelegate,
+  taskIdForTurn,
 } from "./identity.js";
 export type { RepositoryIdentity } from "./identity.js";
 export { ingestJournal } from "./ingest.js";
@@ -34,4 +35,6 @@ export {
 } from "./record.js";
 export type { RecordHookOptions, RecordHookResult } from "./record.js";
 export { isRecognizedHostTool, normalizeTool } from "./tool-mapping.js";
+export { isTurnMarker, turnFieldsOf } from "./turn.js";
+export type { TurnFields } from "./turn.js";
 export type { NormalizedTool } from "./tool-mapping.js";

@@ -188,6 +188,31 @@ export function taskIdForDelegate(delegateId: string): TaskId | null {
   return slug === null ? null : (`task_${slug}` as TaskId);
 }
 
+/**
+ * Identity for the unit of work one user request creates.
+ *
+ * Delegated runs already had a task; ordinary top-level work had none, so 464 of 478 recorded
+ * events carried a null task and every recall answer read "(no task)". A turn is the honest
+ * unit: one thing the user asked for, from the prompt that opened it until the agent stops.
+ * That is also the unit duplicate-work detection needs, because two attempts at the same
+ * request become separable from two steps of one request.
+ *
+ * The host's own prompt identifier is preferred and slugged rather than hashed, so a recorded
+ * task stays greppable against host diagnostics. When the host declares none, the session and
+ * the marker's own timestamp derive one - stable for every call in that turn because both
+ * inputs are fixed once the turn opens.
+ */
+export function taskIdForTurn(sessionId: string, promptId: string | null, at: string): TaskId | null {
+  if (promptId !== null) {
+    const slug = slugForIdentity(promptId);
+    if (slug !== null) return `task_${slug}` as TaskId;
+  }
+  const sessionSlug = slugForIdentity(sessionId);
+  if (sessionSlug === null) return null;
+  const digest = createHash("sha256").update(`${sessionId}\u0000${at}`).digest("hex").slice(0, 12);
+  return `task_turn.${sessionSlug.slice(0, 8)}.${digest}` as TaskId;
+}
+
 export function resourceIdForPath(repositoryId: RepositoryId, logicalPath: string): ResourceId {
   const digest = createHash("sha256").update(`${repositoryId}\u0000${logicalPath}`).digest("hex");
   return `res_${digest}` as ResourceId;

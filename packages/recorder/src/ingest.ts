@@ -9,13 +9,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import type { TaskId } from "@patchmesh/protocol";
 import { SqliteEventStore } from "@patchmesh/storage";
 import { buildHookEvents, type HookPayload } from "./hook.js";
+import { taskIdForTurn } from "./identity.js";
 import { parseJournalLine } from "./journal.js";
+import { isTurnMarker, turnFieldsOf } from "./turn.js";
 
 export interface IngestResult {
   readonly ingested: number;
   readonly skipped: number;
+  /** Turn boundaries replayed. These open a task; they are not themselves recorded calls. */
+  readonly turns: number;
   readonly ledgerPath: string | null;
 }
 
@@ -51,11 +56,16 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   const { journalPath, ledgerPath, worktreeRoot } = options;
 
   const claimedPaths = [...claimJournal(journalPath), ...adoptStaleClaims(journalPath)];
-  if (claimedPaths.length === 0) return { ingested: 0, skipped: 0, ledgerPath: null };
+  if (claimedPaths.length === 0) return { ingested: 0, skipped: 0, turns: 0, ledgerPath: null };
 
   let ingested = 0;
   let skipped = 0;
+  let turns = 0;
   const unprocessed: string[] = [];
+  // Turn state is per session, because two sessions recording into one repository interleave
+  // in the journal and each one's marker must only claim its own calls. It spans claims so an
+  // adopted journal does not lose the turn a crashed run had already opened.
+  const turnTasks = new Map<string, TaskId | null>();
 
   mkdirSync(dirname(ledgerPath), { recursive: true });
   // Opening the store happens inside the claims' lifetime: a locked or corrupt ledger throws
@@ -63,9 +73,10 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   const store = SqliteEventStore.open(ledgerPath);
   try {
     for (const claimedPath of claimedPaths) {
-      const drained = drainClaim({ claimedPath, store, worktreeRoot, unprocessed });
+      const drained = drainClaim({ claimedPath, store, worktreeRoot, unprocessed, turnTasks });
       ingested += drained.ingested;
       skipped += drained.skipped;
+      turns += drained.turns;
     }
   } finally {
     store.close();
@@ -76,7 +87,7 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   }
   for (const claimedPath of claimedPaths) rmSync(claimedPath, { force: true });
 
-  return { ingested, skipped, ledgerPath };
+  return { ingested, skipped, turns, ledgerPath };
 }
 
 interface DrainClaimOptions {
@@ -84,19 +95,22 @@ interface DrainClaimOptions {
   readonly store: SqliteEventStore;
   readonly worktreeRoot: string;
   readonly unprocessed: string[];
+  /** Session id to the task its most recent turn opened. Mutated as markers are replayed. */
+  readonly turnTasks: Map<string, TaskId | null>;
 }
 
-function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: number } {
-  const { claimedPath, store, worktreeRoot, unprocessed } = options;
+function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: number; turns: number } {
+  const { claimedPath, store, worktreeRoot, unprocessed, turnTasks } = options;
   let lines: string[];
   try {
     lines = readFileSync(claimedPath, "utf8").split("\n");
   } catch {
-    return { ingested: 0, skipped: 0 };
+    return { ingested: 0, skipped: 0, turns: 0 };
   }
 
   let ingested = 0;
   let skipped = 0;
+  let turns = 0;
   for (const line of lines) {
     if (line.trim() === "") continue;
     const entry = parseJournalLine(line);
@@ -104,11 +118,24 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
       skipped += 1;
       continue;
     }
+    // A turn boundary is state, not a call. It carries no tool, so building events from it
+    // would raise and file a well-formed entry as unrepresentable.
+    if (isTurnMarker(entry.payload)) {
+      const { sessionId, promptId } = turnFieldsOf(entry.payload);
+      if (sessionId !== null) {
+        turnTasks.set(sessionId, taskIdForTurn(sessionId, promptId, entry.at));
+        turns += 1;
+      }
+      continue;
+    }
+
     try {
+      const sessionId = sessionIdOf(entry.payload);
       const { requested, completed } = buildHookEvents({
         payload: entry.payload as HookPayload,
         worktreeRoot,
         now: () => entry.at,
+        turnTaskId: sessionId === null ? null : turnTasks.get(sessionId) ?? null,
       });
       store.appendAtomic([requested, completed]);
       ingested += 1;
@@ -119,7 +146,14 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
       skipped += 1;
     }
   }
-  return { ingested, skipped };
+  return { ingested, skipped, turns };
+}
+
+/** Which session produced one journalled call, so its turn can be found. */
+function sessionIdOf(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>)["session_id"];
+  return typeof value === "string" && value !== "" ? value : null;
 }
 
 /** Rename the live journal aside, returning the claim, or nothing when there was none to take. */

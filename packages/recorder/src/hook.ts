@@ -103,6 +103,11 @@ export interface BuildHookEventsOptions {
    * resolve attribution from the fields the host declares.
    */
   readonly attribution?: CallAttribution | undefined;
+  /**
+   * Task opened by the turn this call fell inside, replayed by ingest from the preceding
+   * `UserPromptSubmit` marker. Ignored when the host declared a delegated task.
+   */
+  readonly turnTaskId?: TaskId | null;
 }
 
 /**
@@ -126,7 +131,8 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
   // and the spawn's response carries that same id. Nothing here is inferred.
   const fields = attributionFieldsOf(payload);
   const attribution =
-    options.attribution ?? resolveAttribution({ sessionId, hostToolName, ...fields });
+    options.attribution ??
+    resolveAttribution({ sessionId, hostToolName, ...fields, turnTaskId: options.turnTaskId ?? null });
   const agentId: AgentId | null = attribution.agentId;
   const taskId: TaskId | null = attribution.taskId;
   const rawPath = pathFrom(payload.tool_input, normalized.pathProperty);

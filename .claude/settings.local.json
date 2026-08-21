@@ -1,4 +1,16 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(node apps/cli/dist/bin.js --help)",
+      "mcp__patchmesh__patchmesh_recent_activity",
+      "Bash(node -e 'const p=require\\(\"./apps/cli/package.json\"\\);console.log\\(JSON.stringify\\({bin:p.bin,main:p.main},null,1\\)\\)')",
+      "Bash(node apps/cli/dist/main.js --help)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "knowl",
+    "patchmesh"
+  ],
   "hooks": {
     "SessionStart": [
       {
@@ -173,10 +185,18 @@
             "statusMessage": ""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/bin.js\"",
+            "timeout": 10,
+            "statusMessage": ""
+          }
+        ]
       }
     ]
-  },
-  "enabledMcpjsonServers": [
-    "knowl"
-  ]
+  }
 }
