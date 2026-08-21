@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { appendJournalEntry, ingestJournal, journalPathFor } from "@patchmesh/recorder";
+import { appendJournalEntry, ingestJournal, journalPathFor, recordTurnEffects } from "@patchmesh/recorder";
 import { recallRecentActivity, renderRecall } from "../src/index.js";
 
 const SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
@@ -160,6 +160,49 @@ test("the server answers over stdio as a real MCP client sees it", async () => {
     } finally {
       await client.close();
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a file written by a shell command is answerable from observed changes", async () => {
+  // The gap dogfooding found: 90% of recorded calls are shell commands that name no path, so
+  // a file-scoped query returned "no activity" for work that had plainly happened.
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-gateway-effects-"));
+  try {
+    mkdirSync(join(root, ".git"));
+    const journalPath = journalPathFor(root, ".patchmesh");
+    const ledgerPath = join(root, ".patchmesh", "ledger.db");
+    const snapshotPath = join(root, ".patchmesh", "snapshot.json");
+    const at = "2026-08-21T12:00:00.000Z";
+
+    writeFileSync(join(root, "existing.md"), "already here\n", "utf8");
+    appendJournalEntry(journalPath, { session_id: SESSION, hook_event_name: "UserPromptSubmit" }, at);
+    appendJournalEntry(
+      journalPath,
+      { session_id: SESSION, tool_name: "Bash", tool_input: { command: "cat > notes.md" }, tool_response: {} },
+      at,
+    );
+    const drained = ingestJournal({ worktreeRoot: root, journalPath, ledgerPath });
+    assert.notEqual(drained.closedTurn, null, "one session with one marker names one turn");
+    await recordTurnEffects({ worktreeRoot: root, ledgerPath, snapshotPath, turn: drained.closedTurn });
+
+    // The shell command actually writes the file; the next drain is what observes it.
+    writeFileSync(join(root, "notes.md"), "written by a shell command\n", "utf8");
+    await recordTurnEffects({ worktreeRoot: root, ledgerPath, snapshotPath, turn: drained.closedTurn });
+
+    const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, path: "notes.md", now: NOW });
+    // No call named this path - that is exactly the condition that used to answer nothing.
+    assert.equal(result.calls.length, 0);
+    assert.equal(result.changes.length, 1);
+    const change = result.changes[0]!;
+    assert.equal(change.logicalPath, "notes.md");
+    assert.equal(change.changeKind, "created");
+    assert.equal(change.taskId, drained.closedTurn?.taskId);
+
+    const rendered = renderRecall(result, "notes.md");
+    assert.match(rendered, /the filesystem shows it changed/u);
+    assert.match(rendered, /not a judgement/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

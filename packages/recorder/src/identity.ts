@@ -213,8 +213,29 @@ export function taskIdForTurn(sessionId: string, promptId: string | null, at: st
   return `task_turn.${sessionSlug.slice(0, 8)}.${digest}` as TaskId;
 }
 
+/**
+ * Resource identity for one repository-relative path.
+ *
+ * Kept byte-identical to `fileResourceId` in `@patchmesh/observation`, which is what the
+ * adapters, the observation package and the Phase 0 corpus all derive; change both together.
+ * `resource-id.test.ts` pins the two together so the duplication cannot drift silently.
+ *
+ * The formula is duplicated rather than imported for the same reason redaction is: this module
+ * is loaded by the per-tool-call hook binary, and reaching the shared implementation means
+ * importing a package barrel that the hot path cannot afford.
+ *
+ * An earlier derivation hashed `repositoryId + NUL + path` here alone. Nothing detected it,
+ * because no query ever compared a recorded call against an observed effect - the recorder had
+ * no effects to compare. Observing the filesystem is what made the divergence reachable: the
+ * same file would have had two identities, and a change would never have joined the call that
+ * made it. Callers pass an already-normalized `logicalPathFor` result, so normalization here
+ * is only the NFC folding the shared implementation also applies.
+ */
 export function resourceIdForPath(repositoryId: RepositoryId, logicalPath: string): ResourceId {
-  const digest = createHash("sha256").update(`${repositoryId}\u0000${logicalPath}`).digest("hex");
+  const path = logicalPath.normalize("NFC");
+  const digest = createHash("sha256")
+    .update(JSON.stringify([repositoryId, "file", path]), "utf8")
+    .digest("hex");
   return `res_${digest}` as ResourceId;
 }
 

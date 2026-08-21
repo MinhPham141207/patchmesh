@@ -7,6 +7,13 @@ import { findWorktreeRoot } from "./identity.js";
 export const LEDGER_DIRECTORY = ".patchmesh";
 export const LEDGER_FILENAME = "ledger.db";
 
+export const SNAPSHOT_FILENAME = "snapshot.json";
+
+/** Where the last observed worktree state is kept, so the next drain can diff against it. */
+export function snapshotPathFor(worktreeRoot: string): string {
+  return join(worktreeRoot, LEDGER_DIRECTORY, SNAPSHOT_FILENAME);
+}
+
 export function ledgerPathFor(worktreeRoot: string): string {
   return join(worktreeRoot, LEDGER_DIRECTORY, LEDGER_FILENAME);
 }

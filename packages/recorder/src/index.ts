@@ -14,10 +14,17 @@ export {
   taskIdForTurn,
 } from "./identity.js";
 export type { RepositoryIdentity } from "./identity.js";
-export { ingestJournal } from "./ingest.js";
+export { ingestJournal, recordTurnEffects } from "./ingest.js";
 export { attributionFieldsOf, resolveAttribution, SPAWN_TOOL_NAMES } from "./attribution.js";
 export type { AttributionInput, CallAttribution } from "./attribution.js";
-export type { IngestJournalOptions, IngestResult } from "./ingest.js";
+export type {
+  IngestJournalOptions,
+  IngestResult,
+  RecordTurnEffectsOptions,
+  RecordTurnEffectsResult,
+} from "./ingest.js";
+export { observeTurnEffects, readSnapshot, writeSnapshot } from "./effects.js";
+export type { ObserveTurnEffectsOptions, StoredSnapshot, TurnEffects } from "./effects.js";
 export {
   appendJournalEntry,
   JOURNAL_FILENAME,
@@ -32,6 +39,8 @@ export {
   LEDGER_FILENAME,
   ledgerPathFor,
   recordHook,
+  SNAPSHOT_FILENAME,
+  snapshotPathFor,
 } from "./record.js";
 export type { RecordHookOptions, RecordHookResult } from "./record.js";
 export { isRecognizedHostTool, normalizeTool } from "./tool-mapping.js";

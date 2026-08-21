@@ -11,8 +11,10 @@ import {
 import { basename, dirname, join } from "node:path";
 import type { TaskId } from "@patchmesh/protocol";
 import { SqliteEventStore } from "@patchmesh/storage";
+import type { AgentId } from "@patchmesh/protocol";
+import { observeTurnEffects } from "./effects.js";
 import { buildHookEvents, type HookPayload } from "./hook.js";
-import { taskIdForTurn } from "./identity.js";
+import { agentIdForSession, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
 import { parseJournalLine } from "./journal.js";
 import { isTurnMarker, turnFieldsOf } from "./turn.js";
 
@@ -21,6 +23,13 @@ export interface IngestResult {
   readonly skipped: number;
   /** Turn boundaries replayed. These open a task; they are not themselves recorded calls. */
   readonly turns: number;
+  /**
+   * The single turn this drain closed, when it could name exactly one.
+   *
+   * Null when no marker was seen or when more than one session recorded into this repository,
+   * because effects observed over a window two sessions shared belong to neither alone.
+   */
+  readonly closedTurn: { readonly agentId: AgentId | null; readonly taskId: TaskId | null } | null;
   readonly ledgerPath: string | null;
 }
 
@@ -56,7 +65,9 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   const { journalPath, ledgerPath, worktreeRoot } = options;
 
   const claimedPaths = [...claimJournal(journalPath), ...adoptStaleClaims(journalPath)];
-  if (claimedPaths.length === 0) return { ingested: 0, skipped: 0, turns: 0, ledgerPath: null };
+  if (claimedPaths.length === 0) {
+    return { ingested: 0, skipped: 0, turns: 0, closedTurn: null, ledgerPath: null };
+  }
 
   let ingested = 0;
   let skipped = 0;
@@ -87,7 +98,72 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   }
   for (const claimedPath of claimedPaths) rmSync(claimedPath, { force: true });
 
-  return { ingested, skipped, turns, ledgerPath };
+  return { ingested, skipped, turns, closedTurn: soleTurnOf(turnTasks), ledgerPath };
+}
+
+/**
+ * The one turn a drain closed, or nothing when it closed more or fewer than one.
+ *
+ * Effects are observed over the whole window between drains, so they can only be attributed
+ * when that window belonged to a single turn. Two sessions working in one repository share
+ * the window, and a file that changed inside it belongs to neither of them in particular.
+ */
+function soleTurnOf(
+  turnTasks: ReadonlyMap<string, TaskId | null>,
+): { agentId: AgentId | null; taskId: TaskId | null } | null {
+  if (turnTasks.size !== 1) return null;
+  const [sessionId, taskId] = [...turnTasks.entries()][0]!;
+  return { agentId: agentIdForSession(sessionId), taskId };
+}
+
+export interface RecordTurnEffectsOptions {
+  readonly worktreeRoot: string;
+  readonly ledgerPath: string;
+  readonly snapshotPath: string;
+  readonly turn: { readonly agentId: AgentId | null; readonly taskId: TaskId | null } | null;
+}
+
+export interface RecordTurnEffectsResult {
+  readonly changed: number;
+  /** True when this run only established a baseline, which is the first run in a checkout. */
+  readonly baselineOnly: boolean;
+}
+
+/**
+ * Observe what changed on disk since the last drain and record it against the closed turn.
+ *
+ * Kept separate from `ingestJournal` because it is a separate claim. Draining says which calls
+ * were made; this says which files differ, and the two are joined only by the turn they share.
+ * It also runs after the journal is safely drained, so a failure here cannot strand recorded
+ * calls - the ledger keeps the calls it already has and simply gains no effects this round.
+ */
+export async function recordTurnEffects(options: RecordTurnEffectsOptions): Promise<RecordTurnEffectsResult> {
+  const identity = resolveRepositoryIdentity(options.worktreeRoot);
+  const { events, baselineOnly } = await observeTurnEffects({
+    identity,
+    snapshotPath: options.snapshotPath,
+    // `file.changed` is a watcher's claim about the filesystem, not a gateway's claim about a
+    // call it proxied, and validation holds effects to that.
+    source: {
+      kind: "watcher",
+      sourceId: "source_patchmesh_observer",
+      instanceId: identity.worktreeId.slice("wt_".length),
+    },
+    agentId: options.turn?.agentId ?? null,
+    taskId: options.turn?.taskId ?? null,
+  });
+
+  if (events.length > 0) {
+    mkdirSync(dirname(options.ledgerPath), { recursive: true });
+    const store = SqliteEventStore.open(options.ledgerPath);
+    try {
+      // One append per change: a file that cannot be represented must not discard the rest.
+      for (const event of events) store.appendAtomic([event]);
+    } finally {
+      store.close();
+    }
+  }
+  return { changed: events.length, baselineOnly };
 }
 
 interface DrainClaimOptions {

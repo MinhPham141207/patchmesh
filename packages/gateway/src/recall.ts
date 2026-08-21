@@ -13,6 +13,21 @@ export interface RecalledCall {
   readonly outcome: "succeeded" | "failed" | "interrupted" | null;
 }
 
+/**
+ * One observed change to a file, which is a different claim from a call.
+ *
+ * A call is what an agent asked for; a change is what the filesystem shows. They are recorded
+ * separately and joined only by the turn they share, because the recorder observes the
+ * worktree between turns rather than per call - see `recordTurnEffects`.
+ */
+export interface RecalledChange {
+  readonly at: string;
+  readonly agentId: string | null;
+  readonly taskId: string | null;
+  readonly logicalPath: string;
+  readonly changeKind: string;
+}
+
 export interface RecallOptions {
   readonly worktreeRoot: string;
   readonly ledgerPath: string;
@@ -27,6 +42,10 @@ export interface RecallOptions {
 
 export interface RecallResult {
   readonly calls: readonly RecalledCall[];
+  /** Observed file changes in the same window. Empty until a turn has been observed. */
+  readonly changes: readonly RecalledChange[];
+  /** Changes that matched but were not returned. */
+  readonly truncatedChanges: number;
   /** Calls that matched but were not returned, so a caller can tell a page from the whole truth. */
   readonly truncated: number;
   readonly logicalPath: string | null;
@@ -43,6 +62,13 @@ export interface RecallResult {
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const DEFAULT_WITHIN_MINUTES = 240;
+
+/**
+ * Stated on every answer: the ledger records which file was touched and whether its contents
+ * differ, never what the difference means. Two agents changing one file may be collaborating.
+ */
+const CAVEAT =
+  "\nThis is a record of what happened, not a judgement. Same file does not mean same work.";
 
 function payloadOf(event: ProtocolEvent): Record<string, unknown> {
   return event.payload as unknown as Record<string, unknown>;
@@ -72,7 +98,7 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
   // everything. Silently widening "what happened to this file" into "what happened anywhere"
   // would hand back an answer to a question the caller did not ask.
   if (pathRequested && requestedPath === null) {
-    return { calls: [], truncated: 0, logicalPath: null, agents: [] };
+    return { calls: [], changes: [], truncated: 0, truncatedChanges: 0, logicalPath: null, agents: [] };
   }
 
   const store = SqliteEventStore.open(options.ledgerPath);
@@ -94,6 +120,27 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
       outcomeByRequestId.set(requestEventId, payload["outcome"]);
     }
   }
+
+  // Observed changes answer the question calls cannot: a file written by a shell command is
+  // named by no tool argument, so before effects were observed a file-scoped query returned
+  // nothing for work that had plainly happened.
+  const matchedChanges: RecalledChange[] = [];
+  for (const event of events) {
+    if (event.eventType !== "file.changed") continue;
+    if (new Date(event.timestamp) < since) continue;
+    if (options.excludeAgentId !== undefined && event.agentId === options.excludeAgentId) continue;
+    const resource = payloadOf(event)["resource"] as { resourceId?: unknown; locator?: unknown } | undefined;
+    if (targetResourceId !== null && resource?.resourceId !== targetResourceId) continue;
+    matchedChanges.push({
+      at: event.timestamp,
+      agentId: event.agentId,
+      taskId: event.taskId,
+      logicalPath: String(resource?.locator ?? ""),
+      changeKind: String(payloadOf(event)["changeKind"] ?? "changed"),
+    });
+  }
+  matchedChanges.sort((left, right) => right.at.localeCompare(left.at));
+  const changes = matchedChanges.slice(0, limit);
 
   const matched: RecalledCall[] = [];
   for (const event of events) {
@@ -123,7 +170,9 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
 
   return {
     calls,
+    changes,
     truncated: matched.length - calls.length,
+    truncatedChanges: matchedChanges.length - changes.length,
     logicalPath: requestedPath,
     agents: [...new Set(calls.map((call) => call.agentId))],
   };
@@ -138,7 +187,25 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
         ? `\`${requestedPath}\` (outside this repository, so nothing is recorded for it)`
         : "this repository";
 
-  if (result.calls.length === 0) return `No recorded agent activity for ${scope}.`;
+  const changeLines = result.changes.map((change) => {
+    const who = change.agentId ?? "unattributed";
+    const task = change.taskId === null ? "no task" : change.taskId;
+    return `- ${change.at} ${who} (${task}) ${change.changeKind} ${change.logicalPath}`;
+  });
+  const changeSection =
+    result.changes.length === 0
+      ? ""
+      : `\n\n${result.changes.length} observed file change(s), most recent first:\n${changeLines.join("\n")}` +
+        (result.truncatedChanges > 0 ? `\n(${result.truncatedChanges} older change(s) not shown.)` : "");
+
+  if (result.calls.length === 0) {
+    // A file written by a shell command is named by no tool argument, so changes can be the
+    // only thing that answers a file-scoped question.
+    if (result.changes.length > 0) {
+      return `No recorded tool call named ${scope}, but the filesystem shows it changed.${changeSection}${CAVEAT}`;
+    }
+    return `No recorded agent activity for ${scope}.`;
+  }
 
   const lines = result.calls.map((call) => {
     const task = call.taskId === null ? "no task" : call.taskId;
@@ -149,8 +216,5 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
   const header = `${result.calls.length} recorded call(s) for ${scope}, across ${result.agents.length} agent(s), most recent first:`;
   const footer =
     result.truncated > 0 ? `\n(${result.truncated} older matching call(s) not shown.)` : "";
-  // Stated every time: the ledger records which file was touched, never what changed in it.
-  const caveat =
-    "\nThis is a record of what happened, not a judgement. Same file does not mean same work.";
-  return `${header}\n${lines.join("\n")}${footer}${caveat}`;
+  return `${header}\n${lines.join("\n")}${footer}${changeSection}${CAVEAT}`;
 }
