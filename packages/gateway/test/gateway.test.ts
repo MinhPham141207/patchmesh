@@ -153,6 +153,7 @@ test("the server answers over stdio as a real MCP client sees it", async () => {
       assert.deepEqual(tools.tools.map((tool) => tool.name), [
         "patchmesh_recent_activity",
         "patchmesh_overlapping_work",
+        "patchmesh_recap",
       ]);
 
       const called = await client.callTool({

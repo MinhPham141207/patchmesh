@@ -1,8 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LEDGER_DIRECTORY, ledgerPathFor } from "@patchmesh/recorder";
+import { measurementPathFor, recordAnswer } from "./measure.js";
 import { findOverlappingWork, renderOverlap } from "./overlap.js";
 import { recallRecentActivity, renderRecall } from "./recall.js";
+import { recapRecentWork, renderRecap } from "./recap.js";
 
 export interface GatewayOptions {
   readonly worktreeRoot: string;
@@ -18,6 +20,7 @@ export interface GatewayOptions {
  */
 export function createGatewayServer(options: GatewayOptions): McpServer {
   const ledgerPath = options.ledgerPath ?? ledgerPathFor(options.worktreeRoot);
+  const measurementPath = measurementPathFor(options.worktreeRoot, LEDGER_DIRECTORY);
   const server = new McpServer({ name: "patchmesh", version: "0.1.0" });
 
   server.registerTool(
@@ -57,7 +60,15 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
           limit,
           excludeAgentId,
         });
-        return { content: [{ type: "text" as const, text: renderRecall(result, path) }] };
+        const text = renderRecall(result, path);
+        recordAnswer(measurementPath, {
+          tool: "patchmesh_recent_activity",
+          path,
+          answerBytes: Buffer.byteLength(text, "utf8"),
+          items: result.calls.length + result.changes.length + result.inFlight.length,
+          withheld: result.truncated + result.truncatedChanges,
+        });
+        return { content: [{ type: "text" as const, text }] };
       } catch (error) {
         // Advisory tools fail soft. A recall that cannot answer must not become an error the
         // calling agent has to reason about - it just means it learned nothing this time.
@@ -107,7 +118,61 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
           limit,
           taskId,
         });
-        return { content: [{ type: "text" as const, text: renderOverlap(result, path) }] };
+        const text = renderOverlap(result, path);
+        recordAnswer(measurementPath, {
+          tool: "patchmesh_overlapping_work",
+          path,
+          answerBytes: Buffer.byteLength(text, "utf8"),
+          items: result.overlaps.length,
+          withheld: result.truncated,
+        });
+        return { content: [{ type: "text" as const, text }] };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "unknown failure";
+        return {
+          content: [{ type: "text" as const, text: `No PatchMesh ledger available (${reason}).` }],
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_recap",
+    {
+      title: "Recap recent work",
+      description:
+        "A compact summary of what recent tasks did in this repository - who worked, for how " +
+        "long, and which files they changed - so a fresh agent resumes instead of re-deriving " +
+        "it by reading the tree. Reports what was done, not what it means: a changed file is " +
+        "not a finished intention.",
+      inputSchema: {
+        agent: z.string().optional().describe("Narrow to one agent's work. Omit for every agent."),
+        withinMinutes: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("How far back to summarize. Defaults to 1440, one day."),
+        limit: z.number().int().positive().optional().describe("Maximum tasks to describe, capped at 25."),
+      },
+    },
+    ({ agent, withinMinutes, limit }) => {
+      try {
+        const result = recapRecentWork({
+          worktreeRoot: options.worktreeRoot,
+          ledgerPath,
+          agent,
+          withinMinutes,
+          limit,
+        });
+        const text = renderRecap(result, agent);
+        recordAnswer(measurementPath, {
+          tool: "patchmesh_recap",
+          answerBytes: Buffer.byteLength(text, "utf8"),
+          items: result.tasks.length,
+          withheld: result.truncated,
+        });
+        return { content: [{ type: "text" as const, text }] };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "unknown failure";
         return {

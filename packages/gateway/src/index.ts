@@ -4,3 +4,7 @@ export { recallRecentActivity, renderRecall } from "./recall.js";
 export type { RecallOptions, RecallResult, RecalledCall, RecalledChange } from "./recall.js";
 export { findOverlappingWork, renderOverlap } from "./overlap.js";
 export type { OverlapOptions, OverlapResult, OverlappingTask, ResourceOverlap } from "./overlap.js";
+export { recapRecentWork, renderRecap } from "./recap.js";
+export type { RecapOptions, RecapResult, RecappedTask } from "./recap.js";
+export { measurementPathFor, recordAnswer } from "./measure.js";
+export type { AnswerMeasurement } from "./measure.js";
