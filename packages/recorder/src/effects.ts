@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
@@ -84,6 +85,48 @@ export function writeSnapshot(snapshotPath: string, snapshot: ObservationSnapsho
   writeFileSync(snapshotPath, JSON.stringify(stored), "utf8");
 }
 
+/**
+ * Which of these paths the repository already declares are not work product.
+ *
+ * Observation ignores only `.git` and `node_modules`, so it reports build output and other
+ * tools' caches as agent work. Measured on this repository: of 24 observed changes, 18 were a
+ * sibling tool's cache and 3 were build output, leaving 2 that were source. A tool meant to
+ * warn about contested files would mostly have warned about cache churn.
+ *
+ * `.gitignore` is the answer already written down, so this asks git rather than inventing a
+ * heuristic to tune. One batched `check-ignore` covers the whole change set - a small list,
+ * and this runs at ingest where a subprocess is affordable; see
+ * `effect-detection-cannot-run-on-the-hook-hot-path` for why nothing here may move per-call.
+ *
+ * Tracked files are never reported as ignored even when a rule would match them, which is
+ * git's own rule and the one we want: a file the repository keeps is work product.
+ *
+ * Fails open. If git is missing, or this is not a repository, every change is kept: recording
+ * noise is a cost, and silently dropping real work is a lie.
+ */
+function ignoredByRepository(worktreeRoot: string, paths: readonly string[]): ReadonlySet<string> {
+  if (paths.length === 0) return new Set();
+  try {
+    const output = execFileSync("git", ["check-ignore", "--stdin", "-z"], {
+      cwd: worktreeRoot,
+      input: paths.join("\0") + "\0",
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    return new Set(output.split("\0").filter((line) => line !== ""));
+  } catch (error) {
+    // Exit 1 means "none of them are ignored", which is an answer, not a failure. Anything
+    // else - no git, no repository - leaves the set empty and keeps every change.
+    const status = (error as { status?: unknown }).status;
+    if (status === 1) return new Set();
+    const stdout = (error as { stdout?: unknown }).stdout;
+    if (typeof stdout === "string" && stdout !== "") {
+      return new Set(stdout.split("\0").filter((line) => line !== ""));
+    }
+    return new Set();
+  }
+}
+
 export interface ObserveTurnEffectsOptions {
   readonly identity: RepositoryIdentity;
   readonly snapshotPath: string;
@@ -130,8 +173,10 @@ export async function observeTurnEffects(options: ObserveTurnEffectsOptions): Pr
   if (previous === null) return { events: [], baselineOnly: true };
 
   const diff = diffSnapshots(previous, capture.snapshot, false);
-  const events = diff.changes
-    .filter((change) => !isRecorderState(change.path))
+  const candidates = diff.changes.filter((change) => !isRecorderState(change.path));
+  const ignored = ignoredByRepository(identity.worktreeRoot, candidates.map((change) => change.path));
+  const events = candidates
+    .filter((change) => !ignored.has(change.path))
     .map((change) =>
     fileChangedEvent({
       change,

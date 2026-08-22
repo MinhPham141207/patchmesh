@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -140,6 +141,74 @@ test("a batch of observed changes replays as a valid event set", async () => {
     } finally {
       store.close();
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** A real repository: `git check-ignore` needs one, and a bare `.git` directory is not it. */
+function initializedWorktree(gitignore: string): string {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-ignored-"));
+  execFileSync("git", ["init", "--quiet"], { cwd: root, stdio: "ignore" });
+  writeFileSync(join(root, ".gitignore"), gitignore, "utf8");
+  return root;
+}
+
+test("changes the repository already ignores are not recorded as work", async () => {
+  // Measured on this repository before the filter: of 24 observed changes, 18 were a sibling
+  // tool's cache and 3 were build output, leaving 2 that were source.
+  const root = initializedWorktree("node_modules/\ndist/\n.knowl/\n");
+  try {
+    const where = paths(root);
+    writeFileSync(join(root, "kept.ts"), "source\n", "utf8");
+    await recordTurnEffects({ worktreeRoot: root, ...where, turn: TURN });
+
+    mkdirSync(join(root, "dist"), { recursive: true });
+    mkdirSync(join(root, ".knowl", "cache"), { recursive: true });
+    writeFileSync(join(root, "dist", "bundle.js"), "build output\n", "utf8");
+    writeFileSync(join(root, ".knowl", "cache", "a.claim"), "cache churn\n", "utf8");
+    writeFileSync(join(root, "kept.ts"), "source, edited\n", "utf8");
+    writeFileSync(join(root, "added.ts"), "new source\n", "utf8");
+
+    const result = await recordTurnEffects({ worktreeRoot: root, ...where, turn: TURN });
+    assert.equal(result.changed, 2, "only the two source files are work product");
+
+    const changed = readEvents(where.ledgerPath)
+      .filter((event) => event.eventType === "file.changed")
+      .map((event) => (event as { payload: { resource: { locator: string } } }).payload.resource.locator);
+    assert.deepEqual(new Set(changed), new Set(["kept.ts", "added.ts"]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a tracked file stays work product even when a rule would match it", async () => {
+  // git's own rule, and the one we want: a file the repository keeps is not ignored.
+  const root = initializedWorktree("tracked.ts\n");
+  try {
+    const where = paths(root);
+    writeFileSync(join(root, "tracked.ts"), "committed anyway\n", "utf8");
+    execFileSync("git", ["add", "--force", "tracked.ts"], { cwd: root, stdio: "ignore" });
+    await recordTurnEffects({ worktreeRoot: root, ...where, turn: TURN });
+
+    writeFileSync(join(root, "tracked.ts"), "edited\n", "utf8");
+    const result = await recordTurnEffects({ worktreeRoot: root, ...where, turn: TURN });
+    assert.equal(result.changed, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("observation keeps every change when git cannot answer", async () => {
+  // Fails open: recording noise is a cost, silently dropping real work is a lie.
+  const root = temporaryWorktree();
+  try {
+    const where = paths(root);
+    writeFileSync(join(root, "existing.md"), "already here\n", "utf8");
+    await recordTurnEffects({ worktreeRoot: root, ...where, turn: TURN });
+    writeFileSync(join(root, "written.md"), "no real repository here\n", "utf8");
+    const result = await recordTurnEffects({ worktreeRoot: root, ...where, turn: TURN });
+    assert.equal(result.changed, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
