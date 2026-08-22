@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { Ajv2020 } from "ajv/dist/2020.js";
-import { default as addFormats } from "ajv-formats";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import type {
   AttributionCorrectedEvent,
@@ -42,9 +41,11 @@ function readSchema(directory: URL, name: string): Record<string, unknown> {
 }
 
 function createValidators(): { readonly phase0: ValidateFunction; readonly phase2: ValidateFunction; readonly phase3: ValidateFunction } {
+  const require = createRequire(import.meta.url);
+  const { Ajv2020 } = require("ajv/dist/2020.js") as typeof import("ajv/dist/2020.js");
+  const addFormats = require("ajv-formats") as (instance: unknown) => unknown;
   const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
-  const registerFormats = addFormats as unknown as (instance: Ajv2020) => Ajv2020;
-  registerFormats(ajv);
+  addFormats(ajv);
   for (const name of phase0SchemaNames) ajv.addSchema(readSchema(phase0SchemaDirectory, name));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "finding-feedback"));
   ajv.addSchema(readSchema(phase2SchemaDirectory, "dependent-write"));
@@ -62,7 +63,20 @@ function createValidators(): { readonly phase0: ValidateFunction; readonly phase
   return { phase0, phase2, phase3 };
 }
 
-const validators = createValidators();
+type Validators = ReturnType<typeof createValidators>;
+
+let cachedValidators: Validators | undefined;
+
+/**
+ * Schemas compile on first parse rather than on import. Eager compilation cost ~600ms of ajv
+ * load plus thirteen schemas, and every consumer paid it -- including `patchmesh help`, which
+ * validates nothing. ajv is reached through `createRequire` so the module is not even loaded
+ * until something validates; `parseEvent` stays synchronous, which a dynamic import would break.
+ */
+function getValidators(): Validators {
+  cachedValidators ??= createValidators();
+  return cachedValidators;
+}
 
 function diagnostic(code: string, path: string, message: string): ValidationDiagnostic {
   return { code, path, message };
@@ -105,6 +119,7 @@ export function parseEvent(input: unknown): ValidationResult<ProtocolEvent> {
   if (Object.hasOwn(input, "schemaVersion") && input.schemaVersion !== 1 && input.schemaVersion !== 2 && input.schemaVersion !== 3) {
     return { value: null, diagnostics: [diagnostic("PHASE0_SCHEMA_UNSUPPORTED", "/schemaVersion", "schema version is unsupported")] };
   }
+  const validators = getValidators();
   const validateEnvelope = input.schemaVersion === 3 ? validators.phase3 : input.schemaVersion === 2 ? validators.phase2 : validators.phase0;
   if (!validateEnvelope(input)) {
     return { value: null, diagnostics: sortDiagnostics((validateEnvelope.errors ?? []).map(ajvDiagnostic)) };

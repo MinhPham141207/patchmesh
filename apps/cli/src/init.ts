@@ -294,8 +294,15 @@ export function renderInit(result: InitResult, json: boolean): string {
       ? "Restart the agent session so it loads the new hooks, then work normally."
       : "Already configured. Work normally; PatchMesh is recording.",
     "",
-    "Then ask what it recorded:",
-    "  patchmesh events --database .patchmesh/ledger.db",
+    // Recap leads because it is the surface that pays off on one agent working alone, which
+    // is the workflow almost every reader of this message actually has. Overlap needs two
+    // agents running at once before it can say anything at all.
+    "Next session, ask what the last one did:",
+    "  the patchmesh_recap MCP tool, or",
+    "  patchmesh agents   --database .patchmesh/ledger.db",
+    "",
+    "Then what it recorded:",
+    "  patchmesh events   --database .patchmesh/ledger.db",
     "  patchmesh overlaps --database .patchmesh/ledger.db",
     "",
   );

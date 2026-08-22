@@ -40,6 +40,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       ledgerPath: ledgerPathFor(worktreeRoot),
       snapshotPath: snapshotPathFor(worktreeRoot),
       turn: result.closedTurn,
+      calls: result.calls,
     });
     debug(effects.baselineOnly ? "observed baseline only" : `observed ${effects.changed} file change(s)`);
     return 0;

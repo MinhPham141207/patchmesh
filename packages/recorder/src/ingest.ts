@@ -12,7 +12,7 @@ import { basename, dirname, join } from "node:path";
 import type { TaskId } from "patchmesh-protocol";
 import { SqliteEventStore } from "patchmesh-storage";
 import type { AgentId } from "patchmesh-protocol";
-import { observeTurnEffects } from "./effects.js";
+import { observeTurnEffects, type EffectAttributionCall } from "./effects.js";
 import { buildHookEvents, type HookPayload } from "./hook.js";
 import { agentIdForSession, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
 import { ABANDONED_AFTER_MS } from "./inflight.js";
@@ -39,6 +39,11 @@ export interface IngestResult {
    * because effects observed over a window two sessions shared belong to neither alone.
    */
   readonly closedTurn: { readonly agentId: AgentId | null; readonly taskId: TaskId | null } | null;
+  /**
+   * The calls this drain recorded, with the window each occupied, so observed changes can be
+   * matched to the call that was running when they happened.
+   */
+  readonly calls: readonly EffectAttributionCall[];
   readonly ledgerPath: string | null;
 }
 
@@ -84,7 +89,7 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
 
   const claimedPaths = [...claimJournal(journalPath), ...adoptStaleClaims(journalPath)];
   if (claimedPaths.length === 0) {
-    return { ingested: 0, skipped: 0, turns: 0, closedTurn: null, ledgerPath: null };
+    return { ingested: 0, skipped: 0, turns: 0, closedTurn: null, calls: [], ledgerPath: null };
   }
 
   let ingested = 0;
@@ -104,6 +109,9 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   // that drain. Without this, one agent's Stop erases the very in-flight work a second agent
   // needs to see, which is precisely when a collision guard has to work.
   const unfinished = new Map<string, JournalEntry>();
+  // Windows of the calls drained here, handed to effect observation so a change can name the
+  // call it happened inside rather than only the turn it happened during.
+  const calls: EffectAttributionCall[] = [];
 
   mkdirSync(dirname(ledgerPath), { recursive: true });
   // Opening the store happens inside the claims' lifetime: a locked or corrupt ledger throws
@@ -119,6 +127,7 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
         turnTasks,
         activeSessions,
         unfinished,
+        calls,
       });
       ingested += drained.ingested;
       skipped += drained.skipped;
@@ -135,7 +144,7 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   carryForward(journalPath, unfinished, now());
   writeTurnState(turnStatePath, turnTasks, now());
 
-  return { ingested, skipped, turns, closedTurn: soleTurnOf(turnTasks, activeSessions), ledgerPath };
+  return { ingested, skipped, turns, closedTurn: soleTurnOf(turnTasks, activeSessions), calls, ledgerPath };
 }
 
 /**
@@ -166,6 +175,8 @@ export interface RecordTurnEffectsOptions {
   readonly ledgerPath: string;
   readonly snapshotPath: string;
   readonly turn: { readonly agentId: AgentId | null; readonly taskId: TaskId | null } | null;
+  /** Call windows from the drain that just ran, for matching changes to calls. */
+  readonly calls?: readonly EffectAttributionCall[] | undefined;
 }
 
 export interface RecordTurnEffectsResult {
@@ -196,6 +207,7 @@ export async function recordTurnEffects(options: RecordTurnEffectsOptions): Prom
     },
     agentId: options.turn?.agentId ?? null,
     taskId: options.turn?.taskId ?? null,
+    calls: options.calls,
   });
 
   if (events.length > 0) {
@@ -222,10 +234,12 @@ interface DrainClaimOptions {
   readonly activeSessions: Set<string>;
   /** Starts seen with no completion yet, carried back to the live journal after the drain. */
   readonly unfinished: Map<string, JournalEntry>;
+  /** Collects each recorded call's window, for matching observed changes against. */
+  readonly calls: EffectAttributionCall[];
 }
 
 function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: number; turns: number } {
-  const { claimedPath, store, worktreeRoot, unprocessed, turnTasks, activeSessions, unfinished } = options;
+  const { claimedPath, store, worktreeRoot, unprocessed, turnTasks, activeSessions, unfinished, calls } = options;
   let lines: string[];
   try {
     lines = readFileSync(claimedPath, "utf8").split("\n");
@@ -253,6 +267,9 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
       continue;
     }
     const completedCallId = callIdOf(entry.payload);
+    // The start is read before it is discarded: it is the only record of when this call began,
+    // and the window it opens is what lets an observed change name a call rather than a turn.
+    const startedAt = completedCallId === null ? undefined : unfinished.get(completedCallId)?.at;
     if (completedCallId !== null) unfinished.delete(completedCallId);
 
     // A turn boundary is state, not a call. It carries no tool, so building events from it
@@ -277,6 +294,16 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
         turnTaskId: sessionId === null ? null : ((turnTasks.get(sessionId)?.taskId ?? null) as TaskId | null),
       });
       store.appendAtomic([requested, completed]);
+      // With no start there is no window, so completion bounds both ends and effectively
+      // nothing matches. That is the honest degradation when `PreToolUse` is not installed.
+      calls.push({
+        completionEventId: completed.eventId,
+        correlationId: completed.correlationId,
+        agentId: completed.agentId,
+        taskId: completed.taskId,
+        startedAtMs: new Date(startedAt ?? entry.at).getTime(),
+        completedAtMs: new Date(entry.at).getTime(),
+      });
       ingested += 1;
     } catch {
       // A payload this build cannot represent is retained, not silently dropped, so a later

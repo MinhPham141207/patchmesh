@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   diffSnapshots,
   fileResourceId,
@@ -11,7 +11,7 @@ import {
   type ObservedFileChange,
   type ObservedFileState,
 } from "patchmesh-observation";
-import type { AgentId, EventId, ProtocolEvent, Source, TaskId } from "patchmesh-protocol";
+import type { AgentId, CorrelationId, EventId, ProtocolEvent, Source, TaskId } from "patchmesh-protocol";
 import { createCorrelationId, createEventId, type RepositoryIdentity } from "./identity.js";
 import { LEDGER_DIRECTORY } from "./record.js";
 
@@ -132,6 +132,76 @@ export function ignoredByRepository(worktreeRoot: string, paths: readonly string
   }
 }
 
+/**
+ * One recorded call, and the window it occupied, as a candidate owner of an observed change.
+ *
+ * `startedAtMs` comes from the call's `PreToolUse` entry. Without that hook there is no window
+ * -- start collapses onto completion -- and nothing binds, which is the correct degradation
+ * rather than a guess.
+ */
+export interface EffectAttributionCall {
+  readonly completionEventId: EventId;
+  readonly correlationId: CorrelationId;
+  readonly agentId: AgentId | null;
+  readonly taskId: TaskId | null;
+  readonly startedAtMs: number;
+  readonly completedAtMs: number;
+}
+
+/**
+ * When was this file last written, as the filesystem records it.
+ *
+ * This is what makes a change joinable to a call at all. The snapshot diff says *that* a file
+ * differs, never *when* it came to differ, so without an mtime every change in a turn is
+ * simultaneous and only the turn can own it. Only changed files are stat'ed -- a handful per
+ * drain, off the hook path -- so this does not reintroduce the walk that
+ * `effect-detection-cannot-run-on-the-hook-hot-path` rules out.
+ *
+ * A deleted file has nothing left to stat and therefore never binds.
+ */
+function changeTimeMs(worktreeRoot: string, change: ObservedFileChange): number | null {
+  if (change.after === null) return null;
+  try {
+    // Floored to whole milliseconds: mtime carries sub-millisecond precision while journal
+    // timestamps are integer ms, and comparing the two directly loses a write at the boundary.
+    return Math.floor(statSync(join(worktreeRoot, change.path)).mtimeMs);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The one call whose execution window contains this change, or nothing.
+ *
+ * Sole containment is the whole rule. Two calls covering the same instant -- a subagent inside
+ * its parent's span, two sessions in one repository -- make the owner unknowable, and picking
+ * the shorter or the later one would be inference dressed as evidence. Ambiguity returns null
+ * and the change stays attributed to the turn, which is what it was before this existed.
+ *
+ * This is correlation in time, not proof: a call that ran while a file changed is the best
+ * available claim, not a demonstration that it did the writing. It is recorded as causation
+ * because that is the strongest thing the recorded stream can say, and because the alternative
+ * -- null -- asserts less than was actually observed.
+ *
+ * The last writer wins by construction: one mtime survives per file, so a file written by two
+ * calls in one turn binds to the later of them and the earlier leaves no trace.
+ */
+function soleCallCovering(
+  worktreeRoot: string,
+  change: ObservedFileChange,
+  calls: readonly EffectAttributionCall[],
+): EffectAttributionCall | null {
+  const at = changeTimeMs(worktreeRoot, change);
+  if (at === null) return null;
+  let found: EffectAttributionCall | null = null;
+  for (const call of calls) {
+    if (at < call.startedAtMs || at > call.completedAtMs) continue;
+    if (found !== null) return null;
+    found = call;
+  }
+  return found;
+}
+
 export interface ObserveTurnEffectsOptions {
   readonly identity: RepositoryIdentity;
   readonly snapshotPath: string;
@@ -141,6 +211,8 @@ export interface ObserveTurnEffectsOptions {
   readonly taskId: TaskId | null;
   readonly now?: () => string;
   readonly nextEventId?: () => EventId;
+  /** Calls drained in this same round, against whose windows changes are matched. */
+  readonly calls?: readonly EffectAttributionCall[] | undefined;
 }
 
 export interface TurnEffects {
@@ -180,24 +252,30 @@ export async function observeTurnEffects(options: ObserveTurnEffectsOptions): Pr
   const diff = diffSnapshots(previous, capture.snapshot, false);
   const candidates = diff.changes.filter((change) => !isRecorderState(change.path));
   const ignored = ignoredByRepository(identity.worktreeRoot, candidates.map((change) => change.path));
+  const calls = options.calls ?? [];
   const events = candidates
     .filter((change) => !ignored.has(change.path))
-    .map((change) =>
-    fileChangedEvent({
-      change,
-      identity,
-      source: options.source,
-      timestamp,
-      agentId: options.agentId,
-      taskId: options.taskId,
-      // One correlation per change, not one per batch. Each observed change is its own causal
-      // root - nothing in the recorded stream caused it - and a correlation may hold only one
-      // root, so sharing an id across a batch makes every event after the first invalid. Per
-      // event validation cannot see this; it is a property of the set.
-      correlationId: createCorrelationId(),
-      eventId: nextEventId(),
-    }),
-    );
+    .map((change) => {
+      const owner = calls.length === 0 ? null : soleCallCovering(identity.worktreeRoot, change, calls);
+      return fileChangedEvent({
+        change,
+        identity,
+        source: options.source,
+        timestamp,
+        // A bound change inherits the call's attribution, which is narrower than the turn's:
+        // it names the agent that ran, which for a subagent is not the agent that owns the turn.
+        agentId: owner?.agentId ?? options.agentId,
+        taskId: owner?.taskId ?? options.taskId,
+        // A bound change joins its call's correlation, because a child must inherit its
+        // parent's correlation and the set validator enforces exactly that. An unbound change
+        // gets one correlation of its own, not one per batch: it is its own causal root, and a
+        // correlation may hold only one root, so sharing an id across a batch makes every event
+        // after the first invalid. Per-event validation cannot see this; it is a set property.
+        correlationId: owner?.correlationId ?? createCorrelationId(),
+        causationId: owner?.completionEventId ?? null,
+        eventId: nextEventId(),
+      });
+    });
   return { events, baselineOnly: false };
 }
 
@@ -208,7 +286,9 @@ interface FileChangedEventOptions {
   readonly timestamp: string;
   readonly agentId: AgentId | null;
   readonly taskId: TaskId | null;
-  readonly correlationId: ReturnType<typeof createCorrelationId>;
+  readonly correlationId: CorrelationId;
+  /** The completion this change was matched to, or null when no single call's window held it. */
+  readonly causationId: EventId | null;
   readonly eventId: EventId;
 }
 
@@ -244,10 +324,10 @@ function fileChangedEvent(options: FileChangedEventOptions): ProtocolEvent {
     agentId: options.agentId,
     taskId: options.taskId,
     correlationId: options.correlationId,
-    // Nothing caused this in the recorded stream. The change was observed between turns, not
-    // produced by a call the recorder can name, and inventing a causation link would assert
-    // an attribution that was never made.
-    causationId: null,
+    // Null unless exactly one call's window contained the write. An unmatched change was
+    // observed between turns with no call the recorder can name, and inventing a link there
+    // would assert an attribution that was never made.
+    causationId: options.causationId,
     sourceSequence: null,
     payload: {
       resource,
