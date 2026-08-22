@@ -102,7 +102,11 @@ test("a recall answer is bounded and says how much it withheld", () => {
     const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, limit: 1, now: NOW });
     assert.equal(result.calls.length, 1);
     assert.equal(result.truncated, 2, "a page must not read as the whole truth");
-    assert.ok(renderRecall(result, undefined).includes("2 older matching call(s) not shown"));
+    // An unnarrowed answer summarizes calls rather than listing them, so it states the whole
+    // and the part it drew from instead of a leftover count. The invariant is the same one:
+    // a caller must be able to tell a page from everything there was.
+    assert.ok(renderRecall(result, undefined).includes("3 call(s) recorded"));
+    assert.ok(renderRecall(result, undefined).includes("Of the 1 most recent"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -278,6 +282,41 @@ test("reading commits from somewhere without git yields no labels rather than fa
   const root = mkdtempSync(join(tmpdir(), "patchmesh-nogit-"));
   try {
     assert.deepEqual(readCommitsSince(root, new Date("2020-01-01T00:00:00.000Z")), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unnarrowed answer summarizes shell noise instead of quoting it", () => {
+  // 79% of recorded calls are shell commands stored as a redacted command string that names
+  // no resource. Listing twenty of them spends the caller's context on `git status` and
+  // returns nothing it can act on.
+  const { root, ledgerPath } = recordedRepository();
+  try {
+    const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, now: NOW });
+    const rendered = renderRecall(result, undefined);
+
+    assert.match(rendered, /call\(s\) recorded across \d+ agent\(s\)/);
+    assert.match(rendered, /Ask about a specific path to see the calls that named it\./);
+    // The histogram replaces the per-call lines, so no operation string survives.
+    assert.equal(rendered.includes("read_file: "), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("narrowing to a path still lists every call that named it", () => {
+  // Detail follows the question: a caller that narrowed asked for exactly these calls, so
+  // summarizing them would answer a question nobody asked.
+  const { root, ledgerPath } = recordedRepository();
+  try {
+    const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, path: "src/auth.ts", now: NOW });
+    const rendered = renderRecall(result, "src/auth.ts");
+
+    assert.ok(result.calls.length > 0, "the fixture must record a call naming this path");
+    assert.match(rendered, /recorded call\(s\) for `src\/auth\.ts`/);
+    assert.match(rendered, /edit_file: Edit src\/auth\.ts/);
+    assert.equal(rendered.includes("Ask about a specific path"), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

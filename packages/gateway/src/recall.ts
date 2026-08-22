@@ -217,6 +217,107 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
   };
 }
 
+/**
+ * One line, bounded, for a command that may be a whole script.
+ *
+ * An in-flight entry is read straight from the journal, so its operation is whatever the host
+ * passed - a heredoc or an inlined program arrives with its newlines intact and turns a
+ * one-line status report into a page of someone else's source. What a caller needs from a
+ * running call is which tool and roughly what, not the text of it.
+ */
+const OPERATION_LIMIT = 120;
+
+function summarizeOperation(operation: string): string {
+  const firstLine = operation.split("\n", 1)[0] ?? "";
+  const collapsed = firstLine.trim();
+  const suffix = collapsed.length < operation.trim().length ? " …" : "";
+  return collapsed.length > OPERATION_LIMIT
+    ? `${collapsed.slice(0, OPERATION_LIMIT)} …`
+    : `${collapsed}${suffix}`;
+}
+
+/**
+ * Group observed changes by the worker and task that made them.
+ *
+ * One line per change repeated the same timestamp, agent, and task for every file in a turn:
+ * on this repository's ledger, fifteen changes rendered as fifteen ~110-character lines whose
+ * informative half was the fifteen paths. The worker is the thing a caller is deciding about,
+ * so it is said once and the files are listed under it.
+ */
+function renderChanges(result: RecallResult): string {
+  const groups = new Map<string, { agentId: string; taskId: string | null; at: string; byKind: Map<string, string[]> }>();
+  for (const change of result.changes) {
+    const agentId = change.agentId ?? "unattributed";
+    const key = `${agentId} ${change.taskId ?? ""}`;
+    let group = groups.get(key);
+    if (group === undefined) {
+      group = { agentId, taskId: change.taskId, at: change.at, byKind: new Map() };
+      groups.set(key, group);
+    }
+    // Changes arrive newest first, so the first timestamp seen is the group's most recent.
+    const paths = group.byKind.get(change.changeKind);
+    if (paths === undefined) group.byKind.set(change.changeKind, [change.logicalPath]);
+    else paths.push(change.logicalPath);
+  }
+
+  const workers = groups.size;
+  const header = `${result.changes.length} file change(s) observed, by ${workers} worker(s), most recent first:`;
+  const lines: string[] = [header];
+  for (const group of groups.values()) {
+    const task = group.taskId === null ? "no task" : group.taskId;
+    lines.push(`- ${group.agentId} (${task}) at ${group.at}`);
+    for (const [changeKind, paths] of group.byKind) lines.push(`  ${changeKind}: ${paths.join(", ")}`);
+  }
+  if (result.truncatedChanges > 0) lines.push(`(${result.truncatedChanges} older change(s) not shown.)`);
+  return lines.join(NEWLINE);
+}
+
+/**
+ * Summarize calls the caller did not ask about, and list the ones it did.
+ *
+ * 79% of recorded calls are shell commands, stored as a redacted command string that names no
+ * resource. Listing twenty of them spends a caller's context on `git add` and `git status` and
+ * returns nothing it can act on, which is the net-token invariant failing in the direction
+ * that costs rather than saves.
+ *
+ * Detail follows the question. A caller that narrowed to a file gets every call that named it,
+ * because that is the answer it asked for. A caller asking about the whole repository gets a
+ * histogram, plus any call that failed - a failure is the one thing in an unnarrowed stream
+ * that a reader could not have predicted.
+ */
+function renderCalls(result: RecallResult, scope: string): string {
+  const pathScoped = result.logicalPath !== null;
+  const line = (call: RecalledCall) => {
+    const task = call.taskId === null ? "no task" : call.taskId;
+    const outcome = call.outcome === "failed" ? " [failed]" : "";
+    return `- ${call.at} ${call.agentId} (${task}) ${call.toolName}: ${call.operation}${outcome}`;
+  };
+
+  if (pathScoped) {
+    const header = `${result.calls.length} recorded call(s) for ${scope}, across ${result.agents.length} agent(s), most recent first:`;
+    const footer = result.truncated > 0 ? `${NEWLINE}(${result.truncated} older matching call(s) not shown.)` : "";
+    return `${header}${NEWLINE}${result.calls.map(line).join(NEWLINE)}${footer}`;
+  }
+
+  const byTool = new Map<string, number>();
+  for (const call of result.calls) byTool.set(call.toolName, (byTool.get(call.toolName) ?? 0) + 1);
+  const histogram = [...byTool.entries()]
+    .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1))
+    .map(([toolName, count]) => `${toolName} ${count}`)
+    .join(", ");
+
+  const total = result.calls.length + result.truncated;
+  const lines = [
+    `${total} call(s) recorded across ${result.agents.length} agent(s) in this window. Of the ${result.calls.length} most recent: ${histogram}.`,
+  ];
+  const failures = result.calls.filter((call) => call.outcome === "failed");
+  if (failures.length > 0) {
+    lines.push(`${failures.length} failed:`, ...failures.map(line));
+  }
+  lines.push("Ask about a specific path to see the calls that named it.");
+  return lines.join(NEWLINE);
+}
+
 /** Render a recall result as the compact text an agent reads inline. */
 export function renderRecall(result: RecallResult, requestedPath: string | undefined): string {
   const scope =
@@ -228,7 +329,7 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
 
   const inFlightLines = result.inFlight.map((call) => {
     const seconds = Math.round(call.runningForMs / 1000);
-    const what = call.operation === null ? call.hostToolName : `${call.hostToolName}: ${call.operation}`;
+    const what = call.operation === null ? call.hostToolName : `${call.hostToolName}: ${summarizeOperation(call.operation)}`;
     return `- ${call.agentId ?? "unattributed"} ${what} (running ${seconds}s)`;
   });
   // Deliberately first: work still in flight decides more than work already finished.
@@ -237,35 +338,21 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
       ? ""
       : `${result.inFlight.length} call(s) running right now:${NEWLINE}${inFlightLines.join(NEWLINE)}${NEWLINE}${NEWLINE}`;
 
-  const changeLines = result.changes.map((change) => {
-    const who = change.agentId ?? "unattributed";
-    const task = change.taskId === null ? "no task" : change.taskId;
-    return `- ${change.at} ${who} (${task}) ${change.changeKind} ${change.logicalPath}`;
-  });
-  const changeSection =
-    result.changes.length === 0
-      ? ""
-      : `\n\n${result.changes.length} observed file change(s), most recent first:\n${changeLines.join("\n")}` +
-        (result.truncatedChanges > 0 ? `\n(${result.truncatedChanges} older change(s) not shown.)` : "");
+  const changes = result.changes.length === 0 ? null : renderChanges(result);
 
   if (result.calls.length === 0) {
     // A file written by a shell command is named by no tool argument, so changes can be the
     // only thing that answers a file-scoped question.
-    if (result.changes.length > 0) {
-      return `${inFlightSection}No recorded tool call named ${scope}, but the filesystem shows it changed.${changeSection}${CAVEAT}`;
+    if (changes !== null) {
+      return `${inFlightSection}No recorded tool call named ${scope}, but the filesystem shows it changed.${NEWLINE}${NEWLINE}${changes}${CAVEAT}`;
     }
     if (result.inFlight.length > 0) return `${inFlightSection}No completed activity recorded for ${scope}.${CAVEAT}`;
     return `No recorded agent activity for ${scope}.`;
   }
 
-  const lines = result.calls.map((call) => {
-    const task = call.taskId === null ? "no task" : call.taskId;
-    const outcome = call.outcome === "failed" ? " [failed]" : "";
-    return `- ${call.at} ${call.agentId} (${task}) ${call.toolName}: ${call.operation}${outcome}`;
-  });
-
-  const header = `${result.calls.length} recorded call(s) for ${scope}, across ${result.agents.length} agent(s), most recent first:`;
-  const footer =
-    result.truncated > 0 ? `\n(${result.truncated} older matching call(s) not shown.)` : "";
-  return `${inFlightSection}${header}\n${lines.join("\n")}${footer}${changeSection}${CAVEAT}`;
+  // Effects before calls. A call is what an agent asked for and a change is what the
+  // filesystem shows; the second is the one a caller can act on, and leading with the first
+  // buried it under whatever shell plumbing happened to run in the window.
+  const changesFirst = changes === null ? "" : `${changes}${NEWLINE}${NEWLINE}`;
+  return `${inFlightSection}${changesFirst}${renderCalls(result, scope)}${CAVEAT}`;
 }
