@@ -8,7 +8,7 @@ import {
 } from "@patchmesh/core";
 import { createReadServices, ReadServiceError, type EventReader, type ReadServices } from "@patchmesh/query";
 import type { DecisionCreatedEvent, DecisionDelivery, DecisionDeliveryChangedEvent, DecisionId, FindingFeedbackCreatedEvent, FindingId, ProtocolEvent } from "@patchmesh/protocol";
-import { SqliteEventStore, type AppendResult } from "@patchmesh/storage";
+import { SqliteEventStore, type AppendResult, type PruneResult } from "@patchmesh/storage";
 
 export interface DaemonOptions {
   readonly reader?: EventReader;
@@ -76,6 +76,13 @@ export interface PatchMeshDaemon {
     readonly finding: AppendResult;
     readonly decision: AppendResult;
   }[];
+  /**
+   * Deletes events past a retention cutoff, keeping causal replay intact.
+   *
+   * A maintenance write rather than a report, so it lives beside the other writers and needs
+   * the same durable store: readers supplied directly to the daemon stay read-only.
+   */
+  prune(options: { readonly olderThan: Date }): PruneResult;
   close(): void;
 }
 
@@ -104,6 +111,12 @@ export function createDaemon(options: DaemonOptions): PatchMeshDaemon {
         store: status.store,
         errorCategory: status.errorCategory,
       };
+    },
+    prune: (options) => {
+      if (store === null) {
+        throw new ReadServiceError("unavailable", "prune requires a writable event store");
+      }
+      return store.prune(options);
     },
     recordFindingFeedback: (event) => {
       if (store === null) {

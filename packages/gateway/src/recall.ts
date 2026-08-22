@@ -126,7 +126,10 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
   const store = SqliteEventStore.open(options.ledgerPath);
   let events: readonly ProtocolEvent[];
   try {
-    events = store.read();
+    events = store.read({
+      eventTypes: ["tool.requested", "tool.completed", "file.changed"],
+      since: since.toISOString(),
+    });
   } finally {
     store.close();
   }

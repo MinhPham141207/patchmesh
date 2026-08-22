@@ -485,3 +485,60 @@ test("operations after close return a typed storage error", () => withTemporaryD
     (error: unknown) => error instanceof StorageError && error.code === "STORAGE_CLOSED",
   );
 }));
+
+test("prune keeps a survivor's causal ancestors, so replay still succeeds", async () => {
+  // The hazard the whole design has to answer: deleting a time prefix can strand a surviving
+  // event's causationId, and replay fails closed on a dangling reference. A prune that turns a
+  // large readable ledger into a small unreadable one is worse than never pruning.
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-prune-"));
+  try {
+    const store = SqliteEventStore.open(join(directory, "ledger.db"));
+    try {
+      // An old request, its old completion, and a recent event still pointing back at the
+      // old request - the exact shape that strands a reference.
+      const recent = {
+        ...independentRequest,
+        eventId: "evt_00000000000000000000000000000009" as typeof request.eventId,
+        eventType: "tool.completed" as const,
+        timestamp: "2026-08-22T00:00:00.000Z",
+        // A causal child shares its parent's correlation; inheriting a different one is itself
+        // a validation failure and would hide whether prune kept the ancestry intact.
+        correlationId: request.correlationId,
+        causationId: request.eventId,
+        sourceSequence: 3,
+        payload: { requestEventId: request.eventId, outcome: "succeeded" as const, exitCode: 0, effectEventIds: [] },
+      };
+      store.appendAtomic([request, completion]);
+      store.appendAtomic([recent]);
+
+      const result = store.prune({ olderThan: new Date("2026-08-20T00:00:00.000Z") });
+
+      assert.equal(result.removed, 1, "only the old completion nothing points at is removable");
+      assert.equal(result.retained, 2);
+      const retained = store.read().map((event) => event.eventId);
+      assert.equal(retained.includes(request.eventId), true, "an ancestor a survivor points at is kept");
+      // The real assertion: what is left must still replay.
+      assert.doesNotThrow(() => store.replay());
+    } finally {
+      store.close();
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("prune removes nothing when everything is inside the retention window", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-prune-"));
+  try {
+    const store = SqliteEventStore.open(join(directory, "ledger.db"));
+    try {
+      store.appendAtomic([request, completion]);
+      const result = store.prune({ olderThan: new Date("2020-01-01T00:00:00.000Z") });
+      assert.deepEqual(result, { removed: 0, retained: 2 });
+    } finally {
+      store.close();
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

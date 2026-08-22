@@ -22,8 +22,23 @@ import {
 export interface EventQuery {
   readonly eventId?: EventId;
   readonly eventType?: EventType;
+  /**
+   * Any of these event types, for a reader that wants two or three of them and not the rest.
+   *
+   * Recall reads calls and observed changes; overlap reads only changes - 51 of this
+   * repository's 1,165 events. Loading the other 1,114 to discard them in JavaScript is the
+   * shape of cost that does not show up until a ledger has been used for a while.
+   */
+  readonly eventTypes?: readonly EventType[];
   readonly correlationId?: CorrelationId;
   readonly causationId?: EventId | null;
+  /** Inclusive lower bound on `timestamp`, ISO-8601. A window, pushed to SQLite. */
+  readonly since?: string;
+}
+
+export interface PruneResult {
+  readonly removed: number;
+  readonly retained: number;
 }
 
 export type AppendResult =
@@ -371,6 +386,15 @@ export class SqliteEventStore {
       predicates.push("event_type = ?");
       parameters.push(query.eventType);
     }
+    if (query.eventTypes !== undefined) {
+      // An empty set asks for nothing, which is a real answer and must not read everything.
+      predicates.push(`event_type IN (${query.eventTypes.map(() => "?").join(", ") || "NULL"})`);
+      parameters.push(...query.eventTypes);
+    }
+    if (query.since !== undefined) {
+      predicates.push("timestamp >= ?");
+      parameters.push(query.since);
+    }
     if (query.correlationId !== undefined) {
       predicates.push("correlation_id = ?");
       parameters.push(query.correlationId);
@@ -395,6 +419,65 @@ export class SqliteEventStore {
     this.assertOpen();
     const events = this.read();
     return reducer ? replayEvents(events, reducer) : replayEvents(events);
+  }
+
+
+  /**
+   * Delete events older than a cutoff, without breaking causal replay.
+   *
+   * A ledger is append-only and nothing pruned it, so it grew without bound - this repository
+   * reached 1.9MB in four days of one developer, and the value of a recorded call decays fast
+   * (recall looks back four hours by default, recap one day). Retention is therefore a real
+   * operation rather than a nicety.
+   *
+   * The hazard is that deleting a time prefix can strand a survivor's `causationId`, and replay
+   * fails closed on a dangling reference - so a careless prune would turn a large ledger into an
+   * unreadable one. Anything a survivor still points at is retained, transitively: the recursive
+   * term follows each protected event's own parent, because protecting A while deleting the
+   * event A points at just moves the dangling reference one link back.
+   *
+   * Buffered events past the cutoff are dropped outright. They are waiting for a causal parent
+   * that is now, by construction, never arriving.
+   */
+  prune(options: { readonly olderThan: Date }): PruneResult {
+    this.assertOpen();
+    const cutoff = options.olderThan.toISOString();
+    const before = this.count();
+
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare(`
+        WITH RECURSIVE protected(id) AS (
+          SELECT causation_id FROM events
+          WHERE causation_id IS NOT NULL AND timestamp >= ?
+          UNION
+          SELECT parent.causation_id FROM events parent
+          JOIN protected ON parent.event_id = protected.id
+          WHERE parent.causation_id IS NOT NULL
+        )
+        DELETE FROM events
+        WHERE timestamp < ? AND event_id NOT IN (SELECT id FROM protected)
+      `).run(cutoff, cutoff);
+      this.database.prepare("DELETE FROM pending_events WHERE event_id IN (SELECT event_id FROM pending_events)").run();
+      this.database.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.database.exec("ROLLBACK");
+      } catch {
+        // SQLite may have rolled back already; the originating error is the one that matters.
+      }
+      throw error;
+    }
+
+    const retained = this.count();
+    return { removed: before - retained, retained };
+  }
+
+  /** How many events the store holds. Counted in SQLite rather than by loading them. */
+  count(): number {
+    this.assertOpen();
+    const row = this.database.prepare("SELECT COUNT(*) AS total FROM events").get() as { readonly total: number };
+    return row.total;
   }
 
   close(): void {

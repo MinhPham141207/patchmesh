@@ -13,6 +13,10 @@ const migrations = [
     id: "002_pending_events",
     path: new URL("./migrations/002_pending_events.sql", import.meta.url),
   },
+  {
+    id: "003_recall_indexes",
+    path: new URL("./migrations/003_recall_indexes.sql", import.meta.url),
+  },
 ] as const;
 
 function migrationSql(path: URL): string {
