@@ -1,9 +1,9 @@
-import type { AppendResult } from "@patchmesh/storage";
+import type { AppendResult } from "patchmesh-storage";
 import type {
   DerivedCoverage,
   ObservationBoundary,
   ObservationDiagnostic,
-} from "@patchmesh/observation";
+} from "patchmesh-observation";
 import type {
   CorrelationId,
   DependencyId,
@@ -20,7 +20,7 @@ import type {
   ToolName,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 export interface McpToolCall {
   readonly toolName: ToolName;
@@ -38,11 +38,11 @@ export interface McpToolCall {
     readonly resourceId: ResourceId;
     readonly dependsOnReadEventId: EventId;
     /** Canonical host-issued token required for the PR5 proof-bearing path. */
-    readonly readToken?: import("@patchmesh/protocol").ObservedReadToken;
+    readonly readToken?: import("patchmesh-protocol").ObservedReadToken;
     /** Persisted candidate change the observed version is compared against. */
     readonly comparison?: {
       readonly changedEventId: EventId;
-      readonly coverageId: import("@patchmesh/protocol").CoverageId;
+      readonly coverageId: import("patchmesh-protocol").CoverageId;
       readonly integrationTarget: string;
     };
   };
@@ -120,7 +120,7 @@ export interface McpProxyResult<T> {
   readonly completedEventId: EventId;
   readonly readEventIds: readonly EventId[];
   /** Tokens issued only after their explicit read event was durably persisted. */
-  readonly observedReadTokens: readonly import("@patchmesh/protocol").ObservedReadToken[];
+  readonly observedReadTokens: readonly import("patchmesh-protocol").ObservedReadToken[];
   readonly coverage: DerivedCoverage | null;
   readonly observationDiagnostics: readonly ObservationDiagnostic[];
   readonly analysisDiagnostics: readonly { readonly path: string; readonly reason: string }[];

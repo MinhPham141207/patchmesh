@@ -1,4 +1,4 @@
-import type { ToolName } from "@patchmesh/protocol";
+import type { ToolName } from "patchmesh-protocol";
 
 export interface NormalizedTool {
   /** Closed protocol vocabulary the detectors match on. */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WorkGraphProjector, projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
+import { WorkGraphProjector, projectWorkGraph, SqliteEventStore } from "patchmesh-storage";
 import {
   buildGoldenEvents,
   duplicateVariant,

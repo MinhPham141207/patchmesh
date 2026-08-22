@@ -8,7 +8,7 @@ import {
   type EventType,
   type ProtocolEvent,
   validateEventSet,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import { canonicalBytes, canonicalDigest } from "./canonical-json.js";
 import { openDatabase } from "./database.js";
 import { StorageError } from "./errors.js";

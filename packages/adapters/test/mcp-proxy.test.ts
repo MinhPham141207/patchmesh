@@ -19,9 +19,9 @@ import {
   type ObservationCapture,
   type ObservedFileChange,
   type ObservationSnapshot,
-} from "@patchmesh/observation";
-import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
-import { ProtocolValidationError, validateEventSet, type EventId, type ProtocolEvent } from "@patchmesh/protocol";
+} from "patchmesh-observation";
+import { projectWorkGraph, SqliteEventStore } from "patchmesh-storage";
+import { ProtocolValidationError, validateEventSet, type EventId, type ProtocolEvent } from "patchmesh-protocol";
 
 async function withTemporaryDatabase(run: (databasePath: string) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-m3-"));

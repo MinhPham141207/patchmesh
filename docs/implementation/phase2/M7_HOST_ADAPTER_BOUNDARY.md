@@ -3,7 +3,7 @@
 ## Status
 
 PR4 now provides an internal `patchmesh-site` transparent MCP gateway in
-`@patchmesh/adapters`. It is the selected integration path for a host that
+`patchmesh-adapters`. It is the selected integration path for a host that
 declares synchronous dispatch ownership, and delegates every supported host tool
 call to `McpProxy.execute` exactly once. It constructs `McpCallContext` from a
 trusted host/session identity object, rejects mismatched payload identity, reads a

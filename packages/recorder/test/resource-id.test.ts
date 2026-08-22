@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fileResourceId } from "@patchmesh/observation";
-import type { RepositoryId } from "@patchmesh/protocol";
+import { fileResourceId } from "patchmesh-observation";
+import type { RepositoryId } from "patchmesh-protocol";
 import { resourceIdForPath } from "../src/index.js";
 
 const REPOSITORY = "repo_8c5e3b00-39c9-5b2e-83a3-050ecab9cf1b" as RepositoryId;

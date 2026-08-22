@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CoverageId, EventId } from "@patchmesh/protocol";
+import type { CoverageId, EventId } from "patchmesh-protocol";
 import type {
   DerivedCoverage,
   ObservationGap,

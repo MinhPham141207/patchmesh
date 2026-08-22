@@ -6,7 +6,7 @@ import type {
   FindingType,
   ProtocolEvent,
   TaskId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import type {
   EventQuery,
   DecisionView,
@@ -19,7 +19,7 @@ import type {
   ReplayResult,
   SourceSequenceGap,
   WorkGraphSnapshot,
-} from "@patchmesh/storage";
+} from "patchmesh-storage";
 
 export interface EventReader {
   read(query?: EventQuery): readonly ProtocolEvent[];

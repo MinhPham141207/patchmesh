@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { sanitizeDiagnostic } from "@patchmesh/observation";
-import { parseEvent, validateEventSet } from "@patchmesh/protocol";
-import { projectWorkGraph } from "@patchmesh/storage";
+import { sanitizeDiagnostic } from "patchmesh-observation";
+import { parseEvent, validateEventSet } from "patchmesh-protocol";
+import { projectWorkGraph } from "patchmesh-storage";
 import type {
   CoverageId,
   EventId,
@@ -9,7 +9,7 @@ import type {
   Source,
   TargetSnapshot,
   ToolCompletedEvent,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import type { EventAppender } from "./types.js";
 import { digestHostAdapterCapabilities, type HostAdapterCapabilities, type HostAdapterCapabilityDigest } from "./host-adapter-capabilities.js";
 import { McpProxy } from "./mcp-proxy.js";

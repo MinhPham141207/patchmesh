@@ -2,7 +2,7 @@
  * Copy the JSON Schema corpus into the package before it is built.
  *
  * `validation.ts` used to resolve `../../../schemas/` — the repository root — which works in a
- * checkout and is absent from a published tarball, so an installed `@patchmesh/protocol` threw
+ * checkout and is absent from a published tarball, so an installed `patchmesh-protocol` threw
  * ENOENT on first import. A package has to carry what it needs to run.
  *
  * The repository root stays the single source of truth: `tools/phase0/validate.mjs` and the

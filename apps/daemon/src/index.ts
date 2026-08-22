@@ -5,10 +5,10 @@ import {
   createDecisionDeliveryChangedEvent,
   createPhase2RuntimeRecords,
   createSameSymbolRuntimeRecords,
-} from "@patchmesh/core";
-import { createReadServices, ReadServiceError, type EventReader, type ReadServices } from "@patchmesh/query";
-import type { DecisionCreatedEvent, DecisionDelivery, DecisionDeliveryChangedEvent, DecisionId, FindingFeedbackCreatedEvent, FindingId, ProtocolEvent } from "@patchmesh/protocol";
-import { SqliteEventStore, type AppendResult, type PruneResult } from "@patchmesh/storage";
+} from "patchmesh-core";
+import { createReadServices, ReadServiceError, type EventReader, type ReadServices } from "patchmesh-query";
+import type { DecisionCreatedEvent, DecisionDelivery, DecisionDeliveryChangedEvent, DecisionId, FindingFeedbackCreatedEvent, FindingId, ProtocolEvent } from "patchmesh-protocol";
+import { SqliteEventStore, type AppendResult, type PruneResult } from "patchmesh-storage";
 
 export interface DaemonOptions {
   readonly reader?: EventReader;

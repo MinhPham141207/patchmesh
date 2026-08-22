@@ -4,9 +4,9 @@
 
 **Goal:** Build the Phase 1 read-only query services, daemon composition layer, and deterministic `status`, `agents`, `events`, and `graph` CLI commands.
 
-**Architecture:** Add `@patchmesh/query` as the public domain read-service boundary over the existing protocol, event store, and M5 projector. Add `apps/daemon` for in-process composition and `apps/cli` for parsing/rendering; do not add network transport, lifecycle commands, or direct SQLite access from the CLI.
+**Architecture:** Add `patchmesh-query` as the public domain read-service boundary over the existing protocol, event store, and M5 projector. Add `apps/daemon` for in-process composition and `apps/cli` for parsing/rendering; do not add network transport, lifecycle commands, or direct SQLite access from the CLI.
 
-**Tech Stack:** Strict TypeScript, pnpm workspace, Node.js >=22.5.0, `@patchmesh/protocol`, `@patchmesh/storage`, existing Node standard-library APIs, and `node:test`.
+**Tech Stack:** Strict TypeScript, pnpm workspace, Node.js >=22.5.0, `patchmesh-protocol`, `patchmesh-storage`, existing Node standard-library APIs, and `node:test`.
 
 ## Global Constraints
 
@@ -105,7 +105,7 @@ deeply defensive and contain no mutable maps, database handles, or internal stat
 - Create: `packages/query/test/query.test.ts`
 
 **Interfaces:**
-- Consumes: `@patchmesh/protocol` event/identity types, `@patchmesh/storage` `EventQuery`, `ReplayReducer`, `ReplayResult`, `SourceSequenceGap`, and M5 `WorkGraphSnapshot`.
+- Consumes: `patchmesh-protocol` event/identity types, `patchmesh-storage` `EventQuery`, `ReplayReducer`, `ReplayResult`, `SourceSequenceGap`, and M5 `WorkGraphSnapshot`.
 - Produces: public `ReadServices`, DTO, filter, cursor, follow, error, and `EventReader` types for Tasks 2-5.
 
 - [ ] **Step 1: Add the workspace/package skeleton and failing contract tests**
@@ -130,7 +130,7 @@ production code must not accept partial event objects.
 
 - [ ] **Step 2: Run the focused package test to verify the contract is red**
 
-Run: `corepack pnpm --filter @patchmesh/query test`
+Run: `corepack pnpm --filter patchmesh-query test`
 
 Expected: FAIL because the package and public contracts do not exist.
 
@@ -173,7 +173,7 @@ Define `EventListQuery.taskId` so `null` explicitly filters null attribution; ab
 Export the public types and `createReadServices(options: ReadServiceOptions): ReadServices` from `src/index.ts`; keep implementation types private. Run:
 
 ```bash
-corepack pnpm --filter @patchmesh/query typecheck
+corepack pnpm --filter patchmesh-query typecheck
 ```
 
 Expected: PASS with strict declarations and no imports from CLI/daemon code.
@@ -218,7 +218,7 @@ test("redaction applies to nested raw event values", () => {
 
 - [ ] **Step 2: Run focused tests to verify the services are red**
 
-Run: `corepack pnpm --filter @patchmesh/query test`
+Run: `corepack pnpm --filter patchmesh-query test`
 
 Expected: FAIL because service construction, redaction, time parsing, and projections are not implemented.
 
@@ -241,8 +241,8 @@ Build agent records from event envelopes, merge sorted task IDs including null, 
 Run:
 
 ```bash
-corepack pnpm --filter @patchmesh/query test
-corepack pnpm --filter @patchmesh/query typecheck
+corepack pnpm --filter patchmesh-query test
+corepack pnpm --filter patchmesh-query typecheck
 ```
 
 Expected: PASS for status, agents, graph, redaction, filters, and time parsing.
@@ -285,7 +285,7 @@ test("follow advances across filtered events without duplicates", async () => {
 
 - [ ] **Step 2: Run focused tests to verify paging/follow behavior is red**
 
-Run: `corepack pnpm --filter @patchmesh/query test`
+Run: `corepack pnpm --filter patchmesh-query test`
 
 Expected: FAIL because event pages and follow iteration are not implemented.
 
@@ -299,7 +299,7 @@ Implement an async generator with one initial page, an internal cursor, injected
 
 - [ ] **Step 5: Run focused tests and typecheck**
 
-Run: `corepack pnpm --filter @patchmesh/query test` and `corepack pnpm --filter @patchmesh/query typecheck`
+Run: `corepack pnpm --filter patchmesh-query test` and `corepack pnpm --filter patchmesh-query typecheck`
 
 Expected: PASS for all filters, cursor, follow, abort, and error tests.
 
@@ -313,7 +313,7 @@ Expected: PASS for all filters, cursor, follow, abort, and error tests.
 - Modify: `pnpm-workspace.yaml`
 
 **Interfaces:**
-- Consumes: `SqliteEventStore`, `@patchmesh/query` `createReadServices`, `ReadServices`, and `EventReader`.
+- Consumes: `SqliteEventStore`, `patchmesh-query` `createReadServices`, `ReadServices`, and `EventReader`.
 - Produces: `DaemonOptions`, `DaemonHealth`, `PatchMeshDaemon`, and `createDaemon` for the CLI.
 
 - [ ] **Step 1: Add failing daemon composition tests**
@@ -331,13 +331,13 @@ test("daemon composes the public services without creating storage", () => {
 
 - [ ] **Step 2: Run daemon tests to verify they fail**
 
-Run: `corepack pnpm --filter @patchmesh/daemon test`
+Run: `corepack pnpm --filter patchmesh-daemon test`
 
 Expected: FAIL because the package, composition factory, and health DTO do not exist.
 
 - [ ] **Step 3: Add daemon package/workspace configuration**
 
-Add `apps/*` to `pnpm-workspace.yaml`. Configure daemon scripts for `test`, `typecheck`, and `build`, and dependencies on `@patchmesh/query` and `@patchmesh/storage`.
+Add `apps/*` to `pnpm-workspace.yaml`. Configure daemon scripts for `test`, `typecheck`, and `build`, and dependencies on `patchmesh-query` and `patchmesh-storage`.
 
 - [ ] **Step 4: Implement `createDaemon` and health**
 
@@ -345,7 +345,7 @@ Support either an injected `EventReader` for tests or an explicit existing datab
 
 - [ ] **Step 5: Run daemon tests and typecheck**
 
-Run: `corepack pnpm --filter @patchmesh/daemon test`, `corepack pnpm --filter @patchmesh/daemon typecheck`, and `corepack pnpm --filter @patchmesh/daemon build`
+Run: `corepack pnpm --filter patchmesh-daemon test`, `corepack pnpm --filter patchmesh-daemon typecheck`, and `corepack pnpm --filter patchmesh-daemon build`
 
 Expected: PASS with no lifecycle or transport behavior.
 
@@ -385,7 +385,7 @@ test("graph JSON output is stable and contains no Phase 2 fields", async () => {
 
 - [ ] **Step 2: Run CLI tests to verify they fail**
 
-Run: `corepack pnpm --filter @patchmesh/cli test`
+Run: `corepack pnpm --filter patchmesh test`
 
 Expected: FAIL because parser, renderers, command dispatch, and package bin do not exist.
 
@@ -403,7 +403,7 @@ Create `runCli(argv, dependencies)` that parses, dispatches to daemon services, 
 
 - [ ] **Step 6: Run CLI tests, typecheck, and build**
 
-Run: `corepack pnpm --filter @patchmesh/cli test`, `corepack pnpm --filter @patchmesh/cli typecheck`, and `corepack pnpm --filter @patchmesh/cli build`
+Run: `corepack pnpm --filter patchmesh test`, `corepack pnpm --filter patchmesh typecheck`, and `corepack pnpm --filter patchmesh build`
 
 Expected: PASS for all four commands, output modes, filters, redaction, follow shutdown, and exit categories.
 
@@ -445,7 +445,7 @@ Expected: `Phase 0 corpus valid` and no whitespace errors.
 
 - [ ] **Step 1: Run focused package tests**
 
-Run: `corepack pnpm --filter @patchmesh/query test`, `corepack pnpm --filter @patchmesh/daemon test`, and `corepack pnpm --filter @patchmesh/cli test`
+Run: `corepack pnpm --filter patchmesh-query test`, `corepack pnpm --filter patchmesh-daemon test`, and `corepack pnpm --filter patchmesh test`
 
 Expected: all query, daemon, and CLI tests pass with explicit M6-only output.
 

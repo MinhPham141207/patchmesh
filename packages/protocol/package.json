@@ -1,5 +1,5 @@
 {
-  "name": "@patchmesh/protocol",
+  "name": "patchmesh-protocol",
   "version": "0.1.0",
   "type": "module",
   "files": [
@@ -32,9 +32,6 @@
     "url": "https://github.com/minhpham141207/patchmesh/issues"
   },
   "homepage": "https://github.com/minhpham141207/patchmesh#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=24"
   }

@@ -1,12 +1,12 @@
-import type { ProtocolEvent } from "@patchmesh/protocol";
+import type { ProtocolEvent } from "patchmesh-protocol";
 import {
   logicalPathFor,
   readInFlightCalls,
   resolveRepositoryIdentity,
   resourceIdForPath,
   type InFlightCall,
-} from "@patchmesh/recorder";
-import { SqliteEventStore } from "@patchmesh/storage";
+} from "patchmesh-recorder";
+import { SqliteEventStore } from "patchmesh-storage";
 
 /** One recorded call, reduced to what another agent needs in order to decide something. */
 export interface RecalledCall {

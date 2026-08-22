@@ -3,8 +3,8 @@ import type {
   EventType,
   ProtocolEvent,
   TaskId,
-} from "@patchmesh/protocol";
-import { projectWorkGraph } from "@patchmesh/storage";
+} from "patchmesh-protocol";
+import { projectWorkGraph } from "patchmesh-storage";
 import { redactEvent } from "./redaction.js";
 import { parseTimeBound } from "./time.js";
 import {
@@ -276,7 +276,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
     };
   };
 
-  const explainDecision = (decisionId: import("@patchmesh/protocol").DecisionId): DecisionExplanation => {
+  const explainDecision = (decisionId: import("patchmesh-protocol").DecisionId): DecisionExplanation => {
     const snapshot = projectWorkGraph(readEvents(options)).snapshot;
     const decision = snapshot.decisions.find((view) => view.decision.decisionId === decisionId);
     if (decision === undefined) throw new ReadServiceError("cursor", "decision was not found");

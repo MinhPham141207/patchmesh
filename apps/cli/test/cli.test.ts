@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { EventId, ProtocolEvent } from "@patchmesh/protocol";
-import type { ReadServices, StatusView } from "@patchmesh/query";
-import type { WorkGraphSnapshot } from "@patchmesh/storage";
+import type { EventId, ProtocolEvent } from "patchmesh-protocol";
+import type { ReadServices, StatusView } from "patchmesh-query";
+import type { WorkGraphSnapshot } from "patchmesh-storage";
 import { runCli, main } from "../src/main.js";
 import { initializeRepository, renderInit } from "../src/init.js";
 
@@ -541,17 +541,17 @@ test("init writes a portable command when installed as a dependency", async () =
   const root = mkdtempSync(join(tmpdir(), "patchmesh-init-dep-"));
   try {
     mkdirSync(join(root, ".git"));
-    mkdirSync(join(root, "node_modules", "@patchmesh", "recorder", "dist"), { recursive: true });
-    writeFileSync(join(root, "node_modules", "@patchmesh", "recorder", "dist", "bin.js"), "");
+    mkdirSync(join(root, "node_modules", "patchmesh-recorder", "dist"), { recursive: true });
+    writeFileSync(join(root, "node_modules", "patchmesh-recorder", "dist", "bin.js"), "");
 
     initializeRepository({ worktreeRoot: root });
     const settings = readFileSync(join(root, ".claude", "settings.local.json"), "utf8");
     const mcp = readFileSync(join(root, ".mcp.json"), "utf8");
 
-    assert.match(settings, /node_modules\/@patchmesh\/recorder\/dist\/bin\.js/);
-    assert.match(mcp, /node_modules\/@patchmesh\/gateway\/dist\/bin\.js/);
+    assert.match(settings, /node_modules\/patchmesh-recorder\/dist\/bin\.js/);
+    assert.match(mcp, /node_modules\/patchmesh-gateway\/dist\/bin\.js/);
     // No drive letter, no leading slash: nothing that only resolves on the machine that ran it.
-    assert.equal(/[A-Za-z]:[\/]/.test(settings + mcp), false, "config must not carry an absolute path");
+    assert.equal(/[A-Za-z]:[\\/]/.test(settings + mcp), false, "config must not carry an absolute path");
     assert.equal(settings.includes("\\\\"), false, "config must not carry Windows separators");
   } finally {
     rmSync(root, { recursive: true, force: true });

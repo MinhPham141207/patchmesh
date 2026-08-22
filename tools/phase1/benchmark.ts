@@ -3,9 +3,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release, totalmem } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { McpProxy, type McpCallContext, type McpToolCall } from "@patchmesh/adapters";
-import type { ObservationBoundary, ObservationCapture } from "@patchmesh/observation";
-import { replayEvents, SqliteEventStore } from "@patchmesh/storage";
+import { McpProxy, type McpCallContext, type McpToolCall } from "patchmesh-adapters";
+import type { ObservationBoundary, ObservationCapture } from "patchmesh-observation";
+import { replayEvents, SqliteEventStore } from "patchmesh-storage";
 import {
   consumerAgentId,
   consumerTaskId,

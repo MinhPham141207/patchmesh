@@ -1,4 +1,4 @@
-import type { EventId } from "@patchmesh/protocol";
+import type { EventId } from "patchmesh-protocol";
 
 export type McpProxyStorageErrorCode =
   | "MCP_REQUEST_PERSIST_FAILED"

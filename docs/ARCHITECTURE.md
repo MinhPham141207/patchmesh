@@ -145,7 +145,7 @@ before injected execution and `tool.completed` afterward, preserving per-call so
 attribution, correlation, causation, and source-sequence metadata. M3 does not add a
 transport, effect observer, detector, policy, or projection.
 
-M4 adds the `@patchmesh/observation` boundary. It captures Git repository/worktree and
+M4 adds the `patchmesh-observation` boundary. It captures Git repository/worktree and
 revision metadata, filesystem state, content hashes, and normalized process outcomes
 around the MCP call. Snapshot-observed file effects are stored as `file.changed` events
 and linked from `tool.completed.payload.effectEventIds`; because a before/after snapshot

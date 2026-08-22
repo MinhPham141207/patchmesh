@@ -11,7 +11,7 @@ import {
   ProtocolValidationError,
   type ToolCompletedEvent,
   type ToolRequestedEvent,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import {
   canonicalDigest,
   SqliteEventStore,

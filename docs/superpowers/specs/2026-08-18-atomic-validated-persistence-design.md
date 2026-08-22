@@ -4,7 +4,7 @@ Status: Proposed implementation specification
 
 Repository baseline: `27f4bb51bf0050398c9289d49546472d3cd96f6c`
 
-Scope: `@patchmesh/storage` transaction boundary, `@patchmesh/adapters` proof and
+Scope: `patchmesh-storage` transaction boundary, `patchmesh-adapters` proof and
 derived-evidence persistence, `apps/daemon` detection entrypoints
 
 Authority: Report-only. This work MUST NOT add `delay`, `reject`, claims, or leases.
@@ -263,7 +263,7 @@ try {
 }
 ```
 
-`ReadServiceError` in `@patchmesh/query` gains an optional `ErrorOptions` third
+`ReadServiceError` in `patchmesh-query` gains an optional `ErrorOptions` third
 parameter so `cause` survives, satisfying invariant 3.
 
 Whether the *whole run* is atomic — all records or none — is left as a follow-on

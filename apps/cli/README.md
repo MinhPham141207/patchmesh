@@ -7,7 +7,7 @@ deliberately — to find out what has already been done and what is being done r
 they do not repeat it or collide with it.
 
 ```bash
-npm install -D patchmesh @patchmesh/recorder @patchmesh/gateway
+npm install -D patchmesh patchmesh-recorder patchmesh-gateway
 npx patchmesh init
 ```
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { appendJournalEntry, ingestJournal, journalPathFor, readInFlightCalls } from "../src/index.js";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { SqliteEventStore } from "patchmesh-storage";
 
 const SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
 const NOW = () => new Date("2026-08-22T12:00:30.000Z");

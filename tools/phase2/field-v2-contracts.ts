@@ -1,8 +1,8 @@
 import { readFile, lstat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { HostAdapterCapabilities } from "@patchmesh/adapters";
-import { digestHostAdapterCapabilities } from "@patchmesh/adapters";
-import { parseEvent, validateEventSet, type ProtocolEvent } from "@patchmesh/protocol";
+import type { HostAdapterCapabilities } from "patchmesh-adapters";
+import { digestHostAdapterCapabilities } from "patchmesh-adapters";
+import { parseEvent, validateEventSet, type ProtocolEvent } from "patchmesh-protocol";
 import { canonicalSha256, type FieldDetector, type Sha256Digest } from "./gate-definitions.js";
 import { validateJsonSchemaInstance } from "./json-schema.js";
 

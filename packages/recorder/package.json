@@ -1,5 +1,5 @@
 {
-  "name": "@patchmesh/recorder",
+  "name": "patchmesh-recorder",
   "version": "0.1.0",
   "type": "module",
   "files": [
@@ -21,9 +21,9 @@
     "test": "tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
-    "@patchmesh/observation": "workspace:*",
-    "@patchmesh/protocol": "workspace:*",
-    "@patchmesh/storage": "workspace:*"
+    "patchmesh-observation": "workspace:*",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-storage": "workspace:*"
   },
   "description": "Records coding-agent tool calls and observed file changes into a per-repository PatchMesh ledger.",
   "license": "MIT",
@@ -36,9 +36,6 @@
     "url": "https://github.com/minhpham141207/patchmesh/issues"
   },
   "homepage": "https://github.com/minhpham141207/patchmesh#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=24"
   }

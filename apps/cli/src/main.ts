@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { createDaemon, type PatchMeshDaemon } from "@patchmesh/daemon";
+import { createDaemon, type PatchMeshDaemon } from "patchmesh-daemon";
 import {
   findOverlappingWork,
   ReadServiceError,
@@ -9,9 +9,9 @@ import {
   type OverlapResult,
   type ReadServices,
   type StatusView,
-} from "@patchmesh/query";
-import type { EventType } from "@patchmesh/protocol";
-import { findWorktreeRoot } from "@patchmesh/recorder";
+} from "patchmesh-query";
+import type { EventType } from "patchmesh-protocol";
+import { findWorktreeRoot } from "patchmesh-recorder";
 import { parseArgs, usageText, type ParsedArgs } from "./args.js";
 import { initializeRepository, renderInit } from "./init.js";
 import {

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { appendJournalEntry, ingestJournal, journalPathFor, recordTurnEffects } from "@patchmesh/recorder";
+import { appendJournalEntry, ingestJournal, journalPathFor, recordTurnEffects } from "patchmesh-recorder";
 import { recallRecentActivity, renderRecall, renderRecap } from "../src/index.js";
 
 const SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";

@@ -4,9 +4,9 @@
 
 **Goal:** Add deterministic post-tool effect observation and derived degraded-coverage reporting to the existing M3 MCP proxy without widening the Phase 1 event set.
 
-**Architecture:** Create a focused `@patchmesh/observation` package with injected observation ports, pure snapshot-diff/effect logic, and a Node implementation for filesystem and Git metadata. Keep `@patchmesh/adapters` responsible for MCP lifecycle orchestration: persist the request, capture before/after state, append normalized `file.changed` effects, then persist `tool.completed` with linked effect IDs. Coverage is returned as derived data, not persisted as a new event.
+**Architecture:** Create a focused `patchmesh-observation` package with injected observation ports, pure snapshot-diff/effect logic, and a Node implementation for filesystem and Git metadata. Keep `patchmesh-adapters` responsible for MCP lifecycle orchestration: persist the request, capture before/after state, append normalized `file.changed` effects, then persist `tool.completed` with linked effect IDs. Coverage is returned as derived data, not persisted as a new event.
 
-**Tech Stack:** Strict TypeScript, pnpm workspace, Node.js >=22.5 built-in `node:fs`, `node:crypto`, and `node:child_process`, existing `@patchmesh/protocol` and `@patchmesh/storage`, `node:test`, temporary repositories/worktrees, and temporary SQLite databases.
+**Tech Stack:** Strict TypeScript, pnpm workspace, Node.js >=22.5 built-in `node:fs`, `node:crypto`, and `node:child_process`, existing `patchmesh-protocol` and `patchmesh-storage`, `node:test`, temporary repositories/worktrees, and temporary SQLite databases.
 
 ## Global Constraints
 
@@ -134,15 +134,15 @@ return `coverage: null` and an empty diagnostics list, preserving M3 behavior.
 - Modify: `packages/adapters/package.json` only after the package builds, in Task 4
 
 **Interfaces:**
-- Consumes: `@patchmesh/protocol` identity types and existing sibling package scripts.
+- Consumes: `patchmesh-protocol` identity types and existing sibling package scripts.
 - Produces: the shared interfaces above, `normalizeLogicalPath`, `fileResourceId`, and `sanitizeDiagnostic` for Tasks 2-4.
 
 - [ ] **Step 1: Create the workspace package metadata and strict compiler config**
 
 Copy the package shape from `packages/storage/package.json`, set the name to
-`@patchmesh/observation`, keep it private and ESM, export `dist/index.js` and its
+`patchmesh-observation`, keep it private and ESM, export `dist/index.js` and its
 types, and define `build`, `typecheck`, and `test` scripts using the repository's
-existing commands. Depend only on `@patchmesh/protocol`.
+existing commands. Depend only on `patchmesh-protocol`.
 
 - [ ] **Step 2: Write failing path and redaction tests**
 
@@ -164,7 +164,7 @@ test("redacts secret-shaped diagnostics", () => {
 });
 ```
 
-Run: `corepack pnpm --filter @patchmesh/observation test`
+Run: `corepack pnpm --filter patchmesh-observation test`
 
 Expected: FAIL because the package and utilities do not yet exist.
 
@@ -187,14 +187,14 @@ command cannot become an unbounded API response.
 
 - [ ] **Step 5: Run the focused utility tests**
 
-Run: `corepack pnpm --filter @patchmesh/observation test`
+Run: `corepack pnpm --filter patchmesh-observation test`
 
 Expected: PASS for path normalization, resource ID stability, invalid-path rejection,
 and secret redaction.
 
 - [ ] **Step 6: Typecheck and commit the observation contract foundation**
 
-Run: `corepack pnpm --filter @patchmesh/observation typecheck`
+Run: `corepack pnpm --filter patchmesh-observation typecheck`
 
 Expected: PASS.
 
@@ -228,7 +228,7 @@ directory and different administrative directories. The test must compare the
 caller-supplied repository/workspace/worktree IDs separately from observed Git paths;
 the implementation must not derive IDs from those paths.
 
-Run: `corepack pnpm --filter @patchmesh/observation test -- node-observation.test.ts`
+Run: `corepack pnpm --filter patchmesh-observation test -- node-observation.test.ts`
 
 Expected: FAIL because `NodeObservationBoundary` is not implemented.
 
@@ -259,15 +259,15 @@ explicit `unverified` gap when the snapshot cannot prove the complete window.
 
 - [ ] **Step 5: Run the Node observation tests**
 
-Run: `corepack pnpm --filter @patchmesh/observation test`
+Run: `corepack pnpm --filter patchmesh-observation test`
 
 Expected: PASS for repository metadata, file hashes, untracked files, linked-worktree
 metadata, Git-unavailable degradation, and path confinement.
 
 - [ ] **Step 6: Typecheck, build, and commit the Node observer**
 
-Run: `corepack pnpm --filter @patchmesh/observation typecheck` and
-`corepack pnpm --filter @patchmesh/observation build`
+Run: `corepack pnpm --filter patchmesh-observation typecheck` and
+`corepack pnpm --filter patchmesh-observation build`
 
 Expected: PASS.
 
@@ -304,7 +304,7 @@ Add a same-content delete/create pair and assert it is paired as one determinist
 code-unit order. Assert opaque calls preserve actual changes but add exactly one
 `opaque` gap.
 
-Run: `corepack pnpm --filter @patchmesh/observation test -- effects.test.ts`
+Run: `corepack pnpm --filter patchmesh-observation test -- effects.test.ts`
 
 Expected: FAIL because diffing and coverage functions are not implemented.
 
@@ -340,8 +340,8 @@ and no accidental `inferred` mode when only snapshot verification exists.
 
 - [ ] **Step 5: Run the pure observation suite and commit**
 
-Run: `corepack pnpm --filter @patchmesh/observation test` and
-`corepack pnpm --filter @patchmesh/observation typecheck`
+Run: `corepack pnpm --filter patchmesh-observation test` and
+`corepack pnpm --filter patchmesh-observation typecheck`
 
 Expected: PASS.
 
@@ -366,7 +366,7 @@ git commit -m "feat: derive file effects and coverage"
 
 - [ ] **Step 1: Add the observation dependency and deterministic fake observer tests**
 
-Add `@patchmesh/observation: workspace:*` to the adapter package, run
+Add `patchmesh-observation: workspace:*` to the adapter package, run
 `corepack pnpm install --lockfile-only`, and update the adapter test helper with a
 fake boundary that returns fixed before/after snapshots and a watcher source.
 
@@ -393,7 +393,7 @@ coverage, observer failure that still executes and persists completion, effect a
 failure that does not create false verified IDs, and an out-of-band change that has
 `agentId: null`, `taskId: null`, a watcher source, and a separate correlation ID.
 
-Run: `corepack pnpm --filter @patchmesh/adapters test`
+Run: `corepack pnpm --filter patchmesh-adapters test`
 
 Expected: FAIL because the proxy does not yet accept an observer or append effects.
 
@@ -445,15 +445,15 @@ never include that event ID.
 
 - [ ] **Step 6: Run adapter integration and all existing adapter tests**
 
-Run: `corepack pnpm --filter @patchmesh/adapters test`
+Run: `corepack pnpm --filter patchmesh-adapters test`
 
 Expected: PASS for all original M3 tests plus the new M4 effect, failure, opaque,
 out-of-band, and observation-persistence scenarios.
 
 - [ ] **Step 7: Typecheck, build, and commit the proxy integration**
 
-Run: `corepack pnpm --filter @patchmesh/adapters typecheck` and
-`corepack pnpm --filter @patchmesh/adapters build`
+Run: `corepack pnpm --filter patchmesh-adapters typecheck` and
+`corepack pnpm --filter patchmesh-adapters build`
 
 Expected: PASS.
 
@@ -533,8 +533,8 @@ git commit -m "docs: record M4 effect observation evidence"
 Run:
 
 ```bash
-corepack pnpm --filter @patchmesh/observation test
-corepack pnpm --filter @patchmesh/adapters test
+corepack pnpm --filter patchmesh-observation test
+corepack pnpm --filter patchmesh-adapters test
 ```
 
 Expected: both packages pass, including temporary repository, linked-worktree,

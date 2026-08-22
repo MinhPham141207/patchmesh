@@ -195,7 +195,7 @@ than relying on synthetic fixture events.
 history is not.**
 
 Language classification moved out of `McpProxy` into `languageForExtension` in
-`@patchmesh/analyzers`, so every caller classifies a file identically and the supported
+`patchmesh-analyzers`, so every caller classifies a file identically and the supported
 set is testable in one place. That closed a real gap: `.mts` and `.cts` were previously
 classified `unsupported` and silently produced degraded coverage for ordinary
 TypeScript. Python (`.py`, `.pyi`) is now analyzed by `analyzePythonSource`, at the same
@@ -368,7 +368,7 @@ promoted holdout corpus, generated detector output, or M7 evidence; those remain
 the production-host capability checkpoint.
 
 PR4 internal readiness is implemented as `PatchMeshSiteMcpGateway` in
-`@patchmesh/adapters`. When a host contract declares synchronous gateway capability,
+`patchmesh-adapters`. When a host contract declares synchronous gateway capability,
 it provides a transparent MCP dispatch path that calls `McpProxy.execute` exactly
 once, uses authoritative runtime/session identity, rejects payload identity conflicts,
 and forwards only same-store persisted completion-linked events to the recorder with a

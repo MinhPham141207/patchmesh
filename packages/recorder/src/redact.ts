@@ -2,7 +2,7 @@
  * Field whitelisting and secret redaction for the raw hook payload.
  *
  * This runs on the agent's critical path, so like `journal.ts` it imports nothing at all -
- * `@patchmesh/observation` owns the same secret patterns but reaching them means importing a
+ * `patchmesh-observation` owns the same secret patterns but reaching them means importing a
  * package barrel that costs the hot path more than the redaction saves. `redact.test.ts`
  * asserts the two implementations agree on a shared corpus, so the duplication cannot drift
  * silently.
@@ -38,7 +38,7 @@ const SECRET_NAME =
 
 /**
  * Redact credential-shaped text. Kept byte-identical in behaviour to
- * `sanitizeDiagnostic` in `@patchmesh/observation`; change both together.
+ * `sanitizeDiagnostic` in `patchmesh-observation`; change both together.
  */
 export function redactText(value: string): string {
   let sanitized = value;

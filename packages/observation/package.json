@@ -1,5 +1,5 @@
 {
-  "name": "@patchmesh/observation",
+  "name": "patchmesh-observation",
   "version": "0.1.0",
   "type": "module",
   "files": [
@@ -17,7 +17,7 @@
     "test": "tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
-    "@patchmesh/protocol": "workspace:*"
+    "patchmesh-protocol": "workspace:*"
   },
   "description": "Filesystem, Git, and content-hash observation used by the PatchMesh recorder.",
   "license": "MIT",
@@ -30,9 +30,6 @@
     "url": "https://github.com/minhpham141207/patchmesh/issues"
   },
   "homepage": "https://github.com/minhpham141207/patchmesh#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=24"
   }

@@ -6,7 +6,7 @@
 
 **Architecture:** Add optional structured effect metadata to successful tool results. The adapter persists the exact watcher `file.changed` event IDs that match that metadata on `tool.completed`; protocol validation and graph projection accept watcher effects as sufficient only through those durable IDs. A real temporary-Git integration test exercises the complete path without injecting protocol events or weakening unmatched snapshot coverage.
 
-**Tech Stack:** Strict TypeScript, Node `node:test`, `@patchmesh/adapters`, `@patchmesh/observation`, `@patchmesh/storage`, `@patchmesh/core`, SQLite event store, and Git CLI temporary linked worktrees.
+**Tech Stack:** Strict TypeScript, Node `node:test`, `patchmesh-adapters`, `patchmesh-observation`, `patchmesh-storage`, `patchmesh-core`, SQLite event store, and Git CLI temporary linked worktrees.
 
 ## Global Constraints
 
@@ -39,7 +39,7 @@ Add a valid `tool.completed` fixture containing `deterministicallyAttributedEffe
 
 - [ ] **Step 2: Run the focused protocol test**
 
-Run: `corepack pnpm --filter @patchmesh/protocol test`
+Run: `corepack pnpm --filter patchmesh-protocol test`
 
 Expected: the new positive case fails because the payload type/schema does not yet define the field; the negative case fails because no semantic guard exists.
 
@@ -49,7 +49,7 @@ Add the optional schema property with `uniqueItems: true`, extend the TypeScript
 
 - [ ] **Step 4: Run the focused protocol tests**
 
-Run: `corepack pnpm --filter @patchmesh/protocol test`
+Run: `corepack pnpm --filter patchmesh-protocol test`
 
 Expected: all protocol tests pass, including the new acceptance and rejection cases.
 
@@ -72,7 +72,7 @@ Extend the adapter test to execute a real observed change with `effectResourceId
 
 - [ ] **Step 2: Run focused tests to verify RED**
 
-Run: `corepack pnpm --filter @patchmesh/adapters test -- mcp-proxy.test.ts` and `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts`
+Run: `corepack pnpm --filter patchmesh-adapters test -- mcp-proxy.test.ts` and `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts`
 
 Expected: the new assertions fail because the execution result has no effect metadata path and the projection always flags watcher effects.
 
@@ -86,7 +86,7 @@ When calculating tool coverage, read the validated deterministic IDs from `tool.
 
 - [ ] **Step 5: Run focused tests to verify GREEN**
 
-Run: `corepack pnpm --filter @patchmesh/adapters test -- mcp-proxy.test.ts` and `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts`
+Run: `corepack pnpm --filter patchmesh-adapters test -- mcp-proxy.test.ts` and `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts`
 
 Expected: focused adapter and storage tests pass, including the existing degraded watcher tests.
 

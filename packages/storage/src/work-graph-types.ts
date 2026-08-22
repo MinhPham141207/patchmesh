@@ -15,7 +15,7 @@ import type {
   ResourceVersion,
   TaskId,
   WorkProductId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import type { SourceSequenceGap } from "./replay.js";
 
 export type GraphNodeKind = "agent" | "task" | "resource" | "version";

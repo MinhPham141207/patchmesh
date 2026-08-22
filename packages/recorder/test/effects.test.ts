@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseEvent, type ProtocolEvent } from "@patchmesh/protocol";
-import { replayEvents, SqliteEventStore } from "@patchmesh/storage";
+import { parseEvent, type ProtocolEvent } from "patchmesh-protocol";
+import { replayEvents, SqliteEventStore } from "patchmesh-storage";
 import { recordTurnEffects } from "../src/index.js";
 
 const TURN = { agentId: "agent_live-session" as const, taskId: "task_turn.live.abc123" as const };

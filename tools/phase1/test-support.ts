@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ProtocolEvent } from "@patchmesh/protocol";
+import type { ProtocolEvent } from "patchmesh-protocol";
 import {
   projectWorkGraph,
   SqliteEventStore,
   type SourceSequenceGap,
   type WorkGraphSnapshot,
-} from "@patchmesh/storage";
+} from "patchmesh-storage";
 
 export async function withTemporaryDirectory<T>(
   prefix: string,

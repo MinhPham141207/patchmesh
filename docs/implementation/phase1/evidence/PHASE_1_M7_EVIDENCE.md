@@ -37,7 +37,7 @@ Focused M7 commands passed:
 ```text
 corepack pnpm phase1:typecheck
 corepack pnpm phase1:test
-corepack pnpm --filter @patchmesh/storage test
+corepack pnpm --filter patchmesh-storage test
 corepack pnpm phase1:benchmark -- --output docs/implementation/phase1/evidence/PHASE_1_M7_BENCHMARKS.json
 ```
 

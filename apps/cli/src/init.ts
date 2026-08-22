@@ -120,12 +120,12 @@ function posix(path: string): string {
 }
 
 function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
-  const dependencyRecorder = join(worktreeRoot, "node_modules", "@patchmesh", "recorder", "dist", "bin.js");
+  const dependencyRecorder = join(worktreeRoot, "node_modules", "patchmesh-recorder", "dist", "bin.js");
   if (existsSync(dependencyRecorder)) {
     return {
       kind: "dependency",
-      hook: (binary) => `node "${posix(join("node_modules", "@patchmesh", "recorder", "dist", binary))}"`,
-      server: { command: "node", args: [posix(join("node_modules", "@patchmesh", "gateway", "dist", "bin.js"))] },
+      hook: (binary) => `node "${posix(join("node_modules", "patchmesh-recorder", "dist", binary))}"`,
+      server: { command: "node", args: [posix(join("node_modules", "patchmesh-gateway", "dist", "bin.js"))] },
     };
   }
   if (existsSync(join(packageRoot, "packages", "recorder", "dist", "bin.js"))) {

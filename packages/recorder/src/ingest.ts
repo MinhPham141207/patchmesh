@@ -9,9 +9,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import type { TaskId } from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
-import type { AgentId } from "@patchmesh/protocol";
+import type { TaskId } from "patchmesh-protocol";
+import { SqliteEventStore } from "patchmesh-storage";
+import type { AgentId } from "patchmesh-protocol";
 import { observeTurnEffects } from "./effects.js";
 import { buildHookEvents, type HookPayload } from "./hook.js";
 import { agentIdForSession, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";

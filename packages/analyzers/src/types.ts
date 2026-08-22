@@ -1,4 +1,4 @@
-import type { EventId, LogicalResource, ResourceVersion } from "@patchmesh/protocol";
+import type { EventId, LogicalResource, ResourceVersion } from "patchmesh-protocol";
 
 export type SupportedLanguage = "typescript" | "javascript" | "python";
 

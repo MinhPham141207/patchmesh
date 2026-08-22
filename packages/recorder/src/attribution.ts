@@ -1,4 +1,4 @@
-import type { AgentId, TaskId } from "@patchmesh/protocol";
+import type { AgentId, TaskId } from "patchmesh-protocol";
 import { agentIdForSession, subagentIdFor, taskIdForDelegate } from "./identity.js";
 
 /**

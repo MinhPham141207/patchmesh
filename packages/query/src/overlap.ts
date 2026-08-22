@@ -1,11 +1,11 @@
-import type { ProtocolEvent } from "@patchmesh/protocol";
+import type { ProtocolEvent } from "patchmesh-protocol";
 import {
   ignoredByRepository,
   logicalPathFor,
   resolveRepositoryIdentity,
   resourceIdForPath,
-} from "@patchmesh/recorder";
-import { SqliteEventStore } from "@patchmesh/storage";
+} from "patchmesh-recorder";
+import { SqliteEventStore } from "patchmesh-storage";
 
 /**
  * Where two units of work touched the same file.

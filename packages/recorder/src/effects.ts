@@ -10,8 +10,8 @@ import {
   type ObservationSnapshot,
   type ObservedFileChange,
   type ObservedFileState,
-} from "@patchmesh/observation";
-import type { AgentId, EventId, ProtocolEvent, Source, TaskId } from "@patchmesh/protocol";
+} from "patchmesh-observation";
+import type { AgentId, EventId, ProtocolEvent, Source, TaskId } from "patchmesh-protocol";
 import { createCorrelationId, createEventId, type RepositoryIdentity } from "./identity.js";
 import { LEDGER_DIRECTORY } from "./record.js";
 

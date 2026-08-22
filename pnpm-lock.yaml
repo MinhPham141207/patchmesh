@@ -23,64 +23,64 @@ importers:
 
   apps/cli:
     dependencies:
-      '@patchmesh/daemon':
+      patchmesh-daemon:
         specifier: workspace:*
         version: link:../daemon
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@patchmesh/query':
+      patchmesh-query:
         specifier: workspace:*
         version: link:../../packages/query
-      '@patchmesh/recorder':
+      patchmesh-recorder:
         specifier: workspace:*
         version: link:../../packages/recorder
 
   apps/daemon:
     dependencies:
-      '@patchmesh/core':
+      patchmesh-core:
         specifier: workspace:*
         version: link:../../packages/core
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@patchmesh/query':
+      patchmesh-query:
         specifier: workspace:*
         version: link:../../packages/query
-      '@patchmesh/storage':
+      patchmesh-storage:
         specifier: workspace:*
         version: link:../../packages/storage
 
   packages/adapters:
     dependencies:
-      '@patchmesh/analyzers':
+      patchmesh-analyzers:
         specifier: workspace:*
         version: link:../analyzers
-      '@patchmesh/observation':
+      patchmesh-observation:
         specifier: workspace:*
         version: link:../observation
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol
-      '@patchmesh/storage':
+      patchmesh-storage:
         specifier: workspace:*
         version: link:../storage
 
   packages/analyzers:
     dependencies:
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol
 
   packages/core:
     dependencies:
-      '@patchmesh/analyzers':
+      patchmesh-analyzers:
         specifier: workspace:*
         version: link:../analyzers
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol
-      '@patchmesh/storage':
+      patchmesh-storage:
         specifier: workspace:*
         version: link:../storage
 
@@ -89,16 +89,16 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.4.3)
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol
-      '@patchmesh/query':
+      patchmesh-query:
         specifier: workspace:*
         version: link:../query
-      '@patchmesh/recorder':
+      patchmesh-recorder:
         specifier: workspace:*
         version: link:../recorder
-      '@patchmesh/storage':
+      patchmesh-storage:
         specifier: workspace:*
         version: link:../storage
       zod:
@@ -107,7 +107,7 @@ importers:
 
   packages/observation:
     dependencies:
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol
 
@@ -122,64 +122,64 @@ importers:
 
   packages/query:
     dependencies:
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol
-      '@patchmesh/recorder':
+      patchmesh-recorder:
         specifier: workspace:*
         version: link:../recorder
-      '@patchmesh/storage':
+      patchmesh-storage:
         specifier: workspace:*
         version: link:../storage
 
   packages/recorder:
     dependencies:
-      '@patchmesh/observation':
+      patchmesh-observation:
         specifier: workspace:*
         version: link:../observation
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol
-      '@patchmesh/storage':
+      patchmesh-storage:
         specifier: workspace:*
         version: link:../storage
 
   packages/storage:
     dependencies:
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol
 
   tools/phase1:
     dependencies:
-      '@patchmesh/adapters':
+      patchmesh-adapters:
         specifier: workspace:*
         version: link:../../packages/adapters
-      '@patchmesh/core':
+      patchmesh-core:
         specifier: workspace:*
         version: link:../../packages/core
-      '@patchmesh/observation':
+      patchmesh-observation:
         specifier: workspace:*
         version: link:../../packages/observation
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@patchmesh/storage':
+      patchmesh-storage:
         specifier: workspace:*
         version: link:../../packages/storage
 
   tools/phase2:
     dependencies:
-      '@patchmesh/adapters':
+      patchmesh-adapters:
         specifier: workspace:*
         version: link:../../packages/adapters
-      '@patchmesh/observation':
+      patchmesh-observation:
         specifier: workspace:*
         version: link:../../packages/observation
-      '@patchmesh/protocol':
+      patchmesh-protocol:
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@patchmesh/storage':
+      patchmesh-storage:
         specifier: workspace:*
         version: link:../../packages/storage
 

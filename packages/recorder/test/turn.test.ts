@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseEvent, type ProtocolEvent } from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { parseEvent, type ProtocolEvent } from "patchmesh-protocol";
+import { SqliteEventStore } from "patchmesh-storage";
 import { ingestJournal, isTurnMarker, resolveAttribution, taskIdForTurn } from "../src/index.js";
 import { JOURNAL_VERSION } from "../src/journal.js";
 

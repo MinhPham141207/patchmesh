@@ -7,7 +7,7 @@ import type {
   TaskId,
   TargetSnapshot,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 import type { DetectorFinding } from "./types.js";
 

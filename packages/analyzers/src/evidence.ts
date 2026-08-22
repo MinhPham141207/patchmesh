@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { EventId, LogicalResource, ResourceVersion } from "@patchmesh/protocol";
+import type { EventId, LogicalResource, ResourceVersion } from "patchmesh-protocol";
 
 import { analyzeSource } from "./typescript.js";
 import type {

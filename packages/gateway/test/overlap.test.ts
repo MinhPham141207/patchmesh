@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { appendJournalEntry, ingestJournal, journalPathFor, recordTurnEffects } from "@patchmesh/recorder";
-import { findOverlappingWork, renderOverlap } from "@patchmesh/query";
+import { appendJournalEntry, ingestJournal, journalPathFor, recordTurnEffects } from "patchmesh-recorder";
+import { findOverlappingWork, renderOverlap } from "patchmesh-query";
 
 const FIRST_SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
 const SECOND_SESSION = "9c2d4e6a-1b3f-4d78-8e05-2a7c1f9b3d64";

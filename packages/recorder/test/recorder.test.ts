@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseEvent, validateEventSet } from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { parseEvent, validateEventSet } from "patchmesh-protocol";
+import { SqliteEventStore } from "patchmesh-storage";
 import {
   buildHookEvents,
   findWorktreeRoot,

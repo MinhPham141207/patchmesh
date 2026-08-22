@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { SqliteEventStore } from "patchmesh-storage";
 import { buildHookEvents, HookRecordingError, type HookPayload } from "./hook.js";
 import { findWorktreeRoot } from "./identity.js";
 

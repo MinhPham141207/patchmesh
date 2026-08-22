@@ -1,7 +1,7 @@
 import { posix } from "node:path";
 
 import type { DerivedEvidenceFacts, SymbolEvidenceFact } from "./evidence-facts.js";
-import type { ResourceId, ResourceVersion } from "@patchmesh/protocol";
+import type { ResourceId, ResourceVersion } from "patchmesh-protocol";
 import type { ResolvedContractDependency } from "./dependency-events.js";
 
 const supportedExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] as const;

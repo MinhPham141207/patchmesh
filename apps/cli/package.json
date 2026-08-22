@@ -17,10 +17,10 @@
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
-    "@patchmesh/daemon": "workspace:*",
-    "@patchmesh/protocol": "workspace:*",
-    "@patchmesh/query": "workspace:*",
-    "@patchmesh/recorder": "workspace:*"
+    "patchmesh-daemon": "workspace:*",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-query": "workspace:*",
+    "patchmesh-recorder": "workspace:*"
   },
   "description": "A shared work ledger for coding agents: records what agents did, and hands it back so the next one does not repeat it.",
   "keywords": [
@@ -41,8 +41,5 @@
   "bugs": {
     "url": "https://github.com/minhpham141207/patchmesh/issues"
   },
-  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
-  "publishConfig": {
-    "access": "public"
-  }
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme"
 }

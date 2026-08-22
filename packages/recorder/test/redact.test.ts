@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { sanitizeDiagnostic } from "@patchmesh/observation";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { sanitizeDiagnostic } from "patchmesh-observation";
+import { SqliteEventStore } from "patchmesh-storage";
 import { appendJournalEntry, ingestJournal, journalPathFor, redactHookPayload, redactText } from "../src/index.js";
 
 const SESSION = "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17";
@@ -78,7 +78,7 @@ test("credentials inside a whitelisted command are redacted", () => {
 });
 
 test("recorder redaction stays in step with the shared sanitizer", () => {
-  // The hot path cannot import @patchmesh/observation, so the patterns are duplicated. This
+  // The hot path cannot import patchmesh-observation, so the patterns are duplicated. This
   // pins the copies together: a pattern added on one side and not the other fails here.
   const corpus = [
     "Bearer abcdef123456",

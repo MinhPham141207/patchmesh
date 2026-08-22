@@ -1,9 +1,11 @@
 {
-  "name": "@patchmesh/adapters",
+  "name": "patchmesh-adapters",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -16,9 +18,9 @@
     "test": "tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
-    "@patchmesh/analyzers": "workspace:*",
-    "@patchmesh/observation": "workspace:*",
-    "@patchmesh/protocol": "workspace:*",
-    "@patchmesh/storage": "workspace:*"
+    "patchmesh-analyzers": "workspace:*",
+    "patchmesh-observation": "workspace:*",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-storage": "workspace:*"
   }
 }

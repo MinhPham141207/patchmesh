@@ -6,7 +6,7 @@
 ## Goal
 
 Implement Phase 1 milestone M5, `Replayable Work-Graph Projections`, on top of the
-existing `@patchmesh/storage` event store and replay core.
+existing `patchmesh-storage` event store and replay core.
 
 The implementation will build a live work graph as rebuildable derived state from
 validated events. The event log remains the source of truth. The projection is
@@ -17,7 +17,7 @@ decisions, validity transitions, gateway directives, or coordination actions.
 
 M5 includes:
 
-- A typed in-memory work-graph projection in `@patchmesh/storage`.
+- A typed in-memory work-graph projection in `patchmesh-storage`.
 - Incremental processing for causally ordered events.
 - Clean projection rebuild through the existing replay reducer interface.
 - Agent and task projection from nullable event-envelope attribution.

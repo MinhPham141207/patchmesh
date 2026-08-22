@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { classifyContractCompatibility } from "@patchmesh/analyzers";
-import type { CoverageId, DerivedEvidenceEventV3, EventId, ProtocolEvent, ResourceVersion, TargetSnapshot } from "@patchmesh/protocol";
-import { projectWorkGraph } from "@patchmesh/storage";
+import { classifyContractCompatibility } from "patchmesh-analyzers";
+import type { CoverageId, DerivedEvidenceEventV3, EventId, ProtocolEvent, ResourceVersion, TargetSnapshot } from "patchmesh-protocol";
+import { projectWorkGraph } from "patchmesh-storage";
 
 import { createDurableReportOnlyRecords, type DurableReportOnlyRecords } from "./durable-records.js";
 import { runExportedContractInvalidationDetector, runSameSymbolDetector, runStaleReadBeforeWriteDetector } from "./detector-runner.js";

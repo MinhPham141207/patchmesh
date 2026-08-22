@@ -1,5 +1,5 @@
-import type { DecisionDelivery, DecisionId, EventType, FindingId, FindingFeedback } from "@patchmesh/protocol";
-import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters } from "@patchmesh/query";
+import type { DecisionDelivery, DecisionId, EventType, FindingId, FindingFeedback } from "patchmesh-protocol";
+import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters } from "patchmesh-query";
 
 export type CommandName = "init" | "prune" | "status" | "agents" | "events" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "help";
 

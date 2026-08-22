@@ -1,4 +1,4 @@
-import type { CorrelationId, EventId, RepositoryId, Source, WorkspaceId, WorktreeId } from "@patchmesh/protocol";
+import type { CorrelationId, EventId, RepositoryId, Source, WorkspaceId, WorktreeId } from "patchmesh-protocol";
 
 import { createDurableReportOnlyRecords, type DurableReportOnlyRecords } from "./durable-records.js";
 import { evaluateReportOnlyPolicy } from "./report-only-policy.js";

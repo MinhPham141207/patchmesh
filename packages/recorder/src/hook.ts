@@ -1,5 +1,5 @@
-import { sanitizeDiagnostic } from "@patchmesh/observation";
-import type { AgentId, EventId, ProtocolEvent, Source, TaskId } from "@patchmesh/protocol";
+import { sanitizeDiagnostic } from "patchmesh-observation";
+import type { AgentId, EventId, ProtocolEvent, Source, TaskId } from "patchmesh-protocol";
 import { attributionFieldsOf, resolveAttribution, type CallAttribution } from "./attribution.js";
 import {
   createCorrelationId,

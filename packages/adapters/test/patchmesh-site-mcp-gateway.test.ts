@@ -19,9 +19,9 @@ import {
   type PatchMeshSiteHostContract,
   type PatchMeshSiteRuntimeIdentity,
 } from "../src/index.js";
-import { fileResourceId, NodeObservationBoundary, type ObservationBoundary } from "@patchmesh/observation";
-import { validateEventSet } from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { fileResourceId, NodeObservationBoundary, type ObservationBoundary } from "patchmesh-observation";
+import { validateEventSet } from "patchmesh-protocol";
+import { SqliteEventStore } from "patchmesh-storage";
 
 const execFile = promisify(execFileCallback);
 

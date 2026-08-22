@@ -1,7 +1,7 @@
-import type { ProtocolEvent } from "@patchmesh/protocol";
-import { ignoredByRepository } from "@patchmesh/recorder";
+import type { ProtocolEvent } from "patchmesh-protocol";
+import { ignoredByRepository } from "patchmesh-recorder";
 import { commitsWithin, readCommitsSince } from "./label.js";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { SqliteEventStore } from "patchmesh-storage";
 
 /**
  * What a prior session already established, so a fresh agent resumes instead of re-deriving.

@@ -17,7 +17,7 @@ import type {
   ProtocolEvent,
   WorktreeId,
   WorkspaceId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import { canonicalBytes, StorageError } from "../src/index.js";
 import { coverageId, versionNodeId } from "../src/work-graph-ids.js";
 import { WorkGraphProjector, projectWorkGraph } from "../src/work-graph.js";

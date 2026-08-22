@@ -15,10 +15,10 @@ import {
   type SymbolChangedEvent,
   type ToolCompletedEvent,
   type ToolRequestedEvent,
-} from "@patchmesh/protocol";
-import type { EventReader } from "@patchmesh/query";
-import { ReadServiceError } from "@patchmesh/query";
-import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
+} from "patchmesh-protocol";
+import type { EventReader } from "patchmesh-query";
+import { ReadServiceError } from "patchmesh-query";
+import { projectWorkGraph, SqliteEventStore } from "patchmesh-storage";
 import { createDaemon } from "../src/index.js";
 
 const fixtureReader: EventReader = {
@@ -396,7 +396,7 @@ test("daemon persists immutable finding feedback only through a writable store",
       },
     },
   };
-  const decision: import("@patchmesh/protocol").DecisionCreatedEvent = {
+  const decision: import("patchmesh-protocol").DecisionCreatedEvent = {
     ...finding,
     eventId: `evt_${"b".repeat(32)}`,
     eventType: "decision.created",

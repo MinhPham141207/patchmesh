@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { findWorktreeRoot } from "@patchmesh/recorder";
+import { findWorktreeRoot } from "patchmesh-recorder";
 import { createGatewayServer } from "./server.js";
 
 /**

@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { validateEventSet } from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { validateEventSet } from "patchmesh-protocol";
+import { SqliteEventStore } from "patchmesh-storage";
 import {
   appendJournalEntry,
   ingestJournal,

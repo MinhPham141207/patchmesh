@@ -1,4 +1,4 @@
-import type { DecisionDelivery, DecisionId, FindingFeedback, FindingId } from "@patchmesh/protocol";
+import type { DecisionDelivery, DecisionId, FindingFeedback, FindingId } from "patchmesh-protocol";
 import type {
   AgentsView,
   AgentView,
@@ -9,8 +9,8 @@ import type {
   GraphView,
   OverlapResult,
   StatusView,
-} from "@patchmesh/query";
-import { renderOverlap } from "@patchmesh/query";
+} from "patchmesh-query";
+import { renderOverlap } from "patchmesh-query";
 
 /** Structural shape of one projection coverage gap, matching `ProjectionCoverageGap`. */
 interface CoverageGap {

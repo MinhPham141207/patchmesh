@@ -4,7 +4,7 @@ import type {
   ProtocolEvent,
   ResourceChangedPayload,
   ResourceObservedPayload,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import { replayEvents, type ReplayReducer, type SourceSequenceGap } from "./replay.js";
 import { deriveProjectionCoverage } from "./work-graph-coverage.js";
 import {

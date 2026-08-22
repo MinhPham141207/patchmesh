@@ -46,7 +46,7 @@ recall summarizes calls instead of listing them.
 ## Quick start
 
 ```bash
-npm install -D patchmesh @patchmesh/recorder @patchmesh/gateway
+npm install -D patchmesh patchmesh-recorder patchmesh-gateway
 npx patchmesh init
 ```
 

@@ -5,7 +5,7 @@ import type {
   FindingType,
   ResourceId,
   TaskId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 export interface DetectorEvidence {
   readonly subjectResourceId: ResourceId;

@@ -8,7 +8,7 @@ import type {
   Source,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 export interface ObservationContext {
   readonly workspaceRoot: string;

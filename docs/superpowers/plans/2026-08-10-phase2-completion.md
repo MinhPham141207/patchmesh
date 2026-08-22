@@ -6,7 +6,7 @@
 
 **Architecture:** Implement the requested order as independently testable increments. M5 starts with pure cross-worktree dependency matching, multi-consumer retention, and a deterministic signature classifier; M2 then makes the provenance required by M5 durable and replayable; M5 runtime acceptance follows from that evidence layer. M4/M6 extend scenario and CLI coverage, M7 consumes only human-reviewed real-agent cases, and M0 records a separate `NodeObservationBoundary` budget decision. The event log remains authoritative, analyzers remain pure, and all Phase 2 output remains report-only.
 
-**Tech Stack:** Strict TypeScript, Node `node:test`, JSON Schema, `@patchmesh/analyzers`, `@patchmesh/protocol`, `@patchmesh/adapters`, `@patchmesh/core`, `@patchmesh/storage`, `@patchmesh/query`, `@patchmesh/daemon`, `@patchmesh/cli`, SQLite replay, real temporary Git repositories, and the dependency-free `.evidence` recorder.
+**Tech Stack:** Strict TypeScript, Node `node:test`, JSON Schema, `patchmesh-analyzers`, `patchmesh-protocol`, `patchmesh-adapters`, `patchmesh-core`, `patchmesh-storage`, `patchmesh-query`, `patchmesh-daemon`, `patchmesh`, SQLite replay, real temporary Git repositories, and the dependency-free `.evidence` recorder.
 
 ## Global Constraints
 
@@ -44,7 +44,7 @@ Add cases for unchanged signatures, additive optional/default-compatible changes
 
 - [ ] **Step 2: Run the analyzer tests to verify RED.**
 
-Run: `corepack pnpm --filter @patchmesh/analyzers test`
+Run: `corepack pnpm --filter patchmesh-analyzers test`
 
 Expected: the new compatibility import or assertions fail because no classifier exists and cross-worktree matching is still rejected.
 
@@ -58,7 +58,7 @@ Create producer and consumer facts with the same repository/workspace/integratio
 
 - [ ] **Step 5: Implement the minimal resolver change and run the focused tests.**
 
-Remove only the same-worktree requirement, retain repository and integration-target guards, preserve deterministic sorting, and run `corepack pnpm --filter @patchmesh/analyzers test`.
+Remove only the same-worktree requirement, retain repository and integration-target guards, preserve deterministic sorting, and run `corepack pnpm --filter patchmesh-analyzers test`.
 
 Expected: all analyzer tests pass and unresolved/unsupported paths remain degraded or empty.
 
@@ -86,7 +86,7 @@ Provide a compatible prior contract, a breaking current contract, and an unrelat
 
 - [ ] **Step 3: Run focused core tests to verify RED.**
 
-Run: `corepack pnpm --filter @patchmesh/core test`
+Run: `corepack pnpm --filter patchmesh-core test`
 
 Expected: the multiple-consumer case produces only one result or the history case cannot identify the correct contract.
 
@@ -96,7 +96,7 @@ Retain all durable dependency events per contract resource, sort consumers by ev
 
 - [ ] **Step 5: Run the core suite.**
 
-Run: `corepack pnpm --filter @patchmesh/core test`
+Run: `corepack pnpm --filter patchmesh-core test`
 
 Expected: all existing and new tests pass with deterministic finding IDs and no gateway directives beyond report-only values.
 
@@ -126,7 +126,7 @@ Add a valid V2 derived-evidence event with complete provenance and negative fixt
 
 - [ ] **Step 2: Run protocol tests to verify RED.**
 
-Run: `corepack pnpm --filter @patchmesh/protocol test`
+Run: `corepack pnpm --filter patchmesh-protocol test`
 
 Expected: V2 derived-evidence fixtures fail until the schema and semantic checks exist.
 
@@ -144,11 +144,11 @@ Pass metadata from pure `DerivedEvidenceFacts` into durable events. Verify the c
 
 - [ ] **Step 6: Run protocol, adapter, storage, and type checks.**
 
-Run: `corepack pnpm --filter @patchmesh/protocol test`
+Run: `corepack pnpm --filter patchmesh-protocol test`
 
-Run: `corepack pnpm --filter @patchmesh/adapters test`
+Run: `corepack pnpm --filter patchmesh-adapters test`
 
-Run: `corepack pnpm --filter @patchmesh/storage test`
+Run: `corepack pnpm --filter patchmesh-storage test`
 
 Expected: V1 compatibility, V2 validation, durable provenance, restart replay, and degraded guards all pass.
 
@@ -182,11 +182,11 @@ Use replayed durable provenance and contract history to resolve producer/consume
 
 Run: `corepack pnpm exec tsx --test tools/phase1/phase2-golden.test.ts`
 
-Run: `corepack pnpm --filter @patchmesh/core test`
+Run: `corepack pnpm --filter patchmesh-core test`
 
-Run: `corepack pnpm --filter @patchmesh/adapters test`
+Run: `corepack pnpm --filter patchmesh-adapters test`
 
-Run: `corepack pnpm --filter @patchmesh/storage test`
+Run: `corepack pnpm --filter patchmesh-storage test`
 
 Expected: same-symbol and contract golden paths pass, while opaque, failed, mismatched, out-of-band, and unsupported cases remain degraded.
 
@@ -220,15 +220,15 @@ Do not change detector authority or bypass existing guards. Keep immutable event
 
 - [ ] **Step 4: Run focused M4/M6 verification.**
 
-Run: `corepack pnpm --filter @patchmesh/core test`
+Run: `corepack pnpm --filter patchmesh-core test`
 
-Run: `corepack pnpm --filter @patchmesh/storage test`
+Run: `corepack pnpm --filter patchmesh-storage test`
 
-Run: `corepack pnpm --filter @patchmesh/query test`
+Run: `corepack pnpm --filter patchmesh-query test`
 
-Run: `corepack pnpm --filter @patchmesh/daemon test`
+Run: `corepack pnpm --filter patchmesh-daemon test`
 
-Run: `corepack pnpm --filter @patchmesh/cli test`
+Run: `corepack pnpm --filter patchmesh test`
 
 Expected: all evidence gaps remain visible and all directives remain non-disruptive.
 
@@ -313,7 +313,7 @@ Run: `corepack pnpm evidence:test`
 
 Run: `corepack pnpm exec tsx --test tools/phase2/m0-budget-report.test.ts`
 
-Run: `corepack pnpm --filter @patchmesh/protocol test`
+Run: `corepack pnpm --filter patchmesh-protocol test`
 
 Expected: recorder evidence remains separate from M0, V2 docs and validators agree, and no disruptive authority is introduced.
 

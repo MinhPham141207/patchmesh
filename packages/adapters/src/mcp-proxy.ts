@@ -14,7 +14,7 @@ import {
   type SourceFacts,
   type SymbolEvidenceFact,
   type SymbolEventContext,
-} from "@patchmesh/analyzers";
+} from "patchmesh-analyzers";
 import {
   parseEvent,
   ProtocolValidationError,
@@ -31,8 +31,8 @@ import {
   type ResourceVersion,
   type ToolCompletedEvent,
   type ToolRequestedEvent,
-} from "@patchmesh/protocol";
-import { projectWorkGraph, type AppendResult } from "@patchmesh/storage";
+} from "patchmesh-protocol";
+import { projectWorkGraph, type AppendResult } from "patchmesh-storage";
 import {
   deriveCoverage,
   diffSnapshots,
@@ -45,7 +45,7 @@ import {
   type IncrementalObservationBoundary,
   type ObservationWindow,
   type ObservedFileChange,
-} from "@patchmesh/observation";
+} from "patchmesh-observation";
 import type {
   McpCallContext,
   McpProxyOptions,
@@ -370,7 +370,7 @@ function createDerivedEvidenceEvent(
   normalizedSignature: string | null,
   targetSnapshot?: McpCallContext["targetSnapshot"],
   sourceVersion?: ResourceVersion,
-  contractResourceId?: import("@patchmesh/protocol").ResourceId,
+  contractResourceId?: import("patchmesh-protocol").ResourceId,
 ): DerivedEvidenceEvent {
   if (targetSnapshot !== undefined && sourceVersion !== undefined && target.agentId !== null && target.taskId !== null) {
     const sourceEventId = sourceEventIds[0];
@@ -403,7 +403,7 @@ function createDerivedEvidenceEvent(
           } } : { kind: "resolver_confirmed_consumer_dependency", sourceAnalysis: {
             sourceEventId, sourceResourceId: sourceFacts.resource.resourceId, sourceVersion,
             analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: sourceFacts.resource.resourceId, sourceVersion })).digest("hex")}`,
-          }, resolver: { resolverId: "local-contract-resolver", version: "1" }, dependencyId: stableFactId as import("@patchmesh/protocol").DependencyId, consumerResourceId: sourceFacts.resource.resourceId, contractResourceId: contractResourceId ?? sourceFacts.resource.resourceId, resolution: "confirmed" },
+          }, resolver: { resolverId: "local-contract-resolver", version: "1" }, dependencyId: stableFactId as import("patchmesh-protocol").DependencyId, consumerResourceId: sourceFacts.resource.resourceId, contractResourceId: contractResourceId ?? sourceFacts.resource.resourceId, resolution: "confirmed" },
         } },
       };
     }
@@ -501,12 +501,12 @@ function priorSymbolVersions(
   changed: FileChangedEvent,
   targetSnapshot: McpCallContext["targetSnapshot"],
   facts: DerivedEvidenceFacts,
-): ReadonlyMap<import("@patchmesh/protocol").ResourceId, ResourceVersion> {
+): ReadonlyMap<import("patchmesh-protocol").ResourceId, ResourceVersion> {
   if (targetSnapshot === undefined || changed.payload.beforeVersion === null) return new Map();
   const byId = new Map(events.map((event) => [event.eventId, event] as const));
   const expectedConfigurationDigest = configurationDigest(facts.source.configuration);
   const expectedSymbols = new Set(facts.symbols.map((fact) => fact.resource.resourceId));
-  const candidates = new Map<import("@patchmesh/protocol").ResourceId, ResourceVersion[]>();
+  const candidates = new Map<import("patchmesh-protocol").ResourceId, ResourceVersion[]>();
   for (const evidence of events) {
     if (evidence.eventType !== "evidence.derived" || evidence.schemaVersion !== 3
       || evidence.payload.evidence.factKind !== "symbol"

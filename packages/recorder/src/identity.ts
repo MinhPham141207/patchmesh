@@ -10,7 +10,7 @@ import type {
   TaskId,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 /**
  * Deterministic UUID in the shape the Phase 0 identity schema requires: version nibble
@@ -216,7 +216,7 @@ export function taskIdForTurn(sessionId: string, promptId: string | null, at: st
 /**
  * Resource identity for one repository-relative path.
  *
- * Kept byte-identical to `fileResourceId` in `@patchmesh/observation`, which is what the
+ * Kept byte-identical to `fileResourceId` in `patchmesh-observation`, which is what the
  * adapters, the observation package and the Phase 0 corpus all derive; change both together.
  * `resource-id.test.ts` pins the two together so the duplication cannot drift silently.
  *

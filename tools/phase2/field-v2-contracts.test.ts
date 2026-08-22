@@ -3,8 +3,8 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { digestHostAdapterCapabilities, type HostAdapterCapabilities } from "@patchmesh/adapters";
-import type { ProtocolEvent } from "@patchmesh/protocol";
+import { digestHostAdapterCapabilities, type HostAdapterCapabilities } from "patchmesh-adapters";
+import type { ProtocolEvent } from "patchmesh-protocol";
 import { canonicalSha256 } from "./gate-definitions.js";
 import {
   loadFieldCaseBundleV2,

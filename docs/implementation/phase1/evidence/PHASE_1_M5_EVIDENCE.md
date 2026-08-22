@@ -8,7 +8,7 @@
 
 ## Scope Verified
 
-M5 adds a typed in-memory work-graph projector to `@patchmesh/storage`. The projector
+M5 adds a typed in-memory work-graph projector to `patchmesh-storage`. The projector
 implements the existing replay reducer boundary and exposes `projectWorkGraph`,
 incremental `WorkGraphProjector.process`, and frozen `snapshot` APIs. It projects
 agents, tasks, resources, versions, reads, changes, dependencies, task completion
@@ -23,9 +23,9 @@ coordination action, gateway directive, daemon, or CLI behavior was added.
 
 | Command | Result |
 | --- | --- |
-| `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts` | Passed: 31 storage tests |
-| `corepack pnpm --filter @patchmesh/storage typecheck` | Passed |
-| `corepack pnpm --filter @patchmesh/storage build` | Passed |
+| `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts` | Passed: 31 storage tests |
+| `corepack pnpm --filter patchmesh-storage typecheck` | Passed |
+| `corepack pnpm --filter patchmesh-storage build` | Passed |
 | `corepack pnpm --recursive test` | Passed: 82 workspace tests |
 | `corepack pnpm --recursive typecheck` | Passed for all 5 workspace packages |
 | `corepack pnpm --recursive build` | Passed for all 5 workspace packages |

@@ -1,5 +1,5 @@
 {
-  "name": "@patchmesh/gateway",
+  "name": "patchmesh-gateway",
   "version": "0.1.0",
   "type": "module",
   "files": [
@@ -21,10 +21,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@patchmesh/protocol": "workspace:*",
-    "@patchmesh/query": "workspace:*",
-    "@patchmesh/recorder": "workspace:*",
-    "@patchmesh/storage": "workspace:*",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-query": "workspace:*",
+    "patchmesh-recorder": "workspace:*",
+    "patchmesh-storage": "workspace:*",
     "zod": "^4.4.3"
   },
   "description": "MCP server exposing the PatchMesh ledger back to coding agents.",
@@ -38,9 +38,6 @@
     "url": "https://github.com/minhpham141207/patchmesh/issues"
   },
   "homepage": "https://github.com/minhpham141207/patchmesh#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=24"
   }

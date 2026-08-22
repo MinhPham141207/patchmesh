@@ -1,5 +1,5 @@
 {
-  "name": "@patchmesh/storage",
+  "name": "patchmesh-storage",
   "version": "0.1.0",
   "type": "module",
   "engines": {
@@ -20,7 +20,7 @@
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
-    "@patchmesh/protocol": "workspace:*"
+    "patchmesh-protocol": "workspace:*"
   },
   "description": "Append-only SQLite event store, deterministic replay, and work-graph projection for PatchMesh.",
   "license": "MIT",
@@ -32,8 +32,5 @@
   "bugs": {
     "url": "https://github.com/minhpham141207/patchmesh/issues"
   },
-  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
-  "publishConfig": {
-    "access": "public"
-  }
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme"
 }

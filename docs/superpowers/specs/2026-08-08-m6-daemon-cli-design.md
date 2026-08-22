@@ -17,7 +17,7 @@ decisions, validity claims, disruptive directives, or unscheduled lifecycle comm
 
 M6 includes:
 
-- A shared `@patchmesh/query` public read-service package.
+- A shared `patchmesh-query` public read-service package.
 - An `apps/daemon` composition layer with health and read-service wiring.
 - An `apps/cli` executable and command parser.
 - `patchmesh status`, `patchmesh agents`, `patchmesh events`, and `patchmesh graph`.
@@ -39,10 +39,10 @@ M6 does not include:
 
 ## Architecture
 
-### `@patchmesh/query`
+### `patchmesh-query`
 
-Create a public read-service package that depends on `@patchmesh/protocol` and
-`@patchmesh/storage`. It must not import CLI, daemon, adapter, or observation runtime
+Create a public read-service package that depends on `patchmesh-protocol` and
+`patchmesh-storage`. It must not import CLI, daemon, adapter, or observation runtime
 code.
 
 The package exposes:
@@ -76,7 +76,7 @@ export function createDaemon(options: DaemonOptions): PatchMeshDaemon;
 ```
 
 `createDaemon` receives an already selected database path or injected event-store
-reader, opens the existing store, and wires `@patchmesh/query` to M5 projection state.
+reader, opens the existing store, and wires `patchmesh-query` to M5 projection state.
 It does not create missing databases, start a process, listen on a port, or register an
 adapter. `close` releases the store and stops no external process.
 

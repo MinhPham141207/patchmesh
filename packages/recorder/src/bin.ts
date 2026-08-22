@@ -9,7 +9,7 @@ import { redactHookPayload } from "./redact.js";
  * Hook entry point, on the agent's critical path.
  *
  * It imports only `./identity.js`, `./journal.js`, and `./redact.js`, none of which pull
- * anything beyond Node builtins. Importing `@patchmesh/protocol` or `@patchmesh/storage` here would add
+ * anything beyond Node builtins. Importing `patchmesh-protocol` or `patchmesh-storage` here would add
  * roughly 400ms of Ajv import and schema compilation to every single tool call; that work
  * belongs in `patchmesh-ingest`, which pays it once. Keep this module's import graph flat.
  */

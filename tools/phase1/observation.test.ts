@@ -8,9 +8,9 @@ import {
   McpProxy,
   type McpCallContext,
   type McpToolCall,
-} from "@patchmesh/adapters";
-import { NodeObservationBoundary, sanitizeDiagnostic } from "@patchmesh/observation";
-import { SqliteEventStore } from "@patchmesh/storage";
+} from "patchmesh-adapters";
+import { NodeObservationBoundary, sanitizeDiagnostic } from "patchmesh-observation";
+import { SqliteEventStore } from "patchmesh-storage";
 import {
   consumerAgentId,
   consumerTaskId,

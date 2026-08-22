@@ -17,7 +17,7 @@ import type {
   ProtocolEvent,
   ToolCompletedEvent,
   ToolRequestedEvent,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import { projectWorkGraph, SqliteEventStore, StorageError } from "../src/index.js";
 import { replayEvents } from "../src/replay.js";
 

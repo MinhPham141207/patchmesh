@@ -4,14 +4,14 @@
 
 **Goal:** Build the strict TypeScript/pnpm workspace, runtime-agnostic V1 protocol boundary, and in-memory normalized-event collector required by M1.
 
-**Architecture:** The Phase 0 JSON Schemas remain the structural authority. `@patchmesh/protocol` exposes strict TypeScript event unions, Ajv-backed structural validation, and event-set semantic validation; `@patchmesh/collector` depends only on that package and stores validated immutable events in memory. The implementation exercises `tool.requested` followed by `tool.completed` and does not implement adapters, storage, replay, effects, projections, daemon services, or CLI commands.
+**Architecture:** The Phase 0 JSON Schemas remain the structural authority. `patchmesh-protocol` exposes strict TypeScript event unions, Ajv-backed structural validation, and event-set semantic validation; `@patchmesh/collector` depends only on that package and stores validated immutable events in memory. The implementation exercises `tool.requested` followed by `tool.completed` and does not implement adapters, storage, replay, effects, projections, daemon services, or CLI commands.
 
 **Tech Stack:** TypeScript with strict mode, pnpm workspaces, Ajv plus `ajv-formats`, Node's built-in test runner through `tsx`, and the existing Phase 0 JSON Schemas and validator.
 
 ## Global Constraints
 
 - Keep `packages/protocol` runtime-agnostic; it must not import collector, adapters, gateway, storage, CLI, or runtime-specific code.
-- Keep `packages/collector` dependent only on `@patchmesh/protocol`.
+- Keep `packages/collector` dependent only on `patchmesh-protocol`.
 - Preserve the Phase 0 closed V1 envelope and payload contracts; do not invent `tool.failed` or mutate event fields.
 - Every event must retain `agentId` and `taskId` fields, and each may be `null`.
 - Failed and interrupted operations are `tool.completed` events with `outcome: "failed"` or `outcome: "interrupted"`.
@@ -127,7 +127,7 @@ callers cannot mutate collector state through a returned object.
 **Interfaces:**
 
 - Produces the workspace commands used by every later task: `pnpm typecheck`, `pnpm build`, and `pnpm test`.
-- Produces package names `@patchmesh/protocol` and `@patchmesh/collector`.
+- Produces package names `patchmesh-protocol` and `@patchmesh/collector`.
 
 - [ ] **Step 1: Write the workspace configuration**
 
@@ -244,7 +244,7 @@ the full Phase 0 envelope without adding projection behavior.
 Run:
 
 ```text
-pnpm --filter @patchmesh/protocol typecheck
+pnpm --filter patchmesh-protocol typecheck
 ```
 
 Expected: FAIL before the types exist with missing-module or missing-export errors.
@@ -342,8 +342,8 @@ export all public types through `index.ts`.
 Run:
 
 ```text
-pnpm --filter @patchmesh/protocol typecheck
-pnpm --filter @patchmesh/protocol test
+pnpm --filter patchmesh-protocol typecheck
+pnpm --filter patchmesh-protocol test
 ```
 
 Expected: typecheck passes; tests still fail only where `parseEvent` and
@@ -403,7 +403,7 @@ test("requires nullable attribution fields to be present", () => {
 Run:
 
 ```text
-pnpm --filter @patchmesh/protocol test
+pnpm --filter patchmesh-protocol test
 ```
 
 Expected: FAIL because schema loading and `parseEvent` are not implemented.
@@ -480,8 +480,8 @@ Do not infer ordering from timestamps. Do not buffer or repair missing reference
 Run:
 
 ```text
-pnpm --filter @patchmesh/protocol typecheck
-pnpm --filter @patchmesh/protocol test
+pnpm --filter patchmesh-protocol typecheck
+pnpm --filter patchmesh-protocol test
 ```
 
 Expected: all protocol structural and semantic tests pass with no emitted diagnostics
@@ -499,7 +499,7 @@ for valid fixtures and deterministic diagnostics for invalid fixtures.
 
 **Interfaces:**
 
-- Consumes: `ProtocolEvent`, `parseEvent`, `validateEventSet`, and `ProtocolValidationError` from `@patchmesh/protocol`.
+- Consumes: `ProtocolEvent`, `parseEvent`, `validateEventSet`, and `ProtocolValidationError` from `patchmesh-protocol`.
 - Produces: `EventCollector` and `InMemoryEventCollector` for the M1 round trip.
 
 - [ ] **Step 1: Write failing collector tests**
@@ -568,7 +568,7 @@ duplicate and out-of-order policy out of this class; M2 defines those semantics.
 - [ ] **Step 3: Export the collector API**
 
 Export `EventCollector` and `InMemoryEventCollector` from `packages/collector/src/index.ts`.
-Use a package dependency on `@patchmesh/protocol`, not a relative import into the
+Use a package dependency on `patchmesh-protocol`, not a relative import into the
 protocol source directory.
 
 - [ ] **Step 4: Run collector and workspace checks**
