@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseEvent, type ProtocolEvent } from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { replayEvents, SqliteEventStore } from "@patchmesh/storage";
 import { recordTurnEffects } from "../src/index.js";
 
 const TURN = { agentId: "agent_live-session" as const, taskId: "task_turn.live.abc123" as const };
@@ -110,6 +110,36 @@ test("a deletion is a change, and an unchanged repository reports none", async (
     assert.equal(result.changed, 1);
     const change = readEvents(where.ledgerPath).find((event) => event.eventType === "file.changed");
     assert.equal((change as { payload: { changeKind: string } }).payload.changeKind, "deleted");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a batch of observed changes replays as a valid event set", async () => {
+  // Per-event validation cannot catch this class of bug: sharing one correlation across a
+  // batch makes each change a second root of it, which is only invalid as a property of the
+  // set. It broke every graph-backed CLI command - status, agents, graph, overlaps - while
+  // each individual event still parsed cleanly.
+  const root = temporaryWorktree();
+  try {
+    const where = paths(root);
+    writeFileSync(join(root, "existing.md"), "already here\n", "utf8");
+    await recordTurnEffects({ worktreeRoot: root, ...where, turn: TURN });
+
+    writeFileSync(join(root, "one.md"), "first\n", "utf8");
+    writeFileSync(join(root, "two.md"), "second\n", "utf8");
+    writeFileSync(join(root, "three.md"), "third\n", "utf8");
+    const result = await recordTurnEffects({ worktreeRoot: root, ...where, turn: TURN });
+    assert.equal(result.changed, 3);
+
+    const store = SqliteEventStore.open(where.ledgerPath);
+    try {
+      // Throws StorageError("replay event-set validation failed") if the set is inconsistent.
+      const replayed = replayEvents(store.read());
+      assert.equal(replayed.orderedEvents.length, store.read().length);
+    } finally {
+      store.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -130,7 +130,6 @@ export async function observeTurnEffects(options: ObserveTurnEffectsOptions): Pr
   if (previous === null) return { events: [], baselineOnly: true };
 
   const diff = diffSnapshots(previous, capture.snapshot, false);
-  const correlationId = createCorrelationId();
   const events = diff.changes
     .filter((change) => !isRecorderState(change.path))
     .map((change) =>
@@ -141,7 +140,11 @@ export async function observeTurnEffects(options: ObserveTurnEffectsOptions): Pr
       timestamp,
       agentId: options.agentId,
       taskId: options.taskId,
-      correlationId,
+      // One correlation per change, not one per batch. Each observed change is its own causal
+      // root - nothing in the recorded stream caused it - and a correlation may hold only one
+      // root, so sharing an id across a batch makes every event after the first invalid. Per
+      // event validation cannot see this; it is a property of the set.
+      correlationId: createCorrelationId(),
       eventId: nextEventId(),
     }),
     );
