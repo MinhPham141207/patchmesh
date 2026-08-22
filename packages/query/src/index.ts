@@ -13,6 +13,7 @@ export {
   type FindingListQuery,
   type FindingsView,
   type GraphFilters,
+  type GraphNode,
   type GraphView,
   type ReadServiceErrorCode,
   type ReadServiceOptions,

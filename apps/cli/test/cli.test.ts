@@ -419,3 +419,109 @@ test("prune reports what survived, not only what went", async () => {
   // Thirty days back, not thirty days forward, and not "now".
   assert.ok((asked as unknown as Date).getTime() < Date.now());
 });
+
+test("status summarizes repeated coverage gaps instead of printing one line each", async () => {
+  // A hook-recorded ledger produces one opaque gap per shell command, and shell commands are
+  // most of what an agent runs. On this repository's own ledger that was 673 identical lines
+  // against 9 lines of actual status.
+  const gaps = Array.from({ length: 400 }, (_, index) => ({
+    kind: "opaque" as const,
+    scope: `tool:evt_${index}`,
+    reason: "opaque operation effects are not prospectively enumerable",
+    evidenceEventIds: [],
+  }));
+  const noisy = { ...status, coverage: { ...status.coverage, gaps } };
+  const result = await runCli(["status"], {
+    ...overlapDeps,
+    services: { ...services, getStatus: () => noisy } as unknown as ReadServices,
+  });
+
+  assert.equal(result.exitCode, 0);
+  const gapLines = result.stdout.split("\n").filter((line) => line.includes("Coverage gap"));
+  assert.equal(gapLines.length, 1);
+  assert.match(gapLines[0] ?? "", /opaque \(400\) opaque operation effects/);
+});
+
+test("a single coverage gap still names the scope that fell short", async () => {
+  // Summarizing is only worth doing when there is repetition. With one gap the scope is the
+  // informative half and collapsing it would lose the only pointer to what happened.
+  const single = {
+    ...status,
+    coverage: {
+      ...status.coverage,
+      gaps: [{ kind: "unverified" as const, scope: "write.dependent", reason: "absent", evidenceEventIds: [] }],
+    },
+  };
+  const result = await runCli(["status"], {
+    ...overlapDeps,
+    services: { ...services, getStatus: () => single } as unknown as ReadServices,
+  });
+
+  assert.match(result.stdout, /Coverage gap:\s+unverified write\.dependent/);
+});
+
+test("graph names resources by path and nests versions under the file they belong to", async () => {
+  // The node carries `resource.locator`; printing `resource:res_<sha256>` discarded data the
+  // projection already held and made the command 1,145 lines of indistinguishable hex.
+  const snapshot = {
+    nodes: [
+      {
+        kind: "resource",
+        nodeId: "resource:res_abc",
+        resource: { resourceId: "res_abc", repositoryId: "repo_1", kind: "file", locator: "src/auth.ts" },
+        evidenceEventIds: [],
+      },
+      {
+        kind: "version",
+        nodeId: "version:ver_abc",
+        version: {
+          resourceId: "res_abc",
+          domain: { repositoryId: "repo_1", workspaceId: "ws_1", worktreeId: "wt_1" },
+          kind: "content_hash",
+          value: "2e6f071c34b02e949965758d4c5c4b97",
+          evidenceEventIds: [],
+        },
+        evidenceEventIds: [],
+      },
+    ],
+    edges: [{ edgeId: "edge_1", kind: "changes", fromNodeId: null, toNodeId: "resource:res_abc", evidenceEventIds: [] }],
+    coverage: [],
+  } as unknown as WorkGraphSnapshot;
+  const result = await runCli(["graph"], {
+    ...overlapDeps,
+    services: {
+      ...services,
+      getGraph: () => ({ snapshot, filters: {}, coverageWarnings: [] }),
+    } as unknown as ReadServices,
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /WORK GRAPH \(1 resource, 1 version; 1 edge\(s\)\)/);
+  assert.match(result.stdout, /resource\tsrc\/auth\.ts/);
+  assert.match(result.stdout, /version\tsrc\/auth\.ts@2e6f071c/);
+  assert.match(result.stdout, /unattributed\t->\tsrc\/auth\.ts\tchanges/);
+  assert.equal(result.stdout.includes("res_abc"), false);
+});
+
+test("agents nests a subagent under the parent whose id it truncates", async () => {
+  // The recorder names a subagent `<parentPrefix>.sub.<suffix>`, so the parent relationship is
+  // recorded. The prefix is a truncation, so it has to resolve against the agents present -
+  // sorting the ids as strings puts the subagents under an unrelated neighbour.
+  const agents = [
+    { agentId: "agent_62225cb8-9250-4387", taskIds: ["task_1"], eventCount: 569, eventTypeCounts: {}, coverage: [] },
+    { agentId: "agent_7a1033a6.sub.aaa", taskIds: ["task_2"], eventCount: 2, eventTypeCounts: {}, coverage: [] },
+    { agentId: "agent_7a1033a6-93c4-46e2", taskIds: ["task_3", null], eventCount: 312, eventTypeCounts: {}, coverage: [] },
+  ];
+  const result = await runCli(["agents"], {
+    ...overlapDeps,
+    services: { ...services, listAgents: () => ({ agents }) } as unknown as ReadServices,
+  });
+
+  assert.equal(result.exitCode, 0);
+  const lines = result.stdout.split("\n").filter((line) => line.includes("agent_"));
+  assert.match(lines[0] ?? "", /^agent_62225cb8/);
+  assert.match(lines[1] ?? "", /^agent_7a1033a6-93c4/);
+  assert.match(lines[2] ?? "", /^\s+↳ agent_7a1033a6\.sub\.aaa/);
+  // An agent with work outside any task says so rather than reporting a bare count.
+  assert.match(lines[1] ?? "", /1 \(\+unattributed\)/);
+});
