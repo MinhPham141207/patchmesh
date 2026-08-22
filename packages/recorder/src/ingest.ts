@@ -17,7 +17,15 @@ import { buildHookEvents, type HookPayload } from "./hook.js";
 import { agentIdForSession, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
 import { ABANDONED_AFTER_MS } from "./inflight.js";
 import { appendJournalEntry, parseJournalLine, type JournalEntry } from "./journal.js";
-import { isCallStart, isTurnMarker, turnFieldsOf } from "./turn.js";
+import {
+  isCallStart,
+  isTurnMarker,
+  type OpenTurn,
+  readTurnState,
+  TURN_STATE_FILENAME,
+  turnFieldsOf,
+  writeTurnState,
+} from "./turn.js";
 
 export interface IngestResult {
   readonly ingested: number;
@@ -38,6 +46,8 @@ export interface IngestJournalOptions {
   readonly worktreeRoot: string;
   readonly journalPath: string;
   readonly ledgerPath: string;
+  /** Where turns left open by the previous drain are kept. Defaults beside the journal. */
+  readonly turnStatePath?: string | undefined;
   /**
    * Clock used to decide which unfinished calls are still worth carrying forward. Only tests
    * supply it; a real drain reads the wall clock.
@@ -69,6 +79,8 @@ const STALE_CLAIM_MS = 60_000;
  */
 export function ingestJournal(options: IngestJournalOptions): IngestResult {
   const { journalPath, ledgerPath, worktreeRoot } = options;
+  const now = options.now ?? (() => new Date());
+  const turnStatePath = options.turnStatePath ?? join(dirname(journalPath), TURN_STATE_FILENAME);
 
   const claimedPaths = [...claimJournal(journalPath), ...adoptStaleClaims(journalPath)];
   if (claimedPaths.length === 0) {
@@ -80,9 +92,14 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   let turns = 0;
   const unprocessed: string[] = [];
   // Turn state is per session, because two sessions recording into one repository interleave
-  // in the journal and each one's marker must only claim its own calls. It spans claims so an
-  // adopted journal does not lose the turn a crashed run had already opened.
-  const turnTasks = new Map<string, TaskId | null>();
+  // in the journal and each one's marker must only claim its own calls. It is seeded from the
+  // previous drain because a turn does not reliably end where a drain ends: the marker is
+  // journalled once and the calls many times, so a turn split across two drains would leave
+  // every call in the second one unattributed. See `readTurnState`.
+  const turnTasks = readTurnState(turnStatePath, now());
+  // Which sessions this drain actually saw work from, marker or call. Attribution may reach
+  // back into a previous drain's turns; deciding whose effects these are may not.
+  const activeSessions = new Set<string>();
   // A call that is still running when another session drains the shared journal must survive
   // that drain. Without this, one agent's Stop erases the very in-flight work a second agent
   // needs to see, which is precisely when a collision guard has to work.
@@ -94,7 +111,15 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   const store = SqliteEventStore.open(ledgerPath);
   try {
     for (const claimedPath of claimedPaths) {
-      const drained = drainClaim({ claimedPath, store, worktreeRoot, unprocessed, turnTasks, unfinished });
+      const drained = drainClaim({
+        claimedPath,
+        store,
+        worktreeRoot,
+        unprocessed,
+        turnTasks,
+        activeSessions,
+        unfinished,
+      });
       ingested += drained.ingested;
       skipped += drained.skipped;
       turns += drained.turns;
@@ -107,9 +132,10 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
     writeFileSync(`${claimedPaths[0]!}.rejected`, `${unprocessed.join("\n")}\n`, "utf8");
   }
   for (const claimedPath of claimedPaths) rmSync(claimedPath, { force: true });
-  carryForward(journalPath, unfinished, (options.now ?? (() => new Date()))());
+  carryForward(journalPath, unfinished, now());
+  writeTurnState(turnStatePath, turnTasks, now());
 
-  return { ingested, skipped, turns, closedTurn: soleTurnOf(turnTasks), ledgerPath };
+  return { ingested, skipped, turns, closedTurn: soleTurnOf(turnTasks, activeSessions), ledgerPath };
 }
 
 /**
@@ -118,13 +144,21 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
  * Effects are observed over the whole window between drains, so they can only be attributed
  * when that window belonged to a single turn. Two sessions working in one repository share
  * the window, and a file that changed inside it belongs to neither of them in particular.
+ *
+ * Only sessions that recorded something in *this* drain are counted. Carried-forward turn
+ * state exists to attribute calls to the turn that produced them; a session that was merely
+ * still open has not shown it did anything in this window, and counting it would either steal
+ * another session's effects or suppress attribution entirely.
  */
 function soleTurnOf(
-  turnTasks: ReadonlyMap<string, TaskId | null>,
+  turnTasks: ReadonlyMap<string, OpenTurn>,
+  activeSessions: ReadonlySet<string>,
 ): { agentId: AgentId | null; taskId: TaskId | null } | null {
-  if (turnTasks.size !== 1) return null;
-  const [sessionId, taskId] = [...turnTasks.entries()][0]!;
-  return { agentId: agentIdForSession(sessionId), taskId };
+  if (activeSessions.size !== 1) return null;
+  const sessionId = [...activeSessions][0]!;
+  const turn = turnTasks.get(sessionId);
+  if (turn === undefined) return null;
+  return { agentId: agentIdForSession(sessionId), taskId: turn.taskId as TaskId | null };
 }
 
 export interface RecordTurnEffectsOptions {
@@ -183,13 +217,15 @@ interface DrainClaimOptions {
   readonly worktreeRoot: string;
   readonly unprocessed: string[];
   /** Session id to the task its most recent turn opened. Mutated as markers are replayed. */
-  readonly turnTasks: Map<string, TaskId | null>;
+  readonly turnTasks: Map<string, OpenTurn>;
+  /** Sessions observed working in this drain, which is what effects may be attributed to. */
+  readonly activeSessions: Set<string>;
   /** Starts seen with no completion yet, carried back to the live journal after the drain. */
   readonly unfinished: Map<string, JournalEntry>;
 }
 
 function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: number; turns: number } {
-  const { claimedPath, store, worktreeRoot, unprocessed, turnTasks, unfinished } = options;
+  const { claimedPath, store, worktreeRoot, unprocessed, turnTasks, activeSessions, unfinished } = options;
   let lines: string[];
   try {
     lines = readFileSync(claimedPath, "utf8").split("\n");
@@ -224,7 +260,8 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
     if (isTurnMarker(entry.payload)) {
       const { sessionId, promptId } = turnFieldsOf(entry.payload);
       if (sessionId !== null) {
-        turnTasks.set(sessionId, taskIdForTurn(sessionId, promptId, entry.at));
+        turnTasks.set(sessionId, { taskId: taskIdForTurn(sessionId, promptId, entry.at), at: entry.at });
+        activeSessions.add(sessionId);
         turns += 1;
       }
       continue;
@@ -232,11 +269,12 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
 
     try {
       const sessionId = sessionIdOf(entry.payload);
+      if (sessionId !== null) activeSessions.add(sessionId);
       const { requested, completed } = buildHookEvents({
         payload: entry.payload as HookPayload,
         worktreeRoot,
         now: () => entry.at,
-        turnTaskId: sessionId === null ? null : turnTasks.get(sessionId) ?? null,
+        turnTaskId: sessionId === null ? null : ((turnTasks.get(sessionId)?.taskId ?? null) as TaskId | null),
       });
       store.appendAtomic([requested, completed]);
       ingested += 1;

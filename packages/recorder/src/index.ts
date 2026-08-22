@@ -23,7 +23,7 @@ export type {
   RecordTurnEffectsOptions,
   RecordTurnEffectsResult,
 } from "./ingest.js";
-export { observeTurnEffects, readSnapshot, writeSnapshot } from "./effects.js";
+export { ignoredByRepository, observeTurnEffects, readSnapshot, writeSnapshot } from "./effects.js";
 export type { ObserveTurnEffectsOptions, StoredSnapshot, TurnEffects } from "./effects.js";
 export {
   appendJournalEntry,
@@ -44,8 +44,18 @@ export {
 } from "./record.js";
 export type { RecordHookOptions, RecordHookResult } from "./record.js";
 export { isRecognizedHostTool, normalizeTool } from "./tool-mapping.js";
-export { isCallStart, isTurnMarker, turnFieldsOf } from "./turn.js";
-export type { TurnFields } from "./turn.js";
+export {
+  isCallStart,
+  isTurnMarker,
+  readTurnState,
+  TURN_STATE_FILENAME,
+  TURN_STATE_TTL_MS,
+  TURN_STATE_VERSION,
+  turnFieldsOf,
+  turnStatePathFor,
+  writeTurnState,
+} from "./turn.js";
+export type { OpenTurn, TurnFields } from "./turn.js";
 export type { NormalizedTool } from "./tool-mapping.js";
 export { readInFlightCalls } from "./inflight.js";
 export type { InFlightCall, ReadInFlightOptions } from "./inflight.js";

@@ -73,7 +73,7 @@ test("starts are not ingested, so a call is recorded once and not twice", () => 
     entry(root, { hook_event_name: "PostToolUse", tool_use_id: "call_1", tool_name: "Read", tool_input: { file_path: "a.ts" }, tool_response: {} }, "2026-08-22T12:00:05.000Z");
 
     const ledgerPath = join(root, ".patchmesh", "ledger.db");
-    const result = ingestJournal({ worktreeRoot: root, journalPath, ledgerPath });
+    const result = ingestJournal({ worktreeRoot: root, journalPath, ledgerPath, now: NOW });
     assert.equal(result.ingested, 1, "one call, ingested once");
     assert.equal(result.skipped, 0, "a start is skipped deliberately, not as a failure");
 
@@ -110,6 +110,7 @@ test("a call still running survives another session draining the journal", () =>
       worktreeRoot: root,
       journalPath: journalPathFor(root, ".patchmesh"),
       ledgerPath: join(root, ".patchmesh", "ledger.db"),
+      now: NOW,
     });
 
     const live = readInFlightCalls({ worktreeRoot: root, now: NOW });
@@ -126,9 +127,9 @@ test("a finished call is not carried forward, so it is recorded once", () => {
     const ledgerPath = join(root, ".patchmesh", "ledger.db");
     entry(root, { hook_event_name: "PreToolUse", tool_use_id: "call_1", tool_name: "Read", tool_input: { file_path: "a.ts" } }, "2026-08-22T12:00:00.000Z");
     entry(root, { hook_event_name: "PostToolUse", tool_use_id: "call_1", tool_name: "Read", tool_input: { file_path: "a.ts" }, tool_response: {} }, "2026-08-22T12:00:01.000Z");
-    ingestJournal({ worktreeRoot: root, journalPath, ledgerPath });
+    ingestJournal({ worktreeRoot: root, journalPath, ledgerPath, now: NOW });
     // A second drain must find nothing left over from the first.
-    const second = ingestJournal({ worktreeRoot: root, journalPath, ledgerPath });
+    const second = ingestJournal({ worktreeRoot: root, journalPath, ledgerPath, now: NOW });
     assert.equal(second.ingested, 0);
     assert.deepEqual(readInFlightCalls({ worktreeRoot: root, now: NOW }), []);
   } finally {

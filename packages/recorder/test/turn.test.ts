@@ -143,3 +143,102 @@ test("a turn task is stable for one turn and distinct across turns", () => {
   assert.notEqual(first, later);
   assert.match(String(first), /^task_[a-z0-9][a-z0-9._-]{0,63}$/u);
 });
+
+/**
+ * Drain a worktree twice, the way a session does: `Stop` fires, ingest runs, work continues.
+ *
+ * Every test above writes one journal and drains it once, which is why nothing caught a turn
+ * being split across two drains. Measured on this repository's own ledger, that split is where
+ * attribution was actually being lost - in contiguous blocks of 37, 28 and 4 calls.
+ */
+function ingestDrains(drains: string[][], now?: () => Date): ProtocolEvent[] {
+  const root = temporaryWorktree();
+  try {
+    const journalPath = join(root, ".patchmesh", "journal.ndjson");
+    const ledgerPath = join(root, ".patchmesh", "ledger.db");
+    mkdirSync(join(root, ".patchmesh"), { recursive: true });
+    for (const lines of drains) {
+      writeFileSync(journalPath, `${lines.join("\n")}\n`, "utf8");
+      const result = ingestJournal({ worktreeRoot: root, journalPath, ledgerPath, now });
+      assert.equal(result.skipped, 0, "no entry should be unrepresentable");
+    }
+    const store = SqliteEventStore.open(ledgerPath);
+    try {
+      return store.read().map((event) => {
+        const parsed = parseEvent(event);
+        assert.deepEqual(parsed.diagnostics, [], "every recorded event must pass validation");
+        return parsed.value as ProtocolEvent;
+      });
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("a turn outlives the drain that observed its marker", () => {
+  const events = ingestDrains([
+    [line(turnMarker(), "2026-08-21T10:00:00.000Z"), line(toolCall(), "2026-08-21T10:00:01.000Z")],
+    // The turn continues after `Stop` drained its marker away. These calls belong to it too.
+    [line(toolCall(), "2026-08-21T10:00:02.000Z"), line(toolCall(), "2026-08-21T10:00:03.000Z")],
+  ], () => new Date("2026-08-21T10:00:04.000Z"));
+
+  const tasks = events.filter((event) => event.eventType === "tool.requested").map((event) => event.taskId);
+  assert.equal(tasks.length, 3);
+  assert.notEqual(tasks[0], null, "the marker's own drain attributes its calls");
+  assert.equal(tasks[1], tasks[0], "a later drain must not lose the open turn");
+  assert.equal(tasks[2], tasks[0]);
+});
+
+test("a new marker in a later drain replaces the carried turn", () => {
+  const events = ingestDrains([
+    [line(turnMarker(), "2026-08-21T10:00:00.000Z"), line(toolCall(), "2026-08-21T10:00:01.000Z")],
+    [line(turnMarker(), "2026-08-21T10:00:02.000Z"), line(toolCall(), "2026-08-21T10:00:03.000Z")],
+  ], () => new Date("2026-08-21T10:00:04.000Z"));
+  const tasks = events.filter((event) => event.eventType === "tool.requested").map((event) => event.taskId);
+  assert.notEqual(tasks[0], tasks[1], "carried state must not outrank a freshly declared turn");
+});
+
+test("a carried turn expires rather than claiming the next day's work", () => {
+  // Without a ceiling, a session that ended without a closing marker would keep attributing
+  // every later call in the repository to a turn that finished yesterday.
+  const events = ingestDrains(
+    [
+      [line(turnMarker(), "2026-08-21T10:00:00.000Z"), line(toolCall(), "2026-08-21T10:00:01.000Z")],
+      [line(toolCall(), "2026-08-22T10:00:00.000Z")],
+    ],
+    () => new Date("2026-08-22T10:00:01.000Z"),
+  );
+  const tasks = events.filter((event) => event.eventType === "tool.requested").map((event) => event.taskId);
+  assert.notEqual(tasks[0], null);
+  assert.equal(tasks[1], null, "a turn older than the ceiling must stop claiming calls");
+});
+
+test("a session merely left open does not take another session's effects", () => {
+  // `closedTurn` is what file changes are attributed to. Carried state exists to attribute
+  // calls; it must not make a dormant session look like a second worker in this window and
+  // suppress attribution, nor let it claim the window outright.
+  const root = temporaryWorktree();
+  try {
+    const journalPath = join(root, ".patchmesh", "journal.ndjson");
+    const ledgerPath = join(root, ".patchmesh", "ledger.db");
+    mkdirSync(join(root, ".patchmesh"), { recursive: true });
+
+    const now = (): Date => new Date("2026-08-21T10:00:04.000Z");
+    writeFileSync(journalPath, `${line(turnMarker(OTHER_SESSION), "2026-08-21T10:00:00.000Z")}\n`, "utf8");
+    ingestJournal({ worktreeRoot: root, journalPath, ledgerPath, now });
+
+    writeFileSync(
+      journalPath,
+      `${[line(turnMarker(SESSION), "2026-08-21T10:00:02.000Z"), line(toolCall(SESSION), "2026-08-21T10:00:03.000Z")].join("\n")}\n`,
+      "utf8",
+    );
+    const second = ingestJournal({ worktreeRoot: root, journalPath, ledgerPath, now });
+
+    assert.notEqual(second.closedTurn, null, "the one session that worked owns this window");
+    assert.equal(second.closedTurn?.taskId, taskIdForTurn(SESSION, null, "2026-08-21T10:00:02.000Z"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
