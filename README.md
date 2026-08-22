@@ -6,9 +6,11 @@ out what has already been done and what is being done right now, so they do not 
 or collide with it.
 
 > **Project status:** the recorder and the read side work and are dogfooded — this
-> repository's own ledger holds several days of real agent sessions. Detection beyond
-> file-level overlap is not demonstrated: see [What is not proven](#what-is-not-proven).
-> The build order is in the [delivery plan](docs/implementation/DELIVERY_PLAN.md).
+> repository's own ledger holds several days of real agent sessions. The surface that pays
+> off first is **session continuity** (`patchmesh_recap`), which needs no concurrency at all.
+> File-level overlap is validated on a staged two-session workload; detection beyond it is
+> not demonstrated: see [What is not proven](#what-is-not-proven). The build order is in the
+> [delivery plan](docs/implementation/DELIVERY_PLAN.md).
 
 ## The problem
 
@@ -28,8 +30,15 @@ PatchMesh answers: these 15 files changed, by this worker, under this task,
                    and these 2 calls are still running right now.
 ```
 
-The value order is deliberate. Recording is worth something on its own; recall is worth
-more; judgment is worth most, and only after the first two are real.
+**Continuity is the payoff, and it arrives before coordination does.** The first question a
+new session actually asks is "what did the last one do?", and `patchmesh_recap` answers it —
+tasks, spans, files changed, commits landed — on a single agent working alone. Collision
+detection matters, but it only pays when two agents genuinely run at once; continuity pays
+on every session, including the one you are about to start.
+
+That inverts the value order this project was planned around. Recording was assumed to be
+worth least and judgment most; measured against real use, the ranking runs the other way,
+and the roadmap follows the measurement rather than the plan.
 
 ### The net-token invariant
 
@@ -68,7 +77,9 @@ and idempotent: hooks belonging to other tools are never modified, and re-runnin
 is already configured rather than appending a second copy. Restart the agent session so it
 loads the hooks.
 
-Then work normally. Afterwards:
+Then work normally. The question to ask first, at the start of your next session, is what
+the last one did — that is `patchmesh_recap`, and an agent can call it over MCP without you
+typing anything. From the CLI:
 
 ```bash
 npx patchmesh events   --database .patchmesh/ledger.db
@@ -76,21 +87,30 @@ npx patchmesh overlaps --database .patchmesh/ledger.db
 npx patchmesh prune --older-than 30 --database .patchmesh/ledger.db
 ```
 
-Agents get the same ledger back over MCP as `patchmesh_recent_activity`,
-`patchmesh_overlapping_work`, and `patchmesh_recap`.
+Agents get the same ledger back over MCP as `patchmesh_recap` (what previous sessions did),
+`patchmesh_recent_activity` (what changed, optionally scoped to one path), and
+`patchmesh_overlapping_work` (which files more than one task touched).
 
 ## What works today
 
 Verified against this repository's own ledger, not against fixtures:
 
+- **Session continuity.** `patchmesh_recap` summarizes previous sessions — tasks, spans,
+  call counts, files changed, and the commits each task landed, matched by committer time.
+  It needs no concurrency, so it returns real value on the ordinary one-agent-at-a-time
+  workflow, and it is the surface to reach for first.
 - **Recording.** A Claude Code `PostToolUse` hook journals every tool call — including
   built-in `Read`, `Edit`, `Write`, and `Bash`, which no MCP server can see — and
   `patchmesh-ingest` converts the journal into validated events on `Stop`. Measured
   overhead **p50 108ms, p95 166ms** per call against a 65ms bare-Node floor. Fail-open
   throughout: both binaries always exit 0.
-- **Effect observation.** The worktree is captured per turn and diffed, so a file written
-  by a shell command is recorded even though the command named no path. This is what
-  routes around shell opacity without guessing at a command's intent.
+- **Effect observation, bound to the call that caused it.** The worktree is captured per
+  turn and diffed, so a file written by a shell command is recorded even though the command
+  named no path. Each change is then matched to the call whose `[PreToolUse, PostToolUse]`
+  window contains the file's mtime, and binds only when exactly one call's window does —
+  ambiguity stays attributed to the turn rather than guessed at. This routes around shell
+  opacity without ever interpreting a command, and it is what lets two sessions sharing one
+  drain each keep their own attribution instead of both recording as unattributed.
 - **Attribution.** Subagents get their own `agentId` and task, so an answer names the
   subagent that made an edit rather than the session that contained it.
 - **Recall, over MCP.** `patchmesh_recent_activity`, `patchmesh_overlapping_work`, and
@@ -104,15 +124,25 @@ Verified against this repository's own ledger, not against fixtures:
 
 Stated plainly, because a green test suite is not evidence that a product works:
 
-- **Concurrency has never been observed.** `overlaps` correctly returns zero on this
-  repository, because its development has been one agent at a time in one worktree. The
-  detector is honest; the workload has not exercised it.
+- **Concurrency is validated on a staged workload, not an organic one.** `overlaps` fires
+  correctly when two sessions contend on one file, exercised end to end through the real
+  recorder and real drains. But it still returns zero on this repository's own history,
+  because development has been one agent at a time in one worktree. The detector is
+  demonstrated; a real concurrent team has not used it.
+- **One file's contention is only visible across drains.** Snapshot diffing sees final
+  state, so a file written by two agents inside one drain window yields one change and one
+  surviving mtime. This is a property of diff-based observation, not a bug.
+- **Cross-worktree overlap has no shared store.** The ledger lives at the worktree root, so
+  two worktrees keep two ledgers. Ledger scope — per-worktree, per-repository, or
+  per-machine — is still an open decision.
 - **`stale` and `contracts` cannot fire on hook-recorded data.** They are typed against
   `file.read` / `write.dependent` and `symbol.changed` / `dependency.changed`, which a host
   hook does not produce. Both decline and name the missing evidence rather than reporting
   "no findings" — an inability, not a silence.
-- **Reads are largely invisible.** Roughly four in five recorded calls are shell commands,
-  and a read leaves no trace on disk for the observer to find. Coverage reports this as a
+- **Reads are invisible, and no amount of observing fixes it.** Roughly four in five
+  recorded calls are shell commands. A write leaves a difference on disk that observation
+  can find — which is how effect binding recovers it — but a read leaves no trace at all,
+  and recovering one would mean parsing intent out of a command. Coverage reports this as a
   gap instead of guessing.
 - **Displacement is unmeasured.** Answer *cost* is recorded; what an answer *saved* is not,
   so the net-token invariant is instrumented on one side only.

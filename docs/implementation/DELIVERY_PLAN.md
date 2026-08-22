@@ -1,9 +1,17 @@
 # PatchMesh Delivery Plan: Incremental Slices
 
 > **Status:** Adopted. S1 and S2 are implemented — recall, in-flight visibility, and recap
-> all ship. S3 is implemented but **unproven**: `overlaps` is correct and returns zero,
-> because this repository's development has never run two agents at once. S4 is blocked on
-> evidence a host hook cannot produce. S5 and S6 remain planned. This plan replaces the
+> all ship. S3 is implemented and **demonstrated on a staged concurrent workload**: two
+> sessions contending on one file produce the finding, exercised through the real recorder
+> and real drains. It has still never fired on organic traffic, because this repository's
+> development has never run two agents at once. S4 is blocked on evidence a host hook cannot
+> produce. S5 and S6 remain planned.
+>
+> **The measured value order is the reverse of the planned one.** §3 ranks Recording <
+> Recall < Judgment and puts overlap at S3 as the payoff. In use, `patchmesh_recap` —
+> session continuity, which needs no concurrency — is what returns value on the workflow
+> developers actually have. The product leads with continuity; coordination is real but
+> arrives second. This plan replaces the
 > *sequencing* of Phase 2 and later work. It does not delete Phase 0/1 evidence or the
 > Phase 2 milestone definitions; those remain valid descriptions of *what* to build. This
 > document changes *what order* things get built in, and *what evidence is allowed to
@@ -240,7 +248,7 @@ implemented half needed nothing newly recorded either - only the attribution tha
 
 ---
 
-### S3 - Overlap, as an observation — **implemented, unproven**
+### S3 - Overlap, as an observation — **implemented, demonstrated on a staged workload**
 
 **A user can:** run `patchmesh overlaps` and see where concurrent work touches the same
 file, across worktrees.
@@ -266,12 +274,31 @@ of them another tool's SQLite cache and all of them one agent's own consecutive 
 **0 findings with 34 files still reported as observed**, so "nothing contested" stays
 distinguishable from "nothing seen".
 
-But zero is also all it has ever returned, because this repository has been developed by
-one agent at a time in one worktree. Under this plan's own P3 — a slice that cannot be
-demoed to a user who does not already know what PatchMesh is does not count as done — S3 is
-**not done**, and no amount of further code will finish it. It needs a concurrent workload:
-two worktrees, two agents, one shared file. That is a workload gap, not a code gap, and
-naming it as such is the point of P4.
+Zero was also all it had ever returned, because this repository has been developed by one
+agent at a time in one worktree — a workload gap, not a code gap. That gap has now been
+closed deliberately rather than waited out.
+
+**Staged and demonstrated (2026-08-23).** Two scripted sessions, real recorder binary, real
+hook payloads, real `ingest-bin` drains, in a throwaway repository. Session A rewrites
+`shared.md` and drains; session B rewrites it and drains; `overlaps` reports the file
+changed by two tasks, naming both agents and both tasks. No trace is fabricated — only the
+sessions are scripted.
+
+**What the staging also established:**
+
+- **Effect binding is what makes concurrent attribution possible.** When one drain closes
+  two sessions, `soleTurnOf` returns null and — before binding — *both* changes recorded as
+  unattributed. Verified by re-running the identical scenario through the old path. With
+  changes bound to the call whose window contained the write, each keeps its own task.
+- **Contention on one file is only visible across drains.** Snapshot diffing sees final
+  state, so one file yields one change and one surviving mtime however many agents wrote it.
+  A property of diff-based observation, not a bug.
+- **Cross-worktree overlap has no shared store.** The ledger lives at the worktree root, so
+  two worktrees keep two ledgers and there is nothing for a cross-worktree query to read.
+  Ledger scope — per-worktree, per-repository, per-machine — remains the open S1 decision.
+
+Under P3 the slice is now demoable. It is not yet *validated by a real concurrent team*, and
+that distinction is kept rather than collapsed.
 
 ---
 
