@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { createDaemon, type PatchMeshDaemon } from "@patchmesh/daemon";
 import {
@@ -183,6 +185,35 @@ function needsNoStore(argv: readonly string[]): boolean {
 }
 
 /**
+ * Commands that only report, so an absent ledger is an answer rather than a failure.
+ *
+ * The write commands are deliberately absent: `feedback` and `delivery` append events, and a
+ * missing store means they recorded nothing. Exiting 0 there would report success for work
+ * that did not happen.
+ */
+const REPORT_ONLY = new Set(["status", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain"]);
+
+/**
+ * What a repository looks like before it has been worked in.
+ *
+ * The first thing a new user runs is `patchmesh status`, and before this the first thing
+ * PatchMesh said to them was `database is unavailable` — which reads as a broken tool rather
+ * than an empty one. Nothing has gone wrong: the recorder creates the ledger on its first
+ * write, so no file is the honest state of a repository whose agent has not run yet.
+ */
+function renderNoLedger(path: string, json: boolean): string {
+  if (json) return `${JSON.stringify({ ledger: path, exists: false, events: 0 })}\n`;
+  return [
+    `No ledger at ${path} yet, so nothing has been recorded.`,
+    "",
+    "If you have not run `patchmesh init` in this repository, run it and restart the agent",
+    "session so it loads the hooks. If you have, work normally and come back — the recorder",
+    "creates the ledger on the first tool call it sees.",
+    "",
+  ].join("\n");
+}
+
+/**
  * Read services for a command that never reads. Every method throws rather than returning an
  * empty answer, so a command routed here by mistake fails loudly instead of reporting nothing.
  */
@@ -211,7 +242,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stderr.write(result.stderr);
       return result.exitCode;
     }
-    daemon = createDaemon({ databasePath: databasePath(argv) });
+    const ledgerPath = databasePath(argv);
+    if (!existsSync(ledgerPath) && REPORT_ONLY.has(argv[0] ?? "")) {
+      process.stdout.write(renderNoLedger(ledgerPath, argv.includes("--json")));
+      return 0;
+    }
+    daemon = createDaemon({ databasePath: ledgerPath });
     const controller = new AbortController();
     const onInterrupt = () => controller.abort();
     process.once("SIGINT", onInterrupt);

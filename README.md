@@ -46,9 +46,21 @@ recall summarizes calls instead of listing them.
 ## Quick start
 
 ```bash
-pnpm install && pnpm build
+npm install -D patchmesh @patchmesh/recorder @patchmesh/gateway
+npx patchmesh init
+```
+
+Or from a clone of this repository:
+
+```bash
+corepack pnpm install && corepack pnpm build
 node apps/cli/dist/main.js init
 ```
+
+`init` writes a command the rest of your team can use. Installed as a dependency it writes a
+path relative to the repository root, so `.mcp.json` and the hook config are safe to commit;
+installed globally it writes the bin names; run from a clone it writes that clone's absolute
+path, which is correct for a developer and correct to keep out of a shared file.
 
 `init` merges the recorder's host hooks into `.claude/settings.local.json`, registers the
 `patchmesh` MCP server in `.mcp.json`, and adds `.patchmesh/` to `.gitignore`. It is additive
@@ -59,8 +71,9 @@ loads the hooks.
 Then work normally. Afterwards:
 
 ```bash
-node apps/cli/dist/main.js events   --database .patchmesh/ledger.db
-node apps/cli/dist/main.js overlaps --database .patchmesh/ledger.db
+npx patchmesh events   --database .patchmesh/ledger.db
+npx patchmesh overlaps --database .patchmesh/ledger.db
+npx patchmesh prune --older-than 30 --database .patchmesh/ledger.db
 ```
 
 Agents get the same ledger back over MCP as `patchmesh_recent_activity`,

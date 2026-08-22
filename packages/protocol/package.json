@@ -1,9 +1,11 @@
 {
   "name": "@patchmesh/protocol",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "schemas"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -11,12 +13,29 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/copy-schemas.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1"
+  },
+  "description": "PatchMesh event protocol: versioned identities, event unions, and boundary validation.",
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

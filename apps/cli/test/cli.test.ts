@@ -6,7 +6,7 @@ import { test } from "node:test";
 import type { EventId, ProtocolEvent } from "@patchmesh/protocol";
 import type { ReadServices, StatusView } from "@patchmesh/query";
 import type { WorkGraphSnapshot } from "@patchmesh/storage";
-import { runCli } from "../src/main.js";
+import { runCli, main } from "../src/main.js";
 import { initializeRepository, renderInit } from "../src/init.js";
 
 const status: StatusView = {
@@ -348,7 +348,15 @@ test("init wires the recorder without disturbing another tool's hooks", () => {
     assert.deepEqual(settings.permissions, { allow: ["Bash(ls)"] }, "unrelated settings survive");
     const preToolUse = settings.hooks["PreToolUse"]!.flatMap((group) => group.hooks.map((hook) => hook.command));
     assert.equal(preToolUse.includes("othertool hook"), true, "another tool's hook must survive");
-    assert.equal(preToolUse.some((command) => command.includes("recorder")), true);
+    // Asserted by ownership rather than by one spelling: the command form now depends on how
+    // PatchMesh was installed - a relative node_modules path, a bare bin name on the PATH, or
+    // an absolute path in a checkout - and this fixture's packageRoot does not exist, so it
+    // resolves to the global form.
+    assert.equal(
+      preToolUse.some((command) => /recorder\/dist\/bin\.js|patchmesh-record/u.test(command.replaceAll("\\", "/"))),
+      true,
+      "PatchMesh's own recorder hook must be wired, in whichever form this install calls for",
+    );
     // In-flight visibility, the record of work done, and the turn boundary that gives work a
     // task all come from different host events; missing one silently degrades attribution.
     for (const event of ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"]) {
@@ -524,4 +532,42 @@ test("agents nests a subagent under the parent whose id it truncates", async () 
   assert.match(lines[2] ?? "", /^\s+↳ agent_7a1033a6\.sub\.aaa/);
   // An agent with work outside any task says so rather than reporting a bare count.
   assert.match(lines[1] ?? "", /1 \(\+unattributed\)/);
+});
+
+test("init writes a portable command when installed as a dependency", async () => {
+  // `.mcp.json` is normally committed, so an absolute path into one machine's checkout breaks
+  // the repository for everyone else. Verified against a real packed install before this test
+  // existed: the published config must name paths the next clone can resolve.
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-dep-"));
+  try {
+    mkdirSync(join(root, ".git"));
+    mkdirSync(join(root, "node_modules", "@patchmesh", "recorder", "dist"), { recursive: true });
+    writeFileSync(join(root, "node_modules", "@patchmesh", "recorder", "dist", "bin.js"), "");
+
+    initializeRepository({ worktreeRoot: root });
+    const settings = readFileSync(join(root, ".claude", "settings.local.json"), "utf8");
+    const mcp = readFileSync(join(root, ".mcp.json"), "utf8");
+
+    assert.match(settings, /node_modules\/@patchmesh\/recorder\/dist\/bin\.js/);
+    assert.match(mcp, /node_modules\/@patchmesh\/gateway\/dist\/bin\.js/);
+    // No drive letter, no leading slash: nothing that only resolves on the machine that ran it.
+    assert.equal(/[A-Za-z]:[\/]/.test(settings + mcp), false, "config must not carry an absolute path");
+    assert.equal(settings.includes("\\\\"), false, "config must not carry Windows separators");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a report command on a repository with no ledger answers instead of failing", async () => {
+  // The first thing a new user runs is `status`, and the first thing PatchMesh said back was
+  // `database is unavailable` - a broken tool rather than an empty one. The recorder creates
+  // the ledger on its first write, so no file is the honest pre-first-use state.
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-cold-"));
+  try {
+    const missing = join(root, ".patchmesh", "ledger.db");
+    const result = await main(["status", "--database", missing]);
+    assert.equal(result, 0, "an empty repository is a successful report, not a failure");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -1,9 +1,10 @@
 {
   "name": "@patchmesh/analyzers",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,5 +18,22 @@
   },
   "dependencies": {
     "@patchmesh/protocol": "workspace:*"
+  },
+  "description": "Deterministic source analyzers used by PatchMesh detectors.",
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

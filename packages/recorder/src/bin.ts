@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { findWorktreeRoot } from "./identity.js";

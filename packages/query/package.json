@@ -1,10 +1,9 @@
 {
   "name": "@patchmesh/query",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=24"
   },
   "files": [
     "dist"
@@ -24,5 +23,19 @@
     "@patchmesh/protocol": "workspace:*",
     "@patchmesh/recorder": "workspace:*",
     "@patchmesh/storage": "workspace:*"
+  },
+  "description": "Read services over the PatchMesh ledger: status, agents, events, graph, and overlapping work.",
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
+  "publishConfig": {
+    "access": "public"
   }
 }

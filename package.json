@@ -18,7 +18,9 @@
     "evidence:validate": "node tools/evidence/validate-trace.mjs --all .evidence/trace",
     "evidence:benchmark": "node tools/evidence/benchmark.mjs --all --output .evidence/reports",
     "phase2:m0:benchmark": "corepack pnpm build && tsx tools/phase2/m0-benchmark.ts",
-    "phase2:m0:verify": "corepack pnpm build && tsx tools/phase2/m0-verify.ts"
+    "phase2:m0:verify": "corepack pnpm build && tsx tools/phase2/m0-verify.ts",
+    "release:dry": "node tools/release/publish.mjs --dry-run",
+    "release": "node tools/release/publish.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

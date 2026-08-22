@@ -1,7 +1,6 @@
 {
   "name": "@patchmesh/gateway",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "files": [
     "dist"
@@ -27,5 +26,22 @@
     "@patchmesh/recorder": "workspace:*",
     "@patchmesh/storage": "workspace:*",
     "zod": "^4.4.3"
+  },
+  "description": "MCP server exposing the PatchMesh ledger back to coding agents.",
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

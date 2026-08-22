@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import { findWorktreeRoot } from "./identity.js";
 import { ingestJournal, recordTurnEffects } from "./ingest.js";

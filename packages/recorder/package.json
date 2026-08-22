@@ -1,7 +1,6 @@
 {
   "name": "@patchmesh/recorder",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "files": [
     "dist"
@@ -25,5 +24,22 @@
     "@patchmesh/observation": "workspace:*",
     "@patchmesh/protocol": "workspace:*",
     "@patchmesh/storage": "workspace:*"
+  },
+  "description": "Records coding-agent tool calls and observed file changes into a per-repository PatchMesh ledger.",
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

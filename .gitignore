@@ -25,3 +25,6 @@ tools/*/dist/
 
 # recorded agent ledger (local, per-checkout)
 .patchmesh/
+
+# Built into the package from the root schema corpus
+packages/protocol/schemas/

@@ -32,9 +32,9 @@ const phase0SchemaNames = [
   "task-validity",
 ] as const;
 
-const phase0SchemaDirectory = new URL("../../../schemas/phase0/v1/", import.meta.url);
-const phase2SchemaDirectory = new URL("../../../schemas/phase2/v1/", import.meta.url);
-const phase3SchemaDirectory = new URL("../../../schemas/phase2/v2/", import.meta.url);
+const phase0SchemaDirectory = new URL("../schemas/phase0/v1/", import.meta.url);
+const phase2SchemaDirectory = new URL("../schemas/phase2/v1/", import.meta.url);
+const phase3SchemaDirectory = new URL("../schemas/phase2/v2/", import.meta.url);
 
 function readSchema(directory: URL, name: string): Record<string, unknown> {
   const path = fileURLToPath(new URL(`${name}.schema.json`, directory));

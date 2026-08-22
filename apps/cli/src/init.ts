@@ -90,8 +90,58 @@ function defaultPackageRoot(): string {
   return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 }
 
-function binaryPath(packageRoot: string, binary: string): string {
-  return join(packageRoot, "packages", "recorder", "dist", binary);
+/**
+ * How PatchMesh is installed, which decides what the host config may say.
+ *
+ * The first version of this always wrote an absolute path into the monorepo checkout. That
+ * works on exactly one machine: `.mcp.json` is normally committed, so a config naming
+ * `d:\patchmesh\packages\...` breaks for every teammate and every other clone. What goes in a
+ * shared file has to be resolvable by whoever opens it.
+ *
+ * - `dependency` - installed into the repository being wired, so a path relative to its root
+ *   is correct for anyone who has run an install. This is the only form safe to commit.
+ * - `global` - installed on the PATH, so the bin names alone are correct and no path exists
+ *   that would be right for someone else.
+ * - `checkout` - running from a clone of this monorepo, where the absolute path is the only
+ *   thing that resolves. Kept last because it is the developer case, not the user case.
+ */
+type InstallKind = "dependency" | "global" | "checkout";
+
+interface Binaries {
+  readonly kind: InstallKind;
+  /** Hook command for a recorder binary, already quoted for the host config. */
+  readonly hook: (binary: string) => string;
+  readonly server: { readonly command: string; readonly args: readonly string[] };
+}
+
+/** Forward slashes even on Windows: these strings land in JSON other people read and commit. */
+function posix(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
+  const dependencyRecorder = join(worktreeRoot, "node_modules", "@patchmesh", "recorder", "dist", "bin.js");
+  if (existsSync(dependencyRecorder)) {
+    return {
+      kind: "dependency",
+      hook: (binary) => `node "${posix(join("node_modules", "@patchmesh", "recorder", "dist", binary))}"`,
+      server: { command: "node", args: [posix(join("node_modules", "@patchmesh", "gateway", "dist", "bin.js"))] },
+    };
+  }
+  if (existsSync(join(packageRoot, "packages", "recorder", "dist", "bin.js"))) {
+    return {
+      kind: "checkout",
+      hook: (binary) => `node "${join(packageRoot, "packages", "recorder", "dist", binary)}"`,
+      server: { command: "node", args: [join(packageRoot, "packages", "gateway", "dist", "bin.js")] },
+    };
+  }
+  // Nothing local resolves, so the install that put this CLI on the PATH put its siblings
+  // there too. Bare names are what `ownsCommand` already recognizes.
+  return {
+    kind: "global",
+    hook: (binary) => (binary === "bin.js" ? "patchmesh-record" : "patchmesh-ingest"),
+    server: { command: "patchmesh-mcp", args: [] },
+  };
 }
 
 /**
@@ -147,7 +197,7 @@ function mergeHook(hooks: Record<string, unknown>, wiring: HookWiring, command: 
   return true;
 }
 
-function installHooks(worktreeRoot: string, packageRoot: string, force: boolean): InitStep {
+function installHooks(worktreeRoot: string, binaries: Binaries, force: boolean): InitStep {
   const settingsPath = join(worktreeRoot, ".claude", "settings.local.json");
   const existed = existsSync(settingsPath);
   const settings = readJson(settingsPath);
@@ -155,7 +205,7 @@ function installHooks(worktreeRoot: string, packageRoot: string, force: boolean)
 
   let changed = false;
   for (const wiring of HOOKS) {
-    const command = `node "${binaryPath(packageRoot, wiring.binary)}"`;
+    const command = binaries.hook(wiring.binary);
     if (mergeHook(hooks, wiring, command, force)) changed = true;
   }
   if (!changed) return { outcome: "unchanged", detail: "Claude Code hooks already installed" };
@@ -167,7 +217,7 @@ function installHooks(worktreeRoot: string, packageRoot: string, force: boolean)
   };
 }
 
-function registerServer(worktreeRoot: string, packageRoot: string, force: boolean): InitStep {
+function registerServer(worktreeRoot: string, binaries: Binaries, force: boolean): InitStep {
   const configPath = join(worktreeRoot, ".mcp.json");
   const existed = existsSync(configPath);
   const config = readJson(configPath);
@@ -176,11 +226,7 @@ function registerServer(worktreeRoot: string, packageRoot: string, force: boolea
   if (servers[OWNED] !== undefined && !force) {
     return { outcome: "unchanged", detail: "MCP server already registered" };
   }
-  servers[OWNED] = {
-    type: "stdio",
-    command: "node",
-    args: [join(packageRoot, "packages", "gateway", "dist", "bin.js")],
-  };
+  servers[OWNED] = { type: "stdio", command: binaries.server.command, args: [...binaries.server.args] };
   writeJson(configPath, { ...config, mcpServers: servers });
   return { outcome: existed ? "updated" : "created", detail: `MCP server in ${relative(worktreeRoot, configPath)}` };
 }
@@ -205,18 +251,19 @@ function ignoreLedger(worktreeRoot: string): InitStep {
 
 export function initializeRepository(options: InitOptions): InitResult {
   const packageRoot = options.packageRoot ?? defaultPackageRoot();
+  const binaries = resolveBinaries(options.worktreeRoot, packageRoot);
   const force = options.force ?? false;
   const steps: InitStep[] = [];
 
   steps.push(
     options.installHooks === false
       ? { outcome: "skipped", detail: "runtime hook installation skipped" }
-      : installHooks(options.worktreeRoot, packageRoot, force),
+      : installHooks(options.worktreeRoot, binaries, force),
   );
   steps.push(
     options.installHooks === false
       ? { outcome: "skipped", detail: "MCP server registration skipped" }
-      : registerServer(options.worktreeRoot, packageRoot, force),
+      : registerServer(options.worktreeRoot, binaries, force),
   );
   steps.push(
     options.updateGitignore === false
