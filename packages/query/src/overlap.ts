@@ -1,5 +1,10 @@
 import type { ProtocolEvent } from "@patchmesh/protocol";
-import { logicalPathFor, resolveRepositoryIdentity, resourceIdForPath } from "@patchmesh/recorder";
+import {
+  ignoredByRepository,
+  logicalPathFor,
+  resolveRepositoryIdentity,
+  resourceIdForPath,
+} from "@patchmesh/recorder";
 import { SqliteEventStore } from "@patchmesh/storage";
 
 /**
@@ -15,12 +20,21 @@ import { SqliteEventStore } from "@patchmesh/storage";
  * what another started, a rebase, or genuinely divergent work; the ledger holds paths and
  * content hashes, not intent, so it cannot tell those apart and does not try. What it can say
  * without guessing is: these two units of work both changed this file, here is when.
+ *
+ * Two tasks alone are not enough to say that, though, and the first version said it anyway.
+ * Run live against this repository it returned eight files - every one of them a sibling
+ * tool's SQLite cache, and every one a single agent's own two consecutive turns four minutes
+ * apart. Sequence is not overlap, and cache churn is not work. Both are fixed below, because
+ * an advisory tool that is wrong eight times out of eight costs the reader more context than
+ * it saves them and teaches them to stop reading it.
  */
 export interface OverlappingTask {
   readonly taskId: string;
   readonly agentId: string | null;
   readonly at: string;
   readonly changeKind: string;
+  /** Which checkout the change was observed in. Two worktrees are two workers by definition. */
+  readonly worktreeId: string | null;
 }
 
 export interface ResourceOverlap {
@@ -80,7 +94,10 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
   const store = SqliteEventStore.open(options.ledgerPath);
   let events: readonly ProtocolEvent[];
   try {
-    events = store.read();
+    // The window and the event type reach SQLite rather than JavaScript: this used to load
+    // every event ever recorded and discard almost all of it, so the cost of one answer grew
+    // with total history instead of with the window asked for.
+    events = store.read({ eventTypes: ["file.changed"], since: since.toISOString() });
   } finally {
     store.close();
   }
@@ -108,15 +125,25 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
         agentId: event.agentId,
         at: event.timestamp,
         changeKind: String(payload["changeKind"] ?? "changed"),
+        worktreeId: event.worktreeId ?? null,
       });
     }
     byResource.set(resourceId, entry);
   }
 
+  // One batched question for the whole result, not one per file, and only for files that got
+  // this far. See `ignoredByRepository`: git already knows what this repository calls work.
+  const ignored = ignoredByRepository(
+    identity.worktreeRoot,
+    [...byResource.values()].filter((entry) => entry.tasks.size >= 2).map((entry) => entry.locator),
+  );
+
   const all: ResourceOverlap[] = [];
   for (const entry of byResource.values()) {
     if (entry.tasks.size < 2) continue;
+    if (ignored.has(entry.locator)) continue;
     const tasks = [...entry.tasks.values()].sort((left, right) => right.at.localeCompare(left.at));
+    if (!hasDistinctWorkers(tasks)) continue;
     // Asking "am I overlapping with anyone" is the common case, and an overlap the caller is
     // not part of is someone else's business.
     if (options.taskId !== undefined && !tasks.some((task) => task.taskId === options.taskId)) continue;
@@ -131,6 +158,26 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
     logicalPath: requestedPath,
     filesObserved: byResource.size,
   };
+}
+
+/**
+ * Whether these tasks were done by more than one worker.
+ *
+ * A session runs one task at a time, so one agent's two tasks are consecutive by construction:
+ * it finished the first before it began the second, and reporting that as contested is a false
+ * alarm every time. What makes two changes an overlap is two workers - a different agent, a
+ * subagent running beside its parent, or a second checkout of the same repository.
+ *
+ * An unknown worker is not a distinct one. A change with no agent could have come from either
+ * party, so counting it as a second participant would invent the very thing being reported.
+ */
+function hasDistinctWorkers(tasks: readonly OverlappingTask[]): boolean {
+  const workers = new Set<string>();
+  for (const task of tasks) {
+    if (task.agentId === null && task.worktreeId === null) continue;
+    workers.add(`${task.agentId ?? ""}\u0000${task.worktreeId ?? ""}`);
+  }
+  return workers.size >= 2;
 }
 
 /** Render an overlap result as the compact text an agent reads inline. */

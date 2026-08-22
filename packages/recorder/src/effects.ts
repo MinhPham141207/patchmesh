@@ -103,8 +103,13 @@ export function writeSnapshot(snapshotPath: string, snapshot: ObservationSnapsho
  *
  * Fails open. If git is missing, or this is not a repository, every change is kept: recording
  * noise is a cost, and silently dropping real work is a lie.
+ *
+ * Exported because the read side needs the same answer. A ledger is append-only, so filtering
+ * only at write time leaves every change recorded before this existed replaying forever - which
+ * is exactly what it did: the first live `patchmesh_overlapping_work` call after this landed
+ * still returned eight files, all of them a sibling tool's cache.
  */
-function ignoredByRepository(worktreeRoot: string, paths: readonly string[]): ReadonlySet<string> {
+export function ignoredByRepository(worktreeRoot: string, paths: readonly string[]): ReadonlySet<string> {
   if (paths.length === 0) return new Set();
   try {
     const output = execFileSync("git", ["check-ignore", "--stdin", "-z"], {

@@ -1,4 +1,6 @@
 import type { ProtocolEvent } from "@patchmesh/protocol";
+import { ignoredByRepository } from "@patchmesh/recorder";
+import { commitsWithin, readCommitsSince } from "./label.js";
 import { SqliteEventStore } from "@patchmesh/storage";
 
 /**
@@ -25,6 +27,8 @@ export interface RecappedTask {
   readonly changedPaths: readonly string[];
   /** Changed files beyond those listed, so a summary never reads as an inventory. */
   readonly moreChanged: number;
+  /** Subjects of commits that landed while this task was running. See `label.ts`. */
+  readonly commits: readonly string[];
 }
 
 export interface RecapOptions {
@@ -72,7 +76,12 @@ export function recapRecentWork(options: RecapOptions): RecapResult {
   const store = SqliteEventStore.open(options.ledgerPath);
   let events: readonly ProtocolEvent[];
   try {
-    events = store.read();
+    // `tool.completed` is not summarized directly, but it carries the failure outcome each
+    // request is counted by; dropping it here would silently zero every failure count.
+    events = store.read({
+      eventTypes: ["tool.requested", "tool.completed", "file.changed"],
+      since: since.toISOString(),
+    });
   } finally {
     store.close();
   }
@@ -124,8 +133,19 @@ export function recapRecentWork(options: RecapOptions): RecapResult {
     tasks.set(event.taskId, accumulator);
   }
 
+  // Asked once for every path in the recap rather than once per task: `git check-ignore` is a
+  // subprocess, and a recap that names a sibling tool's cache as work spends the reader's
+  // context to tell them nothing. Same policy as the write side; see `ignoredByRepository`.
+  const ignored = ignoredByRepository(
+    options.worktreeRoot,
+    [...new Set([...tasks.values()].flatMap((accumulator) => [...accumulator.changedPaths]))],
+  );
+
+  // One git call for the whole window, not one per task.
+  const commits = readCommitsSince(options.worktreeRoot, since);
+
   const all: RecappedTask[] = [...tasks.entries()].map(([taskId, accumulator]) => {
-    const paths = [...accumulator.changedPaths].sort();
+    const paths = [...accumulator.changedPaths].filter((path) => !ignored.has(path)).sort();
     return {
       taskId,
       agentIds: [...accumulator.agentIds].sort(),
@@ -135,6 +155,7 @@ export function recapRecentWork(options: RecapOptions): RecapResult {
       failed: accumulator.failed,
       changedPaths: paths.slice(0, MAX_PATHS_PER_TASK),
       moreChanged: Math.max(paths.length - MAX_PATHS_PER_TASK, 0),
+      commits: commitsWithin(commits, accumulator.startedAt, accumulator.endedAt),
     };
   });
 
@@ -165,7 +186,10 @@ export function renderRecap(result: RecapResult, agent: string | undefined): str
         ? "  changed no files"
         : `  changed: ${task.changedPaths.join(", ")}` +
           (task.moreChanged > 0 ? ` (+${task.moreChanged} more)` : "");
-    return `- ${task.taskId}\n  ${who}, ${task.startedAt} to ${task.endedAt}, ${task.calls} call(s)${failed}\n${files}`;
+    // "committed", not "did": the commit landed while this task was running, which is an
+    // observation about timing rather than a statement of what the task was for.
+    const committed = task.commits.length === 0 ? "" : `\n  committed: ${task.commits.join(" | ")}`;
+    return `- ${task.taskId}\n  ${who}, ${task.startedAt} to ${task.endedAt}, ${task.calls} call(s)${failed}\n${files}${committed}`;
   });
 
   const header = `${result.tasks.length} recent task(s) in ${scope}, most recent first:`;

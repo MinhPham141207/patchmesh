@@ -20,3 +20,5 @@ export {
   type SourceSequenceGap,
   type StatusView,
 } from "./types.js";
+export { findOverlappingWork, renderOverlap } from "./overlap.js";
+export type { OverlapOptions, OverlapResult, OverlappingTask, ResourceOverlap } from "./overlap.js";

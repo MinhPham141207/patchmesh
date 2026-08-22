@@ -6,7 +6,9 @@
   "engines": {
     "node": ">=22.5.0"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -20,6 +22,7 @@
   },
   "dependencies": {
     "@patchmesh/protocol": "workspace:*",
+    "@patchmesh/recorder": "workspace:*",
     "@patchmesh/storage": "workspace:*"
   }
 }

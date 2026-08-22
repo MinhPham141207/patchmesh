@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LEDGER_DIRECTORY, ledgerPathFor } from "@patchmesh/recorder";
 import { measurementPathFor, recordAnswer } from "./measure.js";
-import { findOverlappingWork, renderOverlap } from "./overlap.js";
+import { findOverlappingWork, renderOverlap } from "@patchmesh/query";
 import { recallRecentActivity, renderRecall } from "./recall.js";
 import { recapRecentWork, renderRecap } from "./recap.js";
 
@@ -85,9 +85,11 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
     {
       title: "Overlapping work",
       description:
-        "Files that more than one task changed recently, based on observed filesystem changes " +
-        "rather than on what a tool call named. Use before continuing work another task may " +
-        "already have moved. Reports history only - two tasks touching one file may be " +
+        "Files that more than one worker changed recently, based on observed filesystem changes " +
+        "rather than on what a tool call named. Use before continuing work another agent may " +
+        "already have moved. Only counts tasks from different agents, subagents or worktrees - " +
+        "one agent's own consecutive turns are sequence, not contention - and only files this " +
+        "repository tracks. Reports history only: two workers touching one file may be " +
         "collaboration, a rebase, or divergence, and the ledger holds paths and content hashes, " +
         "not intent, so it does not decide which.",
       inputSchema: {
@@ -142,9 +144,10 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       title: "Recap recent work",
       description:
         "A compact summary of what recent tasks did in this repository - who worked, for how " +
-        "long, and which files they changed - so a fresh agent resumes instead of re-deriving " +
-        "it by reading the tree. Reports what was done, not what it means: a changed file is " +
-        "not a finished intention.",
+        "long, which files they changed, and what they committed - so a fresh agent resumes " +
+        "instead of re-deriving it by reading the tree. A listed commit landed while that task " +
+        "was running, which is a fact about timing, not a statement of the task's purpose. " +
+        "Reports what was done, not what it means: a changed file is not a finished intention.",
       inputSchema: {
         agent: z.string().optional().describe("Narrow to one agent's work. Omit for every agent."),
         withinMinutes: z

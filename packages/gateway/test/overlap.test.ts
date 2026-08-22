@@ -1,10 +1,11 @@
+import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { appendJournalEntry, ingestJournal, journalPathFor, recordTurnEffects } from "@patchmesh/recorder";
-import { findOverlappingWork, renderOverlap } from "../src/index.js";
+import { findOverlappingWork, renderOverlap } from "@patchmesh/query";
 
 const FIRST_SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
 const SECOND_SESSION = "9c2d4e6a-1b3f-4d78-8e05-2a7c1f9b3d64";
@@ -24,6 +25,21 @@ function repository(): Repo {
     ledgerPath: join(root, ".patchmesh", "ledger.db"),
     snapshotPath: join(root, ".patchmesh", "snapshot.json"),
   };
+}
+
+/**
+ * A worktree with a working git in it.
+ *
+ * `repository()` only makes a `.git` directory, which is enough for identity but not for
+ * `git check-ignore` - it fails, the filter fails open, and every ignored file is reported as
+ * work. That is precisely the production defect being fixed, so the test that covers it cannot
+ * use a fixture that reproduces the failure for an unrelated reason.
+ */
+function initializedRepository(): Repo {
+  const repo = repository();
+  rmSync(join(repo.root, ".git"), { recursive: true, force: true });
+  execFileSync("git", ["init", "-q"], { cwd: repo.root, stdio: "ignore" });
+  return repo;
 }
 
 /**
@@ -93,7 +109,12 @@ test("two tasks changing one file are reported as an overlap", async () => {
   }
 });
 
-test("two turns of one session are two tasks, so both touching a file is an overlap", async () => {
+test("one session's consecutive turns are not an overlap", async () => {
+  // This reverses the rule this test asserted when it was written ("two separate requests
+  // touching one file is a real overlap"). Live evidence overturned it: run against this
+  // repository's own ledger, that rule produced eight findings and all eight were one agent's
+  // own consecutive turns. A session runs one task at a time, so it cannot contend with
+  // itself - it finished the first turn before it began the second.
   const repo = repository();
   try {
     writeFileSync(join(repo.root, "solo.ts"), "original\n", "utf8");
@@ -106,10 +127,42 @@ test("two turns of one session are two tasks, so both touching a file is an over
     });
 
     const result = findOverlappingWork({ worktreeRoot: repo.root, ledgerPath: repo.ledgerPath, now: NOW });
-    // Two turns of one session are two tasks, and that is the point: repetition is not
-    // duplication, but two separate requests touching one file is a real overlap.
-    assert.equal(result.overlaps.length, 1);
-    assert.equal(result.overlaps[0]!.tasks.length, 2);
+    assert.equal(result.overlaps.length, 0, "sequence is not overlap");
+    // The change was still seen. Reporting nothing here is a judgement about what the evidence
+    // means, not a gap in what was observed.
+    assert.equal(result.filesObserved, 1);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test("a file the repository ignores is not reported as contested work", async () => {
+  // The ledger is append-only, so filtering at write time never repairs what is already in it.
+  // Every live overlap this tool reported before this existed was a sibling tool's cache.
+  // A real repository, not the bare `.git` directory the other tests get: the ignore policy is
+  // git's own answer, so there has to be a git here to answer it.
+  const repo = initializedRepository();
+  try {
+    writeFileSync(join(repo.root, ".gitignore"), "cache/\n", "utf8");
+    mkdirSync(join(repo.root, "cache"));
+    writeFileSync(join(repo.root, "cache", "state.db"), "original\n", "utf8");
+    writeFileSync(join(repo.root, "real.ts"), "original\n", "utf8");
+    await baseline(repo);
+    await runTurn(repo, FIRST_SESSION, "2026-08-21T12:00:00.000Z", () => {
+      writeFileSync(join(repo.root, "cache", "state.db"), "churn\n", "utf8");
+      writeFileSync(join(repo.root, "real.ts"), "first\n", "utf8");
+    });
+    await runTurn(repo, SECOND_SESSION, "2026-08-21T12:10:00.000Z", () => {
+      writeFileSync(join(repo.root, "cache", "state.db"), "more churn\n", "utf8");
+      writeFileSync(join(repo.root, "real.ts"), "second\n", "utf8");
+    });
+
+    const result = findOverlappingWork({ worktreeRoot: repo.root, ledgerPath: repo.ledgerPath, now: NOW });
+    assert.deepEqual(
+      result.overlaps.map((overlap) => overlap.logicalPath),
+      ["real.ts"],
+      "only work product can be contested",
+    );
   } finally {
     rmSync(repo.root, { recursive: true, force: true });
   }
