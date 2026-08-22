@@ -11,7 +11,7 @@ import {
   type StatusView,
 } from "patchmesh-query";
 import type { EventType } from "patchmesh-protocol";
-import { findWorktreeRoot } from "patchmesh-recorder";
+import { findWorktreeRoot, ledgerPathFor } from "patchmesh-recorder";
 import { parseArgs, usageText, type ParsedArgs } from "./args.js";
 import { initializeRepository, renderInit } from "./init.js";
 import {
@@ -224,11 +224,28 @@ function unavailableServices(): ReadServices {
   return new Proxy({} as ReadServices, { get: () => unavailable });
 }
 
+/**
+ * Which ledger to read, defaulting to the one this repository owns.
+ *
+ * The recorder writes to `<worktree>/.patchmesh/ledger.db` and nowhere else -- the path is a
+ * convention, not a configurable. Requiring `--database` on every invocation made the user
+ * retype a value that has exactly one correct answer, and got it wrong whenever they ran the
+ * command from a subdirectory. `--database` still wins when given, because reading a ledger
+ * copied from somewhere else is a real thing to want.
+ */
 function databasePath(argv: readonly string[]): string {
   const index = argv.indexOf("--database");
-  const path = index === -1 ? undefined : argv[index + 1];
-  if (path === undefined) throw new ReadServiceError("usage", "--database is required");
-  return path;
+  const explicit = index === -1 ? undefined : argv[index + 1];
+  if (explicit !== undefined) return explicit;
+
+  const worktreeRoot = findWorktreeRoot(process.cwd());
+  if (worktreeRoot === null) {
+    throw new ReadServiceError(
+      "usage",
+      "not inside a git repository, so there is no ledger to default to; pass --database <path>",
+    );
+  }
+  return ledgerPathFor(worktreeRoot);
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -247,11 +264,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(renderNoLedger(ledgerPath, argv.includes("--json")));
       return 0;
     }
+    // Hand the resolved path back to the parser rather than only to the daemon. `overlaps`
+    // reads `parsed.databasePath` on its own, so defaulting in one place and not the other
+    // would leave it opening the empty string while every other command worked.
+    const resolvedArgv = argv.includes("--database") ? argv : [...argv, "--database", ledgerPath];
     daemon = createDaemon({ databasePath: ledgerPath });
     const controller = new AbortController();
     const onInterrupt = () => controller.abort();
     process.once("SIGINT", onInterrupt);
-    const result = await runCli(argv, {
+    const result = await runCli(resolvedArgv, {
       services: daemon.services,
       feedbackWriter: daemon,
       deliveryWriter: daemon,
