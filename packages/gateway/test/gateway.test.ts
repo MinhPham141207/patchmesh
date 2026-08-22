@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { appendJournalEntry, ingestJournal, journalPathFor, recordTurnEffects } from "@patchmesh/recorder";
-import { recallRecentActivity, renderRecall } from "../src/index.js";
+import { recallRecentActivity, renderRecall, renderRecap } from "../src/index.js";
 
 const SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
 const DELEGATE = "a79bd1f2dafad824a";
@@ -320,4 +320,31 @@ test("narrowing to a path still lists every call that named it", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a task that only committed says so, instead of contradicting itself", () => {
+  // Observed on this repository's ledger: task_d2a6d60d made 24 calls, landed 6 commits, and
+  // had zero file.changed events, because the turn that runs `git add` and `git commit` changes
+  // no tracked content itself. Rendering that as "changed no files" beside six commit subjects
+  // reads as a contradiction rather than as the timing claim commit labels actually are.
+  const result = {
+    tasks: [{
+      taskId: "task_commit_only",
+      agentIds: ["agent_1"],
+      startedAt: "2026-08-22T15:10:35.164Z",
+      endedAt: "2026-08-22T15:18:04.471Z",
+      calls: 24,
+      failed: 0,
+      changedPaths: [],
+      moreChanged: 0,
+      commits: ["Label recap tasks with the commits they landed"],
+    }],
+    truncated: 0,
+    unattributedCalls: 0,
+    scopeAgent: null,
+  } as unknown as Parameters<typeof renderRecap>[0];
+
+  const rendered = renderRecap(result);
+  assert.match(rendered, /changed no files itself; the commits below carry work observed under earlier tasks/);
+  assert.equal(rendered.includes("  changed no files\n"), false);
 });

@@ -181,9 +181,15 @@ export function renderRecap(result: RecapResult, agent: string | undefined): str
         ? task.agentIds[0]!
         : `${task.agentIds.length} agents (${task.agentIds.filter((id) => id.includes(".sub.")).length} subagent(s))`;
     const failed = task.failed > 0 ? `, ${task.failed} failed` : "";
+    // A task that landed commits while observing no changes of its own is a real and common
+    // shape - the turn that runs `git add` and `git commit` over work earlier turns did - and
+    // rendering it as "changed no files" beside a list of six commits reads as a contradiction
+    // rather than as the timing claim it is.
     const files =
       task.changedPaths.length === 0
-        ? "  changed no files"
+        ? task.commits.length === 0
+          ? "  changed no files"
+          : "  changed no files itself; the commits below carry work observed under earlier tasks"
         : `  changed: ${task.changedPaths.join(", ")}` +
           (task.moreChanged > 0 ? ` (+${task.moreChanged} more)` : "");
     // "committed", not "did": the commit landed while this task was running, which is an

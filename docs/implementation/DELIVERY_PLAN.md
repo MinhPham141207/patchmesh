@@ -1,11 +1,13 @@
 # PatchMesh Delivery Plan: Incremental Slices
 
-> **Status:** Adopted. S1 is implemented and S2 is partially implemented (recall of
-> recorded activity; in-flight visibility and recap are not built). S3 onward remain
-> planned. This plan replaces the *sequencing* of Phase 2 and later work.
-> It does not delete Phase 0/1 evidence or the Phase 2 milestone definitions; those
-> remain valid descriptions of *what* to build. This document changes *what order*
-> things get built in, and *what evidence is allowed to block* them.
+> **Status:** Adopted. S1 and S2 are implemented — recall, in-flight visibility, and recap
+> all ship. S3 is implemented but **unproven**: `overlaps` is correct and returns zero,
+> because this repository's development has never run two agents at once. S4 is blocked on
+> evidence a host hook cannot produce. S5 and S6 remain planned. This plan replaces the
+> *sequencing* of Phase 2 and later work. It does not delete Phase 0/1 evidence or the
+> Phase 2 milestone definitions; those remain valid descriptions of *what* to build. This
+> document changes *what order* things get built in, and *what evidence is allowed to
+> block* them.
 
 ## 1. Why Phase 2 stalled
 
@@ -193,7 +195,7 @@ these stop being background cleanup:
 
 ---
 
-### S2 - Recall (the payoff) — **partially implemented**
+### S2 - Recall (the payoff) — **implemented**
 
 **A user can:** have their agents stop re-discovering things. Before a subagent explores
 a file or starts a task, it asks PatchMesh what is already known about it and gets a
@@ -201,27 +203,33 @@ short, budgeted answer instead of re-reading the tree.
 
 **Build:** the ledger exposed *back to agents* as MCP tools on the same server.
 
-`packages/gateway` is that server, and ships the first of these tools. The other two are
-still to build, and the exit bar below is therefore not yet met.
+`packages/gateway` is that server, and ships all three tools.
 
 - `patchmesh_recent_activity(path?, withinMinutes?, limit?, excludeAgentId?)` -
-  **implemented** - who touched a file, when, under which task, with what outcome.
-- `patchmesh_inflight()` - **not built** - what is being worked on **right now**. This is the
-  duplicate-work and collision guard, and it must read pre-tool request events, not just
-  completions. In-flight visibility is the requirement; a ledger that only shows
-  finished work cannot stop two subagents from starting the same task.
-- `patchmesh_recap(agent?)` - **not built** - a compact summary of a prior session, so a fresh agent
-  resumes instead of re-deriving.
+  **implemented** - who touched a file, when, under which task, with what outcome. Leads
+  with observed file changes rather than tool calls: a call is what an agent asked for, a
+  change is what the filesystem shows, and the second is the one a caller can act on.
+- **In-flight visibility** - **implemented**, folded into `recent_activity` rather than
+  given its own tool. Read live from the journal, not from the ledger: ingest runs on
+  `Stop`, so anything the ledger holds has already finished. The originally planned
+  `PreToolUse` protocol event proved unnecessary — the journal entry *is* the started call.
+- `patchmesh_recap(agent?)` - **implemented** - a compact summary of prior tasks: who
+  worked, for how long, which files changed, and which commits landed during the task.
 
 **Exit bar:**
 
-- Two agents working the same repository concurrently: the second one's `inflight` call
-  surfaces the first one's active work before it duplicates it. **Blocked:** the recorder
-  is wired only to `PostToolUse`, so nothing records a call while it is still running.
-  In-flight visibility needs `PreToolUse` recording first.
-- **Net-token invariant measured**: recorded tokens returned vs. an estimate of the
-  discovery those responses displaced, on real dogfood sessions. Published, not assumed.
-- Every response is bounded and ranked. No unbounded dumps.
+- Two agents working the same repository concurrently: the second one's in-flight view
+  surfaces the first one's active work before it duplicates it. **Unproven, not blocked** —
+  the mechanism works and reports running calls correctly; no session has ever run two
+  agents at once for it to catch. This is the same gap S3 has, and it is a workload gap
+  rather than a code gap.
+- **Net-token invariant measured**: `.patchmesh/answers.ndjson` records what every answer
+  cost. The displacement side — whether the caller went and read the file anyway — is
+  **not yet measured**, so the invariant is instrumented on one side only. Closing it means
+  joining those lines against the calls that follow them.
+- Every response is bounded and ranked. No unbounded dumps. **Met:** an unnarrowed answer
+  summarizes calls into a histogram rather than quoting shell command strings, which took
+  one measured answer from 6,824 bytes to 1,343.
 
 **Not in this slice:** any claim about whether work *conflicts*. S2 reports facts and
 lets the agent decide.
@@ -232,20 +240,38 @@ implemented half needed nothing newly recorded either - only the attribution tha
 
 ---
 
-### S3 - Overlap, as an observation
+### S3 - Overlap, as an observation — **implemented, unproven**
 
 **A user can:** run `patchmesh overlaps` and see where concurrent work touches the same
-file or symbol, across worktrees.
+file, across worktrees.
 
-**Build:** M3's same-symbol detector, run over real S1 traffic - but demoted from
-"detector with precision thresholds" to "an observation the user asked to see." Nothing
-is pushed. Nothing changes state. Precision matters less when the user typed the command
-and can see the evidence.
+**Build:** M3's detector, run over real S1 traffic - but demoted from "detector with
+precision thresholds" to "an observation the user asked to see." Nothing is pushed.
+Nothing changes state. Precision matters less when the user typed the command and can see
+the evidence.
+
+Built from **observed file changes** rather than the same-symbol projection: a hook-recorded
+ledger never populates the latter, because shell commands are opaque. One implementation in
+`packages/query`, shared by the CLI and the MCP tool.
 
 **Exit bar:** findings are reproducible from stored events; each carries a stable
 dependency path and source event IDs; a rebuild produces the same set; degraded coverage
 is stated rather than guessed around. **No corpus gate** - the user is the reviewer, and
 their dismissals via the existing feedback command become the first labels.
+
+**Where it actually stands.** The rule is right and the false positives are gone: an
+overlap requires two *distinct workers* — `(agentId, worktreeId)` — and a file the
+repository calls work product. That took this repository's live output from 8 findings, all
+of them another tool's SQLite cache and all of them one agent's own consecutive turns, to
+**0 findings with 34 files still reported as observed**, so "nothing contested" stays
+distinguishable from "nothing seen".
+
+But zero is also all it has ever returned, because this repository has been developed by
+one agent at a time in one worktree. Under this plan's own P3 — a slice that cannot be
+demoed to a user who does not already know what PatchMesh is does not count as done — S3 is
+**not done**, and no amount of further code will finish it. It needs a concurrent workload:
+two worktrees, two agents, one shared file. That is a workload gap, not a code gap, and
+naming it as such is the point of P4.
 
 ---
 

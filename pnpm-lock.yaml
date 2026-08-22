@@ -72,12 +72,6 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
-  packages/collector:
-    dependencies:
-      '@patchmesh/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-
   packages/core:
     dependencies:
       '@patchmesh/analyzers':

@@ -1,36 +1,47 @@
 # PatchMesh
 
-PatchMesh is a planned runtime consistency layer for parallel coding agents. It
-detects when one agent's change may invalidate another agent's running or completed
-work, explains the dependency path, and requests the smallest reliable response
-before integration.
+PatchMesh is a **shared work ledger for coding agents and their subagents.** Agents write
+to it implicitly, by working through a host hook. They read from it deliberately, to find
+out what has already been done and what is being done right now, so they do not repeat it
+or collide with it.
 
-> **Project status:** Phase 0 and Phase 1 through M7 are implemented and verified.
-> Phase 2 report-only detection is in progress: its protocol, conservative detectors,
-> evidence binding, and fail-closed quality gates are implemented, but the Phase 2 exit
-> gates are not met. Targeted revalidation, enforcement, and additional runtime adapters
-> remain planned. The implementation sequence is defined in the
-> [roadmap](docs/ROADMAP.md).
+> **Project status:** the recorder and the read side work and are dogfooded — this
+> repository's own ledger holds several days of real agent sessions. Detection beyond
+> file-level overlap is not demonstrated: see [What is not proven](#what-is-not-proven).
+> The build order is in the [delivery plan](docs/implementation/DELIVERY_PLAN.md).
 
 ## The problem
 
-Git can detect textual merge conflicts, worktrees can isolate changes, orchestrators
-can assign tasks, and tests can validate integrated results. They do not reliably
-detect when agents edit different files but one change invalidates another agent's
-assumptions.
+A coding agent starts every session knowing nothing about the last one. It re-reads files
+another agent already read, re-derives conclusions already reached, and — when two agents
+work at once — edits files another agent is holding.
 
-Example:
+Git detects textual merge conflicts, worktrees isolate changes, orchestrators assign tasks.
+None of them records *what the agents actually did*, which is the thing the next agent needs
+and the thing that is thrown away when a session ends.
+
+PatchMesh records it, and hands it back on request:
 
 ```text
-Agent B reads authenticate() signature v12 and modifies a caller.
-Agent A proposes authenticate() signature v13 in another worktree.
-PatchMesh links the candidate change to Agent B's observed dependency.
-Agent B is notified and asked to run the cheapest relevant validation.
+A fresh agent asks: what happened in this repository recently?
+PatchMesh answers: these 15 files changed, by this worker, under this task,
+                   and these 2 calls are still running right now.
 ```
 
-PatchMesh focuses on this question:
+The value order is deliberate. Recording is worth something on its own; recall is worth
+more; judgment is worth most, and only after the first two are real.
 
-> When has concurrent work stopped being independent?
+### The net-token invariant
+
+The read side exists to reduce cost, so it is bound by one rule:
+
+> Any context PatchMesh returns to an agent must be smaller than the context that agent
+> would otherwise have spent discovering the same thing.
+
+Every answer is bounded and ranked, and every answer's size is recorded to
+`.patchmesh/answers.ndjson` so the claim is measurable rather than asserted. An answer that
+quotes shell command strings back at a caller fails this rule, which is why an unnarrowed
+recall summarizes calls instead of listing them.
 
 ## Quick start
 
@@ -55,46 +66,53 @@ node apps/cli/dist/main.js overlaps --database .patchmesh/ledger.db
 Agents get the same ledger back over MCP as `patchmesh_recent_activity`,
 `patchmesh_overlapping_work`, and `patchmesh_recap`.
 
-## Current Phase 1 slice
+## What works today
 
-The current implementation provides:
+Verified against this repository's own ledger, not against fixtures:
 
-- a strict TypeScript/pnpm workspace;
-- runtime-agnostic V1 event types and Phase 0 boundary validation;
-- an in-memory normalized-event collector;
-- an in-process MCP proxy with a tested `tool.requested` and `tool.completed` round trip;
-- filesystem, Git, content-hash, process-outcome, opaque-operation, and conservative
-  coverage observation;
-- append-only SQLite event storage with canonical digests and idempotent retries;
-- deterministic causal replay with bounded reference failures and source-gap reporting;
-- rebuildable, stable-order work-graph projections and immutable attribution correction;
-- read-only daemon services and `patchmesh status`, `agents`, `events`, and `graph`;
-- an observation-only cross-worktree golden slice with resilience and performance evidence.
+- **Recording.** A Claude Code `PostToolUse` hook journals every tool call — including
+  built-in `Read`, `Edit`, `Write`, and `Bash`, which no MCP server can see — and
+  `patchmesh-ingest` converts the journal into validated events on `Stop`. Measured
+  overhead **p50 108ms, p95 166ms** per call against a 65ms bare-Node floor. Fail-open
+  throughout: both binaries always exit 0.
+- **Effect observation.** The worktree is captured per turn and diffed, so a file written
+  by a shell command is recorded even though the command named no path. This is what
+  routes around shell opacity without guessing at a command's intent.
+- **Attribution.** Subagents get their own `agentId` and task, so an answer names the
+  subagent that made an edit rather than the session that contained it.
+- **Recall, over MCP.** `patchmesh_recent_activity`, `patchmesh_overlapping_work`, and
+  `patchmesh_recap` — bounded, ranked, and caveated as observations rather than
+  instructions.
+- **Reports, over the CLI.** `status`, `agents`, `events`, `graph`, `overlaps`, `explain`,
+  plus `feedback` and `delivery` as append-only responses.
+- **Retention.** `patchmesh prune --older-than <days>` keeps replay intact.
 
-## Phase 2 and later roadmap phases
+## What is not proven
 
-The in-progress Phase 2 slice is report-only and only emits findings when explicit,
-sufficient provenance proves the relationship. It does not infer chronology from event
-ordering or concurrency from independent worktrees. Its remaining evidence gates include
-real adapter-produced concurrency and stale-comparison observations, reviewed detector
-holdouts, and the deferred runtime budget. Once those gates are met, later slices will
-provide targeted revalidation and validity history, measured opt-in enforcement, and
-additional runtime adapters.
+Stated plainly, because a green test suite is not evidence that a product works:
 
-Network MCP transport, automatic pause or rejection, semantic duplicate-work detection,
-multiple adapters, and a dashboard are deliberately deferred.
+- **Concurrency has never been observed.** `overlaps` correctly returns zero on this
+  repository, because its development has been one agent at a time in one worktree. The
+  detector is honest; the workload has not exercised it.
+- **`stale` and `contracts` cannot fire on hook-recorded data.** They are typed against
+  `file.read` / `write.dependent` and `symbol.changed` / `dependency.changed`, which a host
+  hook does not produce. Both decline and name the missing evidence rather than reporting
+  "no findings" — an inability, not a silence.
+- **Reads are largely invisible.** Roughly four in five recorded calls are shell commands,
+  and a read leaves no trace on disk for the observer to find. Coverage reports this as a
+  gap instead of guessing.
+- **Displacement is unmeasured.** Answer *cost* is recorded; what an answer *saved* is not,
+  so the net-token invariant is instrumented on one side only.
 
-## Planned architecture
+## Architecture
 
 ```text
-Coding agents
-    -> adapter / gateway / observers
-    -> normalized immutable events
+Coding agent (host hooks)
+    -> append-only journal          .patchmesh/journal.ndjson
+    -> ingest (validate, attribute) .patchmesh/ledger.db
     -> SQLite event store
-    -> live work graph projection
-    -> deterministic detectors
-    -> policy decisions
-    -> targeted coordination and revalidation
+    -> work-graph projection + read services
+    -> MCP tools (to agents) and CLI reports (to people)
 ```
 
 PatchMesh is not a coding agent, task planner, general orchestrator, Git replacement,
@@ -112,20 +130,34 @@ test replacement, or project-management platform.
 
 ## Documentation
 
+- [Delivery plan](docs/implementation/DELIVERY_PLAN.md) — the build order actually in use,
+  and why evidence requirements scale with authority
+- [CLI](docs/CLI.md) — every command, its output, and its exit behavior
 - [Vision](docs/VISION.md) — problem, promise, boundaries, and long-term direction
-- [Roadmap](docs/ROADMAP.md) — implementation phases and evidence gates
-- [Architecture](docs/ARCHITECTURE.md) — planned components and technical contracts
+- [Roadmap](docs/ROADMAP.md) — the original phase structure the delivery plan resequenced
+- [Architecture](docs/ARCHITECTURE.md) — components and technical contracts
 - [Lifecycle](docs/LIFECYCLE.md) — agent, task, event, decision, and revalidation flows
 - [Terminology](docs/TERMINOLOGY.md) — canonical vocabulary
 - [Agent rules](docs/AGENTS.md) — implementation constraints for repository changes
 - [Phase 0 contracts](docs/protocol/identities.md) — versioned identities, events,
   coordination, validity, evidence, replay fixtures, security, and benchmark inputs
 
-Run `node tools/phase0/validate.mjs` to verify the Phase 0 contract corpus. This is
-development validation, not a released PatchMesh CLI.
+## Development
+
+Node 24 or newer is required: the event store is built on `node:sqlite`'s `DatabaseSync`,
+which makes the version a correctness constraint rather than a preference.
+
+```bash
+corepack pnpm check
+```
+
+One command — build, typecheck, the full test suite, the Phase 0 contract corpus, and
+evidence trace validation. CI runs exactly this, so a green pipeline and a green laptop
+mean the same thing.
 
 ## Contributing
 
-Read `docs/VISION.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, and
-`docs/AGENTS.md` before proposing implementation work. Do not describe planned
-behavior as implemented behavior.
+Read `docs/implementation/DELIVERY_PLAN.md` and `docs/AGENTS.md` before proposing
+implementation work. Do not describe planned behavior as implemented behavior — the
+[What is not proven](#what-is-not-proven) section above is part of the contract, not a
+disclaimer to be quietly trimmed.
