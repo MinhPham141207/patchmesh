@@ -23,6 +23,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@patchmesh/protocol": "workspace:*",
+    "@patchmesh/query": "workspace:*",
     "@patchmesh/recorder": "workspace:*",
     "@patchmesh/storage": "workspace:*",
     "zod": "^4.4.3"

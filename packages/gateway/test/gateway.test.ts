@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { commitsWithin, readCommitsSince } from "../src/label.js";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -241,6 +242,42 @@ test("recall reports work still running, which the ledger can never hold", async
     // Deliberately first: work still in flight decides more than work already finished.
     assert.match(rendered, /^1 call\(s\) running right now:/u);
     assert.match(rendered, /pnpm check \(running 30s\)/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a commit that landed during a task is reported, and one outside it is not", () => {
+  // Attribution is by committer time inside the task's observed window - the same basis as
+  // turn-scoped effects. The timezone case is the one that matters: `git log --format=%cI`
+  // emits a real UTC offset while task windows are stamped `Z`, so comparing the two as
+  // strings would order them by the text of the timezone rather than by the instant.
+  const commits = [
+    { at: "2026-08-22T14:45:57+07:00", subject: "inside the window" },
+    { at: "2026-08-22T20:45:57+07:00", subject: "hours later" },
+    { at: "2026-08-21T14:45:57+07:00", subject: "the day before" },
+  ];
+
+  assert.deepEqual(
+    commitsWithin(commits, "2026-08-22T07:39:35.579Z", "2026-08-22T07:46:13.891Z"),
+    ["inside the window"],
+  );
+});
+
+test("a task boundary is inclusive, because a commit is usually the last thing a turn does", () => {
+  const commits = [{ at: "2026-08-22T07:46:13.891Z", subject: "on the boundary" }];
+  assert.deepEqual(
+    commitsWithin(commits, "2026-08-22T07:39:35.579Z", "2026-08-22T07:46:13.891Z"),
+    ["on the boundary"],
+  );
+});
+
+test("reading commits from somewhere without git yields no labels rather than failing", () => {
+  // Labels enrich an answer that is already correct without them; losing git must cost the
+  // labels and never the recap.
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-nogit-"));
+  try {
+    assert.deepEqual(readCommitsSince(root, new Date("2020-01-01T00:00:00.000Z")), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
