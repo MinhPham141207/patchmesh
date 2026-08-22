@@ -1,9 +1,10 @@
 {
-  "name": "@patchmesh/core",
+  "name": "patchmesh-core",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -16,8 +17,22 @@
     "test": "tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
-    "@patchmesh/analyzers": "workspace:*",
-    "@patchmesh/protocol": "workspace:*",
-    "@patchmesh/storage": "workspace:*"
+    "patchmesh-analyzers": "workspace:*",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-storage": "workspace:*"
+  },
+  "description": "PatchMesh detector and policy core.",
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
+  "engines": {
+    "node": ">=24"
   }
 }

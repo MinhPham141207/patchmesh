@@ -8,10 +8,10 @@
 
 ## Scope Verified
 
-M3 adds `@patchmesh/adapters` with an in-process `McpProxy`. The proxy accepts
+M3 adds `patchmesh-adapters` with an in-process `McpProxy`. The proxy accepts
 per-call runtime and attribution metadata, validates and persists `tool.requested`
 before invoking an injected executor, and persists a causally linked
-`tool.completed` outcome afterward through `@patchmesh/storage`.
+`tool.completed` outcome afterward through `patchmesh-storage`.
 
 The boundary remains report-only and allow-only. It does not implement an MCP
 transport, filesystem/Git/process effect observation, coverage projection, graph
@@ -21,11 +21,11 @@ projection, detector, policy, decision, daemon, or CLI behavior.
 
 | Command | Result |
 | --- | --- |
-| `corepack pnpm --filter @patchmesh/adapters test` | Passed: 8 adapter tests |
-| `corepack pnpm --filter @patchmesh/adapters typecheck` | Passed |
-| `corepack pnpm --filter @patchmesh/adapters build` | Passed |
-| `corepack pnpm --filter @patchmesh/protocol build` | Passed |
-| `corepack pnpm --filter @patchmesh/storage build` | Passed |
+| `corepack pnpm --filter patchmesh-adapters test` | Passed: 8 adapter tests |
+| `corepack pnpm --filter patchmesh-adapters typecheck` | Passed |
+| `corepack pnpm --filter patchmesh-adapters build` | Passed |
+| `corepack pnpm --filter patchmesh-protocol build` | Passed |
+| `corepack pnpm --filter patchmesh-storage build` | Passed |
 | `corepack pnpm --recursive test` | Passed: 48 tests across protocol, collector, storage, and adapters |
 | `corepack pnpm --recursive typecheck` | Passed for all 4 workspace packages |
 | `corepack pnpm --recursive build` | Passed for all 4 workspace packages |

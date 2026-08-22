@@ -18,7 +18,7 @@ policy, gateway enforcement, AST or symbol analysis, or a second runtime adapter
 
 In scope:
 
-- A new `@patchmesh/observation` workspace package.
+- A new `patchmesh-observation` workspace package.
 - An injected observation boundary and a Node implementation using built-in filesystem,
   crypto, and Git/process APIs.
 - Repository, worktree, and revision observations at the before/after boundary.
@@ -44,7 +44,7 @@ Out of scope:
 
 ## Architectural Choice
 
-Effect observation belongs in a separate `@patchmesh/observation` package rather than
+Effect observation belongs in a separate `patchmesh-observation` package rather than
 inside `McpProxy` or a broad future analyzer package.
 
 The package provides deterministic observation ports and facts. It does not own event
@@ -222,13 +222,13 @@ Git inspection, hashing, redaction, and coverage policy in one runtime adapter. 
 would be difficult to test independently and would make the adapter responsible for
 generic repository facts.
 
-### Add a broad `@patchmesh/analyzers` package
+### Add a broad `patchmesh-analyzers` package
 
 This matches the eventual architecture naming, but M4 does not implement AST,
 dependency, or symbol analysis. Introducing the broader package now would expand the
 public boundary before M5 justifies it.
 
-### Selected approach: `@patchmesh/observation`
+### Selected approach: `patchmesh-observation`
 
 Use a focused observation package with injected ports and a Node implementation. It
 provides the smallest coherent reusable boundary for M4, keeps the MCP adapter thin,

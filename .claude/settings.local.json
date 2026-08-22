@@ -1,4 +1,20 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(node apps/cli/dist/bin.js --help)",
+      "mcp__patchmesh__patchmesh_recent_activity",
+      "Bash(node -e 'const p=require\\(\"./apps/cli/package.json\"\\);console.log\\(JSON.stringify\\({bin:p.bin,main:p.main},null,1\\)\\)')",
+      "Bash(node apps/cli/dist/main.js --help)",
+      "Bash(PATCHMESH_RECORDER_DEBUG=1 node packages/recorder/dist/ingest-bin.js)",
+      "mcp__patchmesh__patchmesh_overlapping_work",
+      "Bash(node apps/cli/dist/main.js agents --database .patchmesh/ledger.db)",
+      "Bash(echo \"=== exit $? ===\")"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "knowl",
+    "patchmesh"
+  ],
   "hooks": {
     "SessionStart": [
       {
@@ -37,6 +53,17 @@
             "statusMessage": ""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/bin.js\"",
+            "timeout": 10,
+            "statusMessage": ""
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -47,6 +74,17 @@
             "type": "command",
             "command": "knowl.cmd agent-hook claude PostToolUse --json",
             "timeout": 30,
+            "statusMessage": ""
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/bin.js\"",
+            "timeout": 10,
             "statusMessage": ""
           }
         ]
@@ -89,6 +127,17 @@
             "statusMessage": ""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/ingest-bin.js\"",
+            "timeout": 60,
+            "statusMessage": ""
+          }
+        ]
       }
     ],
     "StopFailure": [
@@ -128,6 +177,17 @@
             "statusMessage": ""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/ingest-bin.js\"",
+            "timeout": 60,
+            "statusMessage": ""
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -137,6 +197,17 @@
             "type": "command",
             "command": "knowl.cmd agent-reminder claude --json",
             "timeout": 30,
+            "statusMessage": ""
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/recorder/dist/bin.js\"",
+            "timeout": 10,
             "statusMessage": ""
           }
         ]

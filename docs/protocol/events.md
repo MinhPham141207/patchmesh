@@ -24,6 +24,14 @@ Correlation groups an originating operation and its derived facts. Root events h
 null causation ID; derived events name exactly one direct parent. Fan-in uses explicit
 evidence event IDs. Missing parents are reference errors at bounded replay end.
 
+A writer that receives events from an unordered transport may enable append-time
+buffering. An event whose causal parent is not yet durable is then held in a pending
+buffer instead of being committed, and is promoted into the log once its parent
+arrives; promotion cascades to that event's own buffered children. Buffered events are
+excluded from reads and replay, so the durable log stays causally closed and a parent
+that never arrives leaves its children quarantined rather than making replay
+unresolvable. Buffering is opt-in: a direct append still accepts an out-of-order child.
+
 Event equality is SHA-256 over canonical JSON. Repeated ID plus equal digest is a
 no-op; repeated ID plus different digest is `PHASE0_ID_CONFLICT`. Stored events are
 append-only. Attribution correction is a new `attribution.corrected` event and never

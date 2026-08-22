@@ -501,6 +501,128 @@ test("accepts canonical V2 dependent-write references regardless of arrival orde
     entry.message === "dependent write read resource does not match its dependency"), true);
 });
 
+test("rejects every V2 dependent-write binding branch (M1 compatibility audit)", () => {
+  const dependency = { ...makeDependencyChanged(), sourceSequence: 1 };
+  const readTemplate = makeFileRead();
+  const read = {
+    ...readTemplate,
+    taskId: "task_a" as const,
+    sourceSequence: 0,
+    payload: {
+      ...readTemplate.payload,
+      resource: {
+        ...readTemplate.payload.resource,
+        resourceId: dependency.payload.dependency.dependencyResourceId,
+        locator: "src/dependency.ts",
+      },
+      version: { ...readTemplate.payload.version, resourceId: dependency.payload.dependency.dependencyResourceId },
+    },
+  };
+  const change = { ...makeFileChanged(), taskId: "task_a" as const, sourceSequence: 2 };
+  const dependentWrite: DependentWriteEvent = {
+    ...makeFindingFeedbackCreated(),
+    eventId: `evt_${"d".repeat(32)}`,
+    eventType: "write.dependent",
+    correlationId: change.correlationId,
+    causationId: change.eventId,
+    taskId: read.taskId,
+    sourceSequence: 3,
+    payload: {
+      write: {
+        dependencyId: dependency.payload.dependency.dependencyId,
+        resourceId: change.payload.resource.resourceId,
+        dependsOnReadEventId: read.eventId,
+        coverageId: `coverage_${"d".repeat(32)}`,
+      },
+    },
+  };
+  assert.deepEqual(validateEventSet([read, dependency, change, dependentWrite]), []);
+
+  const expectRejection = (events: readonly ProtocolEvent[], message: string): void => {
+    assert.equal(
+      validateEventSet(events).some((entry) => entry.message === message),
+      true,
+      `expected rejection: ${message}`,
+    );
+  };
+
+  // The read reference must be a resource read, not an arbitrary event type.
+  expectRejection(
+    [dependency, change, { ...dependentWrite, payload: { write: { ...dependentWrite.payload.write, dependsOnReadEventId: change.eventId } } }],
+    "dependent write must reference a resource read",
+  );
+
+  // The read must share the write's repository/domain.
+  expectRejection(
+    [{ ...read, repositoryId: `repo_${"9".repeat(8)}-9999-4999-8999-${"9".repeat(12)}` as typeof read.repositoryId }, dependency, change, dependentWrite],
+    "dependent write read crosses repository or domain",
+  );
+
+  // The read must carry the same task attribution as the write.
+  expectRejection(
+    [{ ...read, taskId: "task_other" as typeof read.taskId }, dependency, change, dependentWrite],
+    "dependent write and read must have the same task attribution",
+  );
+
+  // The written resource must be the dependency's dependent resource.
+  expectRejection(
+    [
+      read,
+      { ...dependency, payload: { dependency: { ...dependency.payload.dependency, dependentResourceId: read.payload.resource.resourceId } } },
+      change,
+      dependentWrite,
+    ],
+    "dependent write resource does not match its dependency",
+  );
+
+  // The causing changed-resource event must concern the written resource.
+  expectRejection(
+    [
+      read,
+      dependency,
+      { ...change, payload: { ...change.payload, resource: { ...change.payload.resource, resourceId: read.payload.resource.resourceId } } },
+      dependentWrite,
+    ],
+    "dependent write resource does not match its changed resource event",
+  );
+
+  // The causing changed-resource event must not cross correlation or task.
+  expectRejection(
+    [read, dependency, { ...change, taskId: "task_other" as typeof change.taskId }, dependentWrite],
+    "dependent write changed resource crosses repository, domain, correlation, or task",
+  );
+
+  // Causation must reference a changed resource, not an unrelated event type.
+  expectRejection(
+    [read, dependency, change, { ...dependentWrite, causationId: read.eventId }],
+    "dependent write causation must reference a changed resource",
+  );
+});
+
+test("a V1 reader replays a V1 stream unchanged when V2 events are present", () => {
+  // M1 compatibility requirement: existing V1 readers must remain able to replay V1
+  // event streams without interpreting the new V2 extensions.
+  const request = makeToolRequested();
+  const completion = {
+    ...makeToolCompleted(),
+    causationId: request.eventId,
+    payload: { ...makeToolCompleted().payload, requestEventId: request.eventId },
+  };
+  const v1Stream = [request, completion];
+  assert.deepEqual(validateEventSet(v1Stream), []);
+
+  // Every V1 event declares schemaVersion 1, so a V1 reader filtering on it sees
+  // exactly the V1 stream even when V2 events share the log.
+  const feedback = makeFindingFeedbackCreated();
+  assert.equal(request.schemaVersion, 1);
+  assert.equal(completion.schemaVersion, 1);
+  assert.ok(feedback.schemaVersion >= 2);
+
+  const mixed = [...v1Stream, feedback];
+  const v1Projection = mixed.filter((event) => event.schemaVersion === 1);
+  assert.deepEqual(v1Projection, v1Stream);
+});
+
 test("requires a symbol comparison integration target to match sufficient derived evidence", () => {
   const request = makeToolRequested();
   const read = {

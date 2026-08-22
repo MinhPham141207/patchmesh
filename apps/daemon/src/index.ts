@@ -5,10 +5,10 @@ import {
   createDecisionDeliveryChangedEvent,
   createPhase2RuntimeRecords,
   createSameSymbolRuntimeRecords,
-} from "@patchmesh/core";
-import { createReadServices, ReadServiceError, type EventReader, type ReadServices } from "@patchmesh/query";
-import type { DecisionCreatedEvent, DecisionDelivery, DecisionDeliveryChangedEvent, DecisionId, FindingFeedbackCreatedEvent, FindingId } from "@patchmesh/protocol";
-import { SqliteEventStore, type AppendResult } from "@patchmesh/storage";
+} from "patchmesh-core";
+import { createReadServices, ReadServiceError, type EventReader, type ReadServices } from "patchmesh-query";
+import type { DecisionCreatedEvent, DecisionDelivery, DecisionDeliveryChangedEvent, DecisionId, FindingFeedbackCreatedEvent, FindingId, ProtocolEvent } from "patchmesh-protocol";
+import { SqliteEventStore, type AppendResult, type PruneResult } from "patchmesh-storage";
 
 export interface DaemonOptions {
   readonly reader?: EventReader;
@@ -39,6 +39,18 @@ function responseDigest(input: FindingFeedbackInput): string {
   return createHash("sha256").update(JSON.stringify(input)).digest("hex");
 }
 
+function persistDerivedRecord(
+  store: SqliteEventStore,
+  record: { readonly finding: ProtocolEvent; readonly decision: ProtocolEvent },
+): { readonly finding: AppendResult; readonly decision: AppendResult } {
+  // appendAtomic returns exactly one result per input, in input order.
+  const [finding, decision] = store.appendAtomic(
+    [record.finding, record.decision],
+    { requireValidEventSet: true },
+  );
+  return { finding: finding!, decision: decision! };
+}
+
 export interface PatchMeshDaemon {
   readonly services: ReadServices;
   readonly health: () => DaemonHealth;
@@ -64,6 +76,13 @@ export interface PatchMeshDaemon {
     readonly finding: AppendResult;
     readonly decision: AppendResult;
   }[];
+  /**
+   * Deletes events past a retention cutoff, keeping causal replay intact.
+   *
+   * A maintenance write rather than a report, so it lives beside the other writers and needs
+   * the same durable store: readers supplied directly to the daemon stay read-only.
+   */
+  prune(options: { readonly olderThan: Date }): PruneResult;
   close(): void;
 }
 
@@ -92,6 +111,12 @@ export function createDaemon(options: DaemonOptions): PatchMeshDaemon {
         store: status.store,
         errorCategory: status.errorCategory,
       };
+    },
+    prune: (options) => {
+      if (store === null) {
+        throw new ReadServiceError("unavailable", "prune requires a writable event store");
+      }
+      return store.prune(options);
     },
     recordFindingFeedback: (event) => {
       if (store === null) {
@@ -169,23 +194,49 @@ export function createDaemon(options: DaemonOptions): PatchMeshDaemon {
         throw new ReadServiceError("unavailable", "same-symbol detection requires a writable event store");
       }
       const writableStore = store;
-      return createSameSymbolRuntimeRecords(writableStore.read()).map((record) => ({
-        finding: writableStore.append(record.finding),
-        decision: writableStore.append(record.decision),
-      }));
+      let records: ReturnType<typeof createSameSymbolRuntimeRecords>;
+      try {
+        records = createSameSymbolRuntimeRecords(writableStore.replay().orderedEvents);
+      } catch (cause) {
+        throw new ReadServiceError(
+          "unavailable",
+          "same-symbol detection is unavailable because durable replay validation failed",
+          { cause },
+        );
+      }
+      try {
+        return records.map((record) => persistDerivedRecord(writableStore, record));
+      } catch (cause) {
+        throw new ReadServiceError(
+          "unavailable",
+          "same-symbol detection could not persist derived records",
+          { cause },
+        );
+      }
     },
     runPhase2Detection: () => {
       if (store === null) {
         throw new ReadServiceError("unavailable", "Phase 2 detection requires a writable event store");
       }
       const writableStore = store;
+      let records: ReturnType<typeof createPhase2RuntimeRecords>;
       try {
-        return createPhase2RuntimeRecords(writableStore.read()).map((record) => ({
-          finding: writableStore.append(record.finding),
-          decision: writableStore.append(record.decision),
-        }));
-      } catch {
-        throw new ReadServiceError("unavailable", "Phase 2 detection is unavailable because durable replay validation failed");
+        records = createPhase2RuntimeRecords(writableStore.replay().orderedEvents);
+      } catch (cause) {
+        throw new ReadServiceError(
+          "unavailable",
+          "Phase 2 detection is unavailable because durable replay validation failed",
+          { cause },
+        );
+      }
+      try {
+        return records.map((record) => persistDerivedRecord(writableStore, record));
+      } catch (cause) {
+        throw new ReadServiceError(
+          "unavailable",
+          "Phase 2 detection could not persist derived records",
+          { cause },
+        );
       }
     },
     close: () => {

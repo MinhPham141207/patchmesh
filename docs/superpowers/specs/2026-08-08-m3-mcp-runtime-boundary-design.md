@@ -17,7 +17,7 @@ been persisted and does not emit findings, decisions, or disruptive directives.
 
 In scope:
 
-- A new `@patchmesh/adapters` package containing an in-process `McpProxy`.
+- A new `patchmesh-adapters` package containing an in-process `McpProxy`.
 - Per-call runtime, repository, workspace, worktree, attribution, correlation, and
   source-sequence metadata.
 - An injected tool executor with explicit success, failure, and interruption results.

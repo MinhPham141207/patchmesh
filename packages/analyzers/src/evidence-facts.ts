@@ -5,7 +5,7 @@ import type {
   LogicalResource,
   ResourceId,
   ResourceVersion,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 import { deriveSourceFacts, type SourceFacts } from "./evidence.js";
 import type { SourceAnalysisInput } from "./types.js";

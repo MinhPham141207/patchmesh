@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "knowl": {
+      "type": "stdio",
+      "command": "knowl.cmd",
+      "args": [
+        "serve"
+      ],
+      "tools": [
+        "*"
+      ]
+    },
+    "patchmesh": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "packages/gateway/dist/bin.js"
+      ],
+      "tools": [
+        "*"
+      ]
+    }
+  }
+}

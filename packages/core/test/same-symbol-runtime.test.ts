@@ -10,9 +10,9 @@ import type {
   SymbolChangedEvent,
   ToolCompletedEvent,
   ToolRequestedEvent,
-} from "@patchmesh/protocol";
-import { validateEventSet } from "@patchmesh/protocol";
-import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
+} from "patchmesh-protocol";
+import { validateEventSet } from "patchmesh-protocol";
+import { projectWorkGraph, SqliteEventStore } from "patchmesh-storage";
 
 import {
   createPhase2RuntimeRecords,

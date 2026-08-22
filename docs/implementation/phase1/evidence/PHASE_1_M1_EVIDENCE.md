@@ -15,7 +15,7 @@
 | Command | Result |
 | --- | --- |
 | `corepack pnpm install` | Passed; workspace dependencies installed and lockfile was current. |
-| `corepack pnpm typecheck` | Passed for `@patchmesh/protocol` and `@patchmesh/collector`. |
+| `corepack pnpm typecheck` | Passed for `patchmesh-protocol` and `@patchmesh/collector`. |
 | `corepack pnpm build` | Passed for both workspace packages. |
 | `corepack pnpm test` | Passed: 18 protocol tests and 3 collector tests, 21 total. |
 | `node tools/phase0/validate.mjs` | Passed: `Phase 0 corpus valid`. |

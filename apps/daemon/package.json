@@ -1,12 +1,13 @@
 {
-  "name": "@patchmesh/daemon",
+  "name": "patchmesh-daemon",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=24"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -19,9 +20,20 @@
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
-    "@patchmesh/core": "workspace:*",
-    "@patchmesh/protocol": "workspace:*",
-    "@patchmesh/query": "workspace:*",
-    "@patchmesh/storage": "workspace:*"
-  }
+    "patchmesh-core": "workspace:*",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-query": "workspace:*",
+    "patchmesh-storage": "workspace:*"
+  },
+  "description": "Read-only daemon services over a PatchMesh event store.",
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme"
 }

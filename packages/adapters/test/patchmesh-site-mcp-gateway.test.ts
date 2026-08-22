@@ -19,9 +19,9 @@ import {
   type PatchMeshSiteHostContract,
   type PatchMeshSiteRuntimeIdentity,
 } from "../src/index.js";
-import { fileResourceId, NodeObservationBoundary, type ObservationBoundary } from "@patchmesh/observation";
-import { validateEventSet } from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { fileResourceId, NodeObservationBoundary, type ObservationBoundary } from "patchmesh-observation";
+import { validateEventSet } from "patchmesh-protocol";
+import { SqliteEventStore } from "patchmesh-storage";
 
 const execFile = promisify(execFileCallback);
 
@@ -290,6 +290,98 @@ test("emits one target-bound V3 concurrency proof only for two overlapping lifec
   } finally {
     await gateway.dispose();
     store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ignores historical lifecycle symbol changes after a gateway restart", async () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-pr5-history-"));
+  const workspaceRoot = join(root, "workspace");
+  const databasePath = join(root, "events.sqlite");
+  const source = "export function api(): string { return \"ok\"; }\n";
+  const baseIdentity = runtimeIdentity(workspaceRoot);
+  const target = targetSnapshot(baseIdentity.repositoryId);
+  const observer: ObservationBoundary = {
+    source: { kind: "watcher", sourceId: "source_pr5_history", instanceId: "88888888-8888-4888-8888-888888888888" },
+    async captureBefore() {
+      return { snapshot: { repository: { commonDirectory: "C:/repo/.git", revision: "a".repeat(40) }, worktree: { administrativeDirectory: "C:/repo/.git" }, files: new Map() }, gaps: [], outOfBandChanges: [] };
+    },
+    async captureAfter() {
+      return { snapshot: { repository: { commonDirectory: "C:/repo/.git", revision: "a".repeat(40) }, worktree: { administrativeDirectory: "C:/repo/.git" }, files: new Map([["src/api.ts", { contentHash: createHash("sha256").update(source).digest("hex"), gitBlob: null, fileKind: "file" as const }]]) }, gaps: [], outOfBandChanges: [] };
+    },
+  };
+  const gatewayOptions = {
+    hostContract: { ...hostContract, integrationTargetSnapshot: true, observedReadVersion: true, dependentWriteToken: true },
+    proxyOptions: {
+      observer,
+      phase2SourceAnalysis: {
+        source: { kind: "analyzer" as const, sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+        analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+        configuration: { parser: "typescript" },
+        integrationTarget: target.integrationTargetId,
+      },
+    },
+  };
+  const call = { toolName: "edit_file" as const, operation: "edit src/api.ts", targetResourceId: fileResourceId(baseIdentity.repositoryId, "src/api.ts"), opaque: false };
+  let executions = 0;
+  mkdirSync(join(workspaceRoot, "src"), { recursive: true });
+  writeFileSync(join(workspaceRoot, "src", "api.ts"), source, "utf8");
+  try {
+    const firstStore = SqliteEventStore.open(databasePath);
+    const firstGateway = new PatchMeshSiteMcpGateway({ ...gatewayOptions, eventStore: firstStore, createCorrelationId: nextCorrelation() });
+    try {
+      const identity = { ...baseIdentity, targetSnapshot: target, lifecycleId: "life-history" };
+      firstGateway.beginTaskLifecycle({
+        lifecycleId: identity.lifecycleId, source: identity.source, repositoryId: identity.repositoryId,
+        workspaceId: identity.workspaceId, worktreeId: identity.worktreeId, agentId: identity.agentId!,
+        taskId: identity.taskId!, targetSnapshot: identity.targetSnapshot,
+      });
+      await firstGateway.dispatch(identity, {
+        call,
+        execute: async () => {
+          executions += 1;
+          return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [call.targetResourceId] } as const;
+        },
+      });
+    } finally {
+      await firstGateway.dispose();
+      firstStore.close();
+    }
+
+    const secondStore = SqliteEventStore.open(databasePath);
+    const secondGateway = new PatchMeshSiteMcpGateway({
+      ...gatewayOptions,
+      eventStore: secondStore,
+      createCorrelationId: () => "corr_ffffffffffffffffffffffffffffffff",
+    });
+    try {
+      const identity = {
+        ...baseIdentity,
+        source: { ...baseIdentity.source, instanceId: "22222222-2222-4222-8222-222222222222" },
+        targetSnapshot: target,
+        lifecycleId: "life-current",
+      };
+      secondGateway.beginTaskLifecycle({
+        lifecycleId: identity.lifecycleId, source: identity.source, repositoryId: identity.repositoryId,
+        workspaceId: identity.workspaceId, worktreeId: identity.worktreeId, agentId: identity.agentId!,
+        taskId: identity.taskId!, targetSnapshot: identity.targetSnapshot,
+      });
+      const result = await secondGateway.dispatch(identity, {
+        call,
+        execute: async () => {
+          executions += 1;
+          return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [call.targetResourceId] } as const;
+        },
+      });
+      assert.equal(result.execution.outcome, "succeeded");
+      assert.equal(executions, 2, "the restarted gateway executes the call exactly once");
+      assert.equal(secondStore.read().filter((event) => event.eventType === "task.concurrency.observed").length, 0);
+      assert.deepEqual(validateEventSet(secondStore.read()), []);
+    } finally {
+      await secondGateway.dispose();
+      secondStore.close();
+    }
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

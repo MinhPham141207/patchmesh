@@ -39,7 +39,7 @@ replay never exposes a partial success snapshot.
 
 ## Architecture
 
-`packages/storage` depends on `@patchmesh/protocol` only. The protocol remains
+`packages/storage` depends on `patchmesh-protocol` only. The protocol remains
 runtime-agnostic and the storage package does not depend on the in-memory collector.
 Callers submit untrusted input to the storage boundary; storage parses and validates
 it before persistence.

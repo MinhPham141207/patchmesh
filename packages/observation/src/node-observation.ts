@@ -4,7 +4,7 @@ import { watch, type BigIntStats, type FSWatcher } from "node:fs";
 import { lstat, readFile, readlink, readdir } from "node:fs/promises";
 import { dirname, isAbsolute, resolve, relative, sep } from "node:path";
 import { promisify } from "node:util";
-import type { Source } from "@patchmesh/protocol";
+import type { Source } from "patchmesh-protocol";
 import { normalizeLogicalPath } from "./paths.js";
 import { sanitizeDiagnostic } from "./redaction.js";
 import type {

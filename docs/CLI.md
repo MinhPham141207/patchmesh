@@ -40,11 +40,14 @@ not mutation of the original event. See [Event Protocol V1](protocol/events.md) 
 | `agents` | Phase 1 - Observe and Replay | Available, read-only |
 | `events` | Phase 1 - Observe and Replay | Available, read-only |
 | `graph` | Phase 1 - Observe and Replay | Available, read-only |
-| `overlaps` | Phase 2 - Deterministic Detection | Available, read-only, report-only |
-| `stale` | Phase 2 - Deterministic Detection | Available, read-only, report-only |
+| `overlaps` | Recorder slice - recall | Available, read-only, report-only |
+| `stale` | Phase 2 - Deterministic Detection | Available, report-only; declines without proxy-recorded evidence |
+| `contracts` | Phase 2 - Deterministic Detection | Available, report-only; declines without proxy-recorded evidence |
 | `explain` | Phase 2 - Deterministic Detection | Available, read-only, report-only |
 | `feedback` | Phase 2 - Deterministic Detection | Available, append-only, report-only |
-| `init`, `start`, `stop` | Unscheduled support designs | Not available |
+| `init` | Recorder slice - setup | Available, writes host configuration |
+| `prune` | Recorder slice - retention | Available, deletes events past a cutoff |
+| `start`, `stop` | Unscheduled support designs | Not available |
 | `follow`, `inspect`, `doctor` | Unscheduled support designs | Not available |
 | `watch` | Deferred dashboard design | Not available |
 
@@ -89,9 +92,9 @@ Command-line options take priority over environment variables.
 
 ## `patchmesh init`
 
-**Roadmap placement:** Unscheduled support design. Not available.
+**Roadmap placement:** Recorder slice - setup. Available.
 
-Initialize PatchMesh in the current Git repository.
+Wire PatchMesh into the current Git repository, so its agents start recording.
 
 ### Usage
 
@@ -101,52 +104,49 @@ patchmesh init [options]
 
 ### Responsibilities
 
-- Verify that the current directory is a Git repository
-- Create the local PatchMesh directory
-- Create the default configuration
-- Initialize the event database
-- Detect supported coding-agent runtimes
-- Offer or install required runtime hooks
-- Add local PatchMesh state to `.gitignore`
+- Verify that the current directory is a Git worktree
+- Merge the recorder's host hooks into `.claude/settings.local.json`
+- Register the `patchmesh` MCP server in `.mcp.json`
+- Add `.patchmesh/` to `.gitignore`
 
-### Expected files
+Nothing else is created. The ledger, journal and snapshot under `.patchmesh/` are written by
+the recorder on first use; `init` does not pre-create them, so a repository that is configured
+but has not been worked in reports honestly as having no events rather than an empty store.
 
-```text
-.patchmesh/
-├─ patchmesh.db
-├─ state/
-└─ logs/
+### Hooks installed
 
-patchmesh.config.json
-```
+| Host event | Binary | Why |
+| --- | --- | --- |
+| `UserPromptSubmit` | `patchmesh-record` | Turn boundary; gives ordinary work a task |
+| `PreToolUse` | `patchmesh-record` | In-flight visibility, before a call finishes |
+| `PostToolUse` | `patchmesh-record` | The record of work done |
+| `Stop` | `patchmesh-ingest` | Drains the journal into the ledger |
+| `SessionEnd` | `patchmesh-ingest` | Drains a session that ended without stopping |
+
+Merging is additive and idempotent. Hooks belonging to other tools are never modified, and
+re-running reports `[==]` rather than appending a second copy. PatchMesh's own entries are
+replaced only under `--force`.
 
 ### Options
 
 ```text
---force             Replace existing generated configuration
---runtime <name>    Configure a specific runtime
---no-hooks          Skip runtime hook installation
+--force             Replace PatchMesh's existing hook and server entries
+--no-hooks          Skip hook installation and MCP registration
 --no-gitignore      Do not modify .gitignore
+--json              Machine-readable step outcomes
 ```
 
-### Example
-
-```bash
-patchmesh init --runtime claude-code
-```
-
-### Expected output
+### Example output
 
 ```text
-[OK] Git repository detected
-[OK] Created .patchmesh/
-[OK] Created patchmesh.config.json
-[OK] Initialized SQLite event store
-[OK] Installed Claude Code hooks
+[OK] Claude Code hooks in .claudesettings.local.json
+[OK] MCP server in .mcp.json
+[OK] .patchmesh/ ignored
 
-Run:
-  patchmesh start
+Restart the agent session so it loads the new hooks, then work normally.
 ```
+
+Exit code is `0` when configured and `2` when the working directory is not a Git worktree.
 
 ---
 
@@ -209,6 +209,56 @@ patchmesh stop [options]
 ```text
 --force    Terminate the process if graceful shutdown fails
 ```
+
+---
+
+## `patchmesh prune`
+
+**Roadmap placement:** Recorder slice - retention. Available. Deletes durable events.
+
+Delete events older than a retention cutoff, keeping causal replay intact.
+
+The ledger is append-only and nothing else removes from it. A recorded call's value decays
+fast - recall looks back four hours by default and recap one day - while the file grows with
+every session, so retention is a real operation rather than housekeeping.
+
+### Replay safety
+
+Deleting a time prefix can strand a surviving event's `causationId`, and replay fails closed on
+a dangling reference: a careless prune turns a large readable ledger into a small unreadable
+one. Anything a retained event still points at is therefore kept, transitively - protecting one
+ancestor while deleting the event *it* points at would only move the dangling reference one
+link back. Retained counts include these, so `removed` is usually smaller than the number of
+events older than the cutoff.
+
+Buffered events waiting on a causal parent are dropped, because past the cutoff that parent is
+by construction never arriving.
+
+### Usage
+
+```bash
+patchmesh prune --older-than <days> --database <path>
+```
+
+`--older-than` is required. Deleting history is not something to do because a flag was
+forgotten.
+
+### Options
+
+```text
+--older-than <days>        Retention cutoff, in whole days (required)
+--json                     Print machine-readable output
+```
+
+### Example output
+
+```text
+Removed 122 event(s) older than 2026-08-20T14:58:17.609Z.
+1213 event(s) retained, including any a retained event still depends on.
+```
+
+Exit code is `0` whether or not anything was removed. The recorder's own `.patchmesh/*.rejected`
+files are not touched by this command.
 
 ---
 
@@ -510,10 +560,25 @@ agent:agent-b
 
 ## `patchmesh overlaps`
 
-**Roadmap placement:** Phase 2 - Deterministic Detection. Available, read-only and report-only.
+**Roadmap placement:** Recorder slice - recall. Available, read-only and report-only.
 
-Show persisted same-symbol-overlap findings. Output includes deterministic coverage
-warnings when evidence is degraded.
+Show files that more than one worker changed recently, from observed filesystem changes.
+
+This answers from recorded `file.changed` events rather than from the work-graph projection.
+It previously read persisted `same_symbol_overlap` findings, which on a host-hook-recorded
+ledger are never produced - shell commands record as opaque, so the projection emits coverage
+gaps instead of overlaps. The same question was already answered for agents over MCP by
+`patchmesh_overlapping_work`; both surfaces now call one implementation.
+
+### What counts as an overlap
+
+Two conditions, both required:
+
+- **Two distinct workers.** A different agent, a subagent running beside its parent, or a
+  second worktree of the same repository. One agent's own consecutive turns are sequence, not
+  contention, and are not reported.
+- **A file the repository tracks.** Paths `.gitignore` covers are excluded, so another tool's
+  cache is not reported as contested work.
 
 ### Usage
 
@@ -524,50 +589,31 @@ patchmesh overlaps [options]
 ### Options
 
 ```text
+--resource <path>          Narrow to one repository-relative file
+--within <minutes>         How far back to look (default 240)
 --json                     Print machine-readable output
 ```
-
-Additional filtering is not yet available through the CLI.
-
-### Phase 2 deterministic finding types
-
-```text
-same_symbol_overlap
-stale_read_before_write
-exported_contract_invalidation
-```
-
-Semantic duplicate-work and architectural-conflict classifications are deferred to
-Phase 5 and are not emitted by the report-only MVP.
 
 ### Example
 
 ```bash
-patchmesh overlaps
+patchmesh overlaps --within 480 --database .patchmesh/ledger.db
 ```
 
 ### Example output
 
 ```text
-Finding:             fnd-42
-Decision:            dec-42
-Severity:            high
-Type:                same_symbol_overlap
-Agents:              agent-a, agent-b
-Shared resource:     symbol:src/db/pool.ts::releaseConnection
-
-Evidence:
-  agent-a is modifying the symbol
-  agent-b requested an edit to the same symbol
-
-Coordination action: request_recheck
-Gateway directive:  allow_with_notice
-Coverage:            intercepted, verified
-Coverage gap:        opaque shell effects
-
-Recommendation:
-  agent-b should recheck its intended edit before continuing.
+1 file(s) in this repository changed by more than one task:
+- `packages/gateway/src/server.ts` changed by 2 tasks:
+    - 2026-08-22T07:46:13.891Z agent_b48c1c15 (task_771fe0be) modified
+    - 2026-08-22T07:12:04.220Z agent_7a1033a6.sub.a79bd1f2 (task_a79bd1f2) modified
+This is a record of what happened, not a judgement. Two tasks touching one file may be
+collaboration, a rebase, or divergence.
 ```
+
+When nothing is contested, "no two tasks changed the same file" and "no file changes were
+observed at all" are reported as different answers. The second is an absence of evidence, not
+evidence of independence.
 
 ---
 
@@ -577,6 +623,14 @@ Recommendation:
 
 Show persisted stale-read-before-write findings. This does not confirm Phase 3
 validity state or execute a revalidation.
+
+### Evidence this detector requires
+
+`stale` is typed against evidence a host-hook recorder does not produce: `file.read` and `write.dependent` events. When the
+event store contains none of it, the command reports which evidence is missing and exits `0`
+rather than printing "no findings" - silence and inability are different answers, and reporting
+no findings would be a claim it has not earned. Recording through an MCP proxy that declares
+read and dependency evidence populates it.
 
 ### Usage
 
@@ -599,6 +653,43 @@ Login frontend    possibly_stale   Built against POST /login v3
 
 Confirmed `stale` status and validity history depend on Phase 3 and are not
 available in the Phase 2 target.
+
+---
+
+## `patchmesh contracts`
+
+**Roadmap placement:** Phase 2 - Deterministic Detection. Available, report-only.
+
+Show persisted exported-contract-invalidation findings: a changed exported contract whose
+consumers may no longer hold. This reports; it does not revalidate a consumer or change
+validity state.
+
+### Evidence this detector requires
+
+`contracts` is typed against evidence a host-hook recorder does not produce: `symbol.changed` and `dependency.changed` events. When the
+event store contains none of it, the command reports which evidence is missing and exits `0`
+rather than printing "no findings" - silence and inability are different answers, and reporting
+no findings would be a claim it has not earned. Recording through an MCP proxy that declares
+read and dependency evidence populates it.
+
+### Usage
+
+```bash
+patchmesh contracts [options]
+```
+
+### Options
+
+```text
+--json                     Print machine-readable output
+```
+
+### Example output
+
+```text
+No contracts findings can be derived from this event store.
+Missing evidence: symbol.changed, dependency.changed.
+```
 
 ---
 

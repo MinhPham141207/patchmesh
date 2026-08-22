@@ -19,9 +19,9 @@ import {
   type ObservationCapture,
   type ObservedFileChange,
   type ObservationSnapshot,
-} from "@patchmesh/observation";
-import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
-import { ProtocolValidationError, validateEventSet, type EventId, type ProtocolEvent } from "@patchmesh/protocol";
+} from "patchmesh-observation";
+import { projectWorkGraph, SqliteEventStore } from "patchmesh-storage";
+import { ProtocolValidationError, validateEventSet, type EventId, type ProtocolEvent } from "patchmesh-protocol";
 
 async function withTemporaryDatabase(run: (databasePath: string) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-m3-"));
@@ -294,6 +294,124 @@ test("derives persisted symbol changes from an observed TypeScript source file",
   }
 });
 
+test("does not partially persist derived symbol facts when the proof batch rejects", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-symbol-atomic-"));
+  const databasePath = join(directory, "events.sqlite");
+  const sourceDirectory = join(directory, "src");
+  try {
+    mkdirSync(sourceDirectory);
+    const source = "export function api(): void {}\n";
+    writeFileSync(join(sourceDirectory, "api.ts"), source, "utf8");
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      let proofBatchCalls = 0;
+      const failingStore: EventAppender = {
+        append(input) {
+          return store.append(input);
+        },
+        appendAtomic(inputs) {
+          proofBatchCalls += 1;
+          const events = inputs as readonly ProtocolEvent[];
+          assert.deepEqual(events.map((event) => event.eventType), ["symbol.changed", "evidence.derived"]);
+          throw new Error("final derived symbol proof rejected");
+        },
+        read() {
+          return store.read();
+        },
+      };
+      const result = await createProxy(failingStore, [
+        "evt_0000000000000000000000000000002a",
+        "evt_0000000000000000000000000000002b",
+        "evt_0000000000000000000000000000002c",
+        "evt_0000000000000000000000000000002d",
+        "evt_0000000000000000000000000000002e",
+      ], {
+        observer: changedObserver({
+          after: capture(snapshot(new Map([["src/api.ts", { contentHash: contentHash(source) }]]))),
+        }),
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: "main",
+        },
+      }).execute(
+        { ...call, toolName: "edit_file", operation: "edit src/api.ts" },
+        { ...context, workspaceRoot: directory },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      assert.equal(proofBatchCalls, 1);
+      assert.deepEqual(store.read().map((event) => event.eventType), [
+        "tool.requested", "file.changed", "tool.completed",
+      ]);
+      assert.deepEqual(result.analysisDiagnostics, [
+        { path: "src/api.ts", reason: "derived symbol event persistence failed" },
+      ]);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("degrades derived symbol coverage when atomic persistence is unavailable", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-symbol-unavailable-"));
+  const databasePath = join(directory, "events.sqlite");
+  const sourceDirectory = join(directory, "src");
+  try {
+    mkdirSync(sourceDirectory);
+    const source = "export function api(): void {}\n";
+    writeFileSync(join(sourceDirectory, "api.ts"), source, "utf8");
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      const unavailableStore: EventAppender = {
+        append(input) {
+          return store.append(input);
+        },
+        read() {
+          return store.read();
+        },
+      };
+      const result = await createProxy(unavailableStore, [
+        "evt_0000000000000000000000000000002f",
+        "evt_00000000000000000000000000000030",
+        "evt_00000000000000000000000000000031",
+        "evt_00000000000000000000000000000032",
+      ], {
+        observer: changedObserver({
+          after: capture(snapshot(new Map([["src/api.ts", { contentHash: contentHash(source) }]]))),
+        }),
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: "main",
+        },
+      }).execute(
+        { ...call, toolName: "edit_file", operation: "edit src/api.ts" },
+        { ...context, workspaceRoot: directory },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      assert.deepEqual(store.read().map((event) => event.eventType), [
+        "tool.requested", "file.changed", "tool.completed",
+      ]);
+      assert.deepEqual(result.analysisDiagnostics, [
+        { path: "src/api.ts", reason: "derived symbol event persistence failed" },
+      ]);
+      assert.equal(result.coverage?.presentation, "degraded");
+      assert.equal(result.observationDiagnostics.some((gap) => gap.scope === "source:src/api.ts"
+        && gap.reason === "derived symbol event persistence failed"), true);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("materializes a target-bound modified symbol only from an explicit prior source version", async () => {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-pr5-contract-"));
   const databasePath = join(directory, "events.sqlite");
@@ -423,7 +541,20 @@ test("issues and consumes a target-bound observed-read token only for a persiste
         toolName: "edit_file" as const, operation: "write output", targetResourceId: writeResourceId, opaque: false,
         dependentWrite: { dependencyId: dependencyEvent.payload.dependency.dependencyId, resourceId: writeResourceId, dependsOnReadEventId: token!.readEventId, readToken: token!, comparison: { changedEventId: candidate.eventId, coverageId: candidateCoverage!, integrationTarget: targetSnapshot.integrationTargetId } },
       };
-      await createProxy(store, [
+      let proofAtomicCalls = 0;
+      const proofStore: EventAppender = {
+        append(input) {
+          return store.append(input);
+        },
+        appendAtomic(inputs, options) {
+          proofAtomicCalls += 1;
+          return store.appendAtomic(inputs, options);
+        },
+        read() {
+          return store.read();
+        },
+      };
+      await createProxy(proofStore, [
         "evt_000000000000000000000000000000d8", "evt_000000000000000000000000000000d9", "evt_000000000000000000000000000000da", "evt_000000000000000000000000000000db",
       ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "c".repeat(64) }]]))) }), proofAuthority }).execute(
         dependentCall, { ...proofContext, correlationId: "corr_00000000000000000000000000000003", requestSourceSequence: 5, completionSourceSequence: 6 },
@@ -432,9 +563,10 @@ test("issues and consumes a target-bound observed-read token only for a persiste
       const writes = store.read().filter((event) => event.eventType === "write.dependent");
       assert.equal(writes.length, 1);
       assert.equal(writes[0]?.schemaVersion, 3);
+      assert.equal(proofAtomicCalls, 1, "the proof-bearing write uses one atomic append");
       assert.deepEqual(validateEventSet(store.read()), []);
 
-      await createProxy(store, [
+      const invalidTokenResult = await createProxy(store, [
         "evt_000000000000000000000000000000dc", "evt_000000000000000000000000000000dd", "evt_000000000000000000000000000000de", "evt_000000000000000000000000000000df",
       ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "d".repeat(64) }]]))) }), proofAuthority }).execute(
         { ...dependentCall, dependentWrite: { ...dependentCall.dependentWrite, readToken: { ...token!, tokenDigest: `sha256:${"0".repeat(64)}` } } },
@@ -442,6 +574,150 @@ test("issues and consumes a target-bound observed-read token only for a persiste
         async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] }),
       );
       assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "invalid token must not create another proof write");
+      assert.equal(invalidTokenResult.coverage?.presentation, "degraded");
+      assert.ok(invalidTokenResult.observationDiagnostics.some((gap) => gap.scope === "write.dependent"));
+
+      const invalidConcurrentEvent: ProtocolEvent = {
+        ...dependencyEvent,
+        eventId: "evt_000000000000000000000000000000f0",
+        causationId: "evt_000000000000000000000000000000f1",
+      };
+      const unavailableStore: EventAppender = {
+        append(input) {
+          return store.append(input);
+        },
+        read() {
+          return store.read();
+        },
+      };
+      let unavailableExecutions = 0;
+      const unavailableResult = await createProxy(unavailableStore, [
+        "evt_000000000000000000000000000000f2", "evt_000000000000000000000000000000f3", "evt_000000000000000000000000000000f4", "evt_000000000000000000000000000000f5",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "4".repeat(64) }]]))) }), proofAuthority }).execute(
+        dependentCall,
+        { ...proofContext, correlationId: "corr_00000000000000000000000000000010", requestSourceSequence: 19, completionSourceSequence: 20 },
+        async () => {
+          unavailableExecutions += 1;
+          return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] };
+        },
+      );
+      assert.equal(unavailableExecutions, 1, "missing atomic capability must not retry the completed side effect");
+      assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "missing atomic capability must not create a proof write");
+      assert.equal(unavailableResult.coverage?.presentation, "degraded");
+      assert.ok(unavailableResult.observationDiagnostics.some((gap) => gap.scope === "write.dependent"));
+
+      const rejectedStore: EventAppender = {
+        append(input) {
+          return store.append(input);
+        },
+        appendAtomic() {
+          throw new ProtocolValidationError(validateEventSet([invalidConcurrentEvent]));
+        },
+        read() {
+          return store.read();
+        },
+      };
+      let rejectedExecutions = 0;
+      const rejectedResult = await createProxy(rejectedStore, [
+        "evt_000000000000000000000000000000f6", "evt_000000000000000000000000000000f7", "evt_000000000000000000000000000000f8", "evt_000000000000000000000000000000f9",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "5".repeat(64) }]]))) }), proofAuthority }).execute(
+        dependentCall,
+        { ...proofContext, correlationId: "corr_00000000000000000000000000000011", requestSourceSequence: 21, completionSourceSequence: 22 },
+        async () => {
+          rejectedExecutions += 1;
+          return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] };
+        },
+      );
+      assert.equal(rejectedExecutions, 1, "atomic proof rejection must not retry the completed side effect");
+      assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "atomic proof rejection must not create a proof write");
+      assert.equal(rejectedResult.coverage?.presentation, "degraded");
+      assert.ok(rejectedResult.observationDiagnostics.some((gap) => gap.scope === "write.dependent"));
+
+      const unauthorizedResult = await createProxy(store, [
+        "evt_000000000000000000000000000000e0", "evt_000000000000000000000000000000e1", "evt_000000000000000000000000000000e2", "evt_000000000000000000000000000000e3",
+      ], {
+        observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "e".repeat(64) }]]))) }),
+        proofAuthority: { ...proofAuthority, dependentWriteToken: false },
+      }).execute(
+        dependentCall,
+        { ...proofContext, correlationId: "corr_00000000000000000000000000000005", requestSourceSequence: 9, completionSourceSequence: 10 },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] }),
+      );
+      assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "unauthorized proof path must not create another proof write");
+      assert.equal(unauthorizedResult.coverage?.presentation, "degraded");
+      assert.ok(unauthorizedResult.observationDiagnostics.some((gap) => gap.scope === "write.dependent"));
+
+      const unlinkedCompletionResult = await createProxy(store, [
+        "evt_000000000000000000000000000000e4", "evt_000000000000000000000000000000e5", "evt_000000000000000000000000000000e6", "evt_000000000000000000000000000000e7",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "f".repeat(64) }]]))) }), proofAuthority }).execute(
+        dependentCall,
+        { ...proofContext, correlationId: "corr_00000000000000000000000000000006", requestSourceSequence: 11, completionSourceSequence: 12 },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [] }),
+      );
+      assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "unlinked completion must not create another proof write");
+      assert.equal(unlinkedCompletionResult.coverage?.presentation, "degraded");
+      assert.ok(unlinkedCompletionResult.observationDiagnostics.some((gap) => gap.scope === "write.dependent"));
+
+      const omittedTokenResult = await createProxy(store, [
+        "evt_000000000000000000000000000000e8", "evt_000000000000000000000000000000e9", "evt_000000000000000000000000000000ea", "evt_000000000000000000000000000000eb",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "1".repeat(64) }]]))) }), proofAuthority }).execute(
+        { ...dependentCall, dependentWrite: { ...dependentCall.dependentWrite, readToken: undefined } },
+        { ...proofContext, correlationId: "corr_00000000000000000000000000000007", requestSourceSequence: 13, completionSourceSequence: 14 },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] }),
+      );
+      assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "target-bound writes without a token must not fall back to a legacy proof write");
+      assert.equal(omittedTokenResult.coverage?.presentation, "degraded");
+      assert.ok(omittedTokenResult.observationDiagnostics.some((gap) => gap.scope === "write.dependent"));
+
+      let mismatchedTargetExecutions = 0;
+      const mismatchedTargetResult = await createProxy(store, [
+        "evt_000000000000000000000000000000ec", "evt_000000000000000000000000000000ed", "evt_000000000000000000000000000000ee", "evt_000000000000000000000000000000ef",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "2".repeat(64) }]]))) }), proofAuthority }).execute(
+        { ...dependentCall, dependentWrite: { ...dependentCall.dependentWrite, comparison: { ...dependentCall.dependentWrite.comparison, integrationTarget: "release" } } },
+        { ...proofContext, correlationId: "corr_00000000000000000000000000000008", requestSourceSequence: 15, completionSourceSequence: 16 },
+        async () => {
+          mismatchedTargetExecutions += 1;
+          return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] };
+        },
+      );
+      assert.equal(mismatchedTargetExecutions, 1, "invalid proof metadata must not cause callers to retry a completed side effect");
+      assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "mismatched target bindings must not create another proof write");
+      assert.equal(mismatchedTargetResult.coverage?.presentation, "degraded");
+      assert.ok(mismatchedTargetResult.observationDiagnostics.some((gap) => gap.scope === "write.dependent"));
+
+      const racingCorrelationId = "corr_00000000000000000000000000000009";
+      let racingExecutions = 0;
+      let injectedInvalidHistory = false;
+      const racingStore: EventAppender = {
+        append(input) {
+          return store.append(input);
+        },
+        read() {
+          return store.read();
+        },
+        appendAtomic(inputs, options) {
+          if (!injectedInvalidHistory) {
+            store.append(invalidConcurrentEvent);
+            injectedInvalidHistory = true;
+          }
+          return store.appendAtomic(inputs, options);
+        },
+      };
+      const racingHistoryResult = await createProxy(racingStore, [
+        "evt_000000000000000000000000000000fa", "evt_000000000000000000000000000000fb", "evt_000000000000000000000000000000fc", "evt_000000000000000000000000000000fd",
+      ], { observer: changedObserver({ after: capture(snapshot(new Map([["src/output.ts", { contentHash: "3".repeat(64) }]]))) }), proofAuthority }).execute(
+        dependentCall,
+        { ...proofContext, correlationId: racingCorrelationId, requestSourceSequence: 17, completionSourceSequence: 18 },
+        async () => {
+          racingExecutions += 1;
+          return { outcome: "succeeded", value: true, exitCode: 0, effectResourceIds: [writeResourceId] };
+        },
+      );
+      assert.equal(injectedInvalidHistory, true, "the regression must alter durable history inside the atomic append boundary");
+      assert.equal(racingExecutions, 1, "atomic proof rejection must not cause callers to retry a completed side effect");
+      assert.equal(store.read().filter((event) => event.eventType === "write.dependent").length, 1, "changed invalid history must suppress the proof write");
+      assert.equal(racingHistoryResult.coverage?.presentation, "degraded");
+      assert.ok(racingHistoryResult.observationDiagnostics.some((gap) => gap.scope === "write.dependent"));
     } finally {
       store.close();
     }
@@ -504,6 +780,152 @@ test("derives a persisted dependency from real changed local TypeScript sources"
       assert.equal(dependencyEvidence.payload.evidence.factKind, "dependency");
       assert.equal(dependencyEvidence.payload.evidence.stableFactId, dependency.payload.dependency.dependencyId);
       assert.deepEqual(result.analysisDiagnostics, []);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("does not partially persist resolved dependencies when the proof batch rejects", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-dependency-atomic-"));
+  const databasePath = join(directory, "events.sqlite");
+  const sourceDirectory = join(directory, "src");
+  try {
+    mkdirSync(sourceDirectory);
+    const apiSource = "export interface Account { id: string }\n";
+    const consumerSource = 'import { Account } from "./api";\nfunction consume(value: Account) {}\n';
+    writeFileSync(join(sourceDirectory, "api.ts"), apiSource, "utf8");
+    writeFileSync(join(sourceDirectory, "consumer.ts"), consumerSource, "utf8");
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      let dependencyBatchCalls = 0;
+      const failingStore: EventAppender = {
+        append(input) {
+          return store.append(input);
+        },
+        appendAtomic(inputs, options) {
+          const events = inputs as readonly ProtocolEvent[];
+          if (events.some((event) => event.eventType === "dependency.changed")) {
+            dependencyBatchCalls += 1;
+            assert.deepEqual(events.map((event) => event.eventType), ["dependency.changed", "evidence.derived"]);
+            throw new Error("final derived dependency proof rejected");
+          }
+          return store.appendAtomic(inputs, options);
+        },
+        read() {
+          return store.read();
+        },
+      };
+      const result = await createProxy(failingStore, [
+        "evt_0000000000000000000000000000003a",
+        "evt_0000000000000000000000000000003b",
+        "evt_0000000000000000000000000000003c",
+        "evt_0000000000000000000000000000003d",
+        "evt_0000000000000000000000000000003e",
+        "evt_0000000000000000000000000000003f",
+        "evt_00000000000000000000000000000040",
+        "evt_00000000000000000000000000000041",
+        "evt_00000000000000000000000000000042",
+        "evt_00000000000000000000000000000043",
+      ], {
+        observer: changedObserver({
+          after: capture(snapshot(new Map([
+            ["src/api.ts", { contentHash: contentHash(apiSource) }],
+            ["src/consumer.ts", { contentHash: contentHash(consumerSource) }],
+          ]))),
+        }),
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: "main",
+        },
+      }).execute(
+        { ...call, toolName: "edit_file", operation: "edit src" },
+        { ...context, workspaceRoot: directory },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      assert.equal(dependencyBatchCalls, 1);
+      assert.equal(store.read().some((event) => event.eventType === "dependency.changed"), false);
+      assert.equal(store.read().some((event) => event.eventType === "evidence.derived" && event.payload.evidence.factKind === "dependency"), false);
+      assert.deepEqual(result.analysisDiagnostics, [
+        { path: "dependencies", reason: "derived dependency event persistence failed" },
+      ]);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("degrades dependency coverage when its atomic persistence becomes unavailable", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "patchmesh-phase2-dependency-unavailable-"));
+  const databasePath = join(directory, "events.sqlite");
+  const sourceDirectory = join(directory, "src");
+  try {
+    mkdirSync(sourceDirectory);
+    const apiSource = "export interface Account { id: string }\n";
+    const consumerSource = 'import { Account } from "./api";\nfunction consume(value: Account) {}\n';
+    writeFileSync(join(sourceDirectory, "api.ts"), apiSource, "utf8");
+    writeFileSync(join(sourceDirectory, "consumer.ts"), consumerSource, "utf8");
+    const store = SqliteEventStore.open(databasePath);
+    try {
+      let atomicLookups = 0;
+      const intermittentlyUnavailableStore: EventAppender = {
+        append(input) {
+          return store.append(input);
+        },
+        get appendAtomic() {
+          atomicLookups += 1;
+          return atomicLookups <= 4 ? store.appendAtomic.bind(store) : undefined;
+        },
+        read() {
+          return store.read();
+        },
+      };
+      const result = await createProxy(intermittentlyUnavailableStore, [
+        "evt_00000000000000000000000000000044",
+        "evt_00000000000000000000000000000045",
+        "evt_00000000000000000000000000000046",
+        "evt_00000000000000000000000000000047",
+        "evt_00000000000000000000000000000048",
+        "evt_00000000000000000000000000000049",
+        "evt_0000000000000000000000000000004a",
+        "evt_0000000000000000000000000000004b",
+        "evt_0000000000000000000000000000004c",
+        "evt_0000000000000000000000000000004d",
+      ], {
+        observer: changedObserver({
+          after: capture(snapshot(new Map([
+            ["src/api.ts", { contentHash: contentHash(apiSource) }],
+            ["src/consumer.ts", { contentHash: contentHash(consumerSource) }],
+          ]))),
+        }),
+        phase2SourceAnalysis: {
+          source: { kind: "analyzer", sourceId: "source_typescript", instanceId: "33333333-3333-4333-8333-333333333333" },
+          analyzer: { analyzerId: "analyzer_typescript", version: "1" },
+          configuration: { parser: "typescript" },
+          integrationTarget: "main",
+        },
+      }).execute(
+        { ...call, toolName: "edit_file", operation: "edit src" },
+        { ...context, workspaceRoot: directory },
+        async () => ({ outcome: "succeeded", value: true, exitCode: 0 }),
+      );
+
+      assert.equal(store.read().some((event) => event.eventType === "dependency.changed"), false);
+      assert.equal(store.read().some((event) => event.eventType === "evidence.derived"
+        && event.payload.evidence.factKind === "dependency"), false);
+      assert.deepEqual(result.analysisDiagnostics, [
+        { path: "dependencies", reason: "derived dependency event persistence failed" },
+      ]);
+      assert.equal(result.coverage?.presentation, "degraded");
+      assert.equal(result.observationDiagnostics.some((gap) => gap.scope === "source:dependencies"
+        && gap.reason === "derived dependency event persistence failed"), true);
     } finally {
       store.close();
     }

@@ -7,7 +7,7 @@ import type {
   TaskId,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 import type { DerivedEvidenceFacts, SymbolEvidenceFact } from "./evidence-facts.js";
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { StorageError, SqliteEventStore } from "@patchmesh/storage";
+import { StorageError, SqliteEventStore } from "patchmesh-storage";
 import {
   buildGoldenEvents,
   buildReplayCorpus,

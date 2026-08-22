@@ -4,7 +4,7 @@ import type {
   ProtocolEvent,
   ResourceChangedPayload,
   ResourceObservedPayload,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import { replayEvents, type ReplayReducer, type SourceSequenceGap } from "./replay.js";
 import { deriveProjectionCoverage } from "./work-graph-coverage.js";
 import {
@@ -399,12 +399,53 @@ export class WorkGraphProjector implements ReplayReducer<WorkGraphState> {
   }
 }
 
+/**
+ * Build the whole projection from an ordered event set in one pass.
+ *
+ * `applyEvent` is written for the incremental reducer, where each event must yield a complete
+ * snapshot: it copies all six collections and re-derives every view. Folding it over a whole
+ * event set costs O(n^2 log n), which is not a theoretical bound. Measured on this repository's
+ * own ledger, `patchmesh status` took 40s and the detector commands never returned at all -
+ * 60 events answered instantly, 800 took 14.3s, and 1,131 exceeded two minutes. Every
+ * fixture-sized test passed throughout, which is why it survived so long.
+ *
+ * Corrections are collected before anything is mapped, so a correction that arrives after the
+ * event it corrects is applied without rebuilding. That is what `rebuildProjection` does per
+ * correction; doing it once up front is both cheaper and simpler.
+ */
+function buildProjection(orderedEvents: readonly ProtocolEvent[]): WorkGraphState {
+  const state = initialState();
+  for (const event of orderedEvents) {
+    state.eventsById.set(event.eventId, event);
+    if (event.eventType === "attribution.corrected") {
+      state.correctionsByTarget.set(event.payload.targetEventId, {
+        eventId: event.payload.targetEventId,
+        correction: event,
+      });
+    }
+  }
+
+  for (const event of orderedEvents) {
+    if (event.eventType === "attribution.corrected") {
+      addEnvelopeNodes(state, event);
+      continue;
+    }
+    mapEvent(state, effectiveEvent(event, state.correctionsByTarget));
+  }
+  deriveFindingAndDecisionViews(state);
+
+  return {
+    ...state,
+    coverageInputs: deriveProjectionCoverage([...state.eventsById.values()], [], state.correctionsByTarget),
+  };
+}
+
 export function projectWorkGraph(events: readonly ProtocolEvent[]): WorkGraphReplayResult {
-  const projector = new WorkGraphProjector();
-  const replay = replayEvents(events, projector);
+  const replay = replayEvents(events);
+  const state = buildProjection(replay.orderedEvents);
   return {
     orderedEvents: replay.orderedEvents,
     sourceSequenceGaps: replay.sourceSequenceGaps,
-    snapshot: snapshotFromState(replay.state, replay.sourceSequenceGaps),
+    snapshot: snapshotFromState(state, replay.sourceSequenceGaps),
   };
 }

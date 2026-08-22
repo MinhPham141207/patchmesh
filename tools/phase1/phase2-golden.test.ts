@@ -9,14 +9,14 @@ import {
   McpProxy,
   type McpCallContext,
   type McpToolCall,
-} from "@patchmesh/adapters";
-import { createPhase2RuntimeRecords } from "@patchmesh/core";
+} from "patchmesh-adapters";
+import { createPhase2RuntimeRecords } from "patchmesh-core";
 import {
   fileResourceId,
   NodeObservationBoundary,
-} from "@patchmesh/observation";
-import { projectWorkGraph, SqliteEventStore } from "@patchmesh/storage";
-import type { RepositoryId, TargetSnapshot, WorktreeId } from "@patchmesh/protocol";
+} from "patchmesh-observation";
+import { projectWorkGraph, SqliteEventStore } from "patchmesh-storage";
+import type { RepositoryId, TargetSnapshot, WorktreeId } from "patchmesh-protocol";
 import { withTemporaryDatabase, withTemporaryDirectory } from "./test-support.js";
 
 const execFile = promisify(execFileCallback);

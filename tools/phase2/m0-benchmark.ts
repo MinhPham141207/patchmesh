@@ -3,9 +3,9 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release, tmpdir, totalmem } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { McpProxy, type McpCallContext, type McpToolCall } from "@patchmesh/adapters";
-import { fileResourceId, NodeObservationBoundary, OBSERVATION_IGNORE_POLICY_VERSION, type NodeObservationOptions } from "@patchmesh/observation";
-import { SqliteEventStore } from "@patchmesh/storage";
+import { McpProxy, type McpCallContext, type McpToolCall } from "patchmesh-adapters";
+import { fileResourceId, NodeObservationBoundary, OBSERVATION_IGNORE_POLICY_VERSION, type NodeObservationOptions } from "patchmesh-observation";
+import { SqliteEventStore } from "patchmesh-storage";
 import { loadM0GateDefinition, type M0GateDefinition, type Sha256Digest } from "./gate-definitions.js";
 import { verifyM0Evidence } from "./m0-evidence.js";
 import { DEFAULT_M0_ARTIFACT_PATH } from "./m0-paths.js";
@@ -66,8 +66,20 @@ function content(index: number, sequence: number, bytes: number, seed: string): 
   return prefix + "x".repeat(Math.max(0, bytes - Buffer.byteLength(prefix)));
 }
 
+/**
+ * The largest tier stages 50,000 files, and Git's default output prints one line per
+ * added path. That exceeds Node's 1 MB default `maxBuffer` and rejects the whole run,
+ * so every invocation here is given headroom well beyond the largest tier's output.
+ */
+const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const result = await execFile("git", args, { cwd, encoding: "utf8", windowsHide: true });
+  const result = await execFile("git", args, {
+    cwd,
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: GIT_MAX_BUFFER_BYTES,
+  });
   return result.stdout.trim();
 }
 
@@ -76,11 +88,14 @@ async function deterministicFixtureCommit(root: string): Promise<void> {
   await execFile("git", [
     "-c", "commit.gpgSign=false",
     "-c", "core.hooksPath=.git/benchmark-empty-hooks",
-    "commit", "--no-gpg-sign", "-m", "M0 deterministic fixture",
+    // --quiet suppresses the per-path summary. The benchmark never reads this
+    // output, and at 50,000 paths printing it is pure overhead.
+    "commit", "--quiet", "--no-gpg-sign", "-m", "M0 deterministic fixture",
   ], {
     cwd: root,
     encoding: "utf8",
     windowsHide: true,
+    maxBuffer: GIT_MAX_BUFFER_BYTES,
     env: {
       ...process.env,
       GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { diffSnapshots, NodeObservationBoundary, type ObservationContext } from "@patchmesh/observation";
+import { diffSnapshots, NodeObservationBoundary, type ObservationContext } from "patchmesh-observation";
 import type { M0GateDefinition, Sha256Digest } from "./gate-definitions.js";
 import { createM0Fixture, generateM0Benchmark } from "./m0-benchmark.js";
 

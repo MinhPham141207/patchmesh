@@ -6,7 +6,7 @@ import type {
   FindingType,
   ProtocolEvent,
   TaskId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import type {
   EventQuery,
   DecisionView,
@@ -19,7 +19,7 @@ import type {
   ReplayResult,
   SourceSequenceGap,
   WorkGraphSnapshot,
-} from "@patchmesh/storage";
+} from "patchmesh-storage";
 
 export interface EventReader {
   read(query?: EventQuery): readonly ProtocolEvent[];
@@ -118,8 +118,8 @@ export type ReadServiceErrorCode = "usage" | "unavailable" | "replay" | "cursor"
 export class ReadServiceError extends Error {
   readonly code: ReadServiceErrorCode;
 
-  constructor(code: ReadServiceErrorCode, message: string) {
-    super(message);
+  constructor(code: ReadServiceErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "ReadServiceError";
     this.code = code;
   }

@@ -1,4 +1,4 @@
-import type { FindingType } from "@patchmesh/protocol";
+import type { FindingType } from "patchmesh-protocol";
 
 import type { DetectorFinding } from "./types.js";
 

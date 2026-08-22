@@ -13,8 +13,6 @@ opencode.json
 
 .vscode/
 
-.mcp.json
-
 # Node workspace outputs
 node_modules/
 packages/*/dist/
@@ -24,3 +22,9 @@ tools/*/dist/
 # Agent evidence runtime state
 .evidence/.locks/
 .evidence/.state/
+
+# recorded agent ledger (local, per-checkout)
+.patchmesh/
+
+# Built into the package from the root schema corpus
+packages/protocol/schemas/

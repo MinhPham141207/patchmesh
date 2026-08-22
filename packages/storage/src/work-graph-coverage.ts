@@ -3,7 +3,7 @@ import type {
   ProtocolEvent,
   ToolCompletedEvent,
   ToolRequestedEvent,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import type { SourceSequenceGap } from "./replay.js";
 import { coverageId } from "./work-graph-ids.js";
 import type {

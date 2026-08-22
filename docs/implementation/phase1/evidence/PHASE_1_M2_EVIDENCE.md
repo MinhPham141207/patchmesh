@@ -8,7 +8,7 @@
 
 ## Scope Verified
 
-M2 adds `@patchmesh/storage` with Node's built-in `node:sqlite` on Node
+M2 adds `patchmesh-storage` with Node's built-in `node:sqlite` on Node
 `v24.15.0`. The package provides transactional migrations, append-only canonical
 event storage, SHA-256 digests, duplicate and conflicting-ID handling, raw reads,
 and deterministic causal replay. It does not add a runtime adapter, effect

@@ -13,6 +13,7 @@ export {
   type FindingListQuery,
   type FindingsView,
   type GraphFilters,
+  type GraphNode,
   type GraphView,
   type ReadServiceErrorCode,
   type ReadServiceOptions,
@@ -20,3 +21,5 @@ export {
   type SourceSequenceGap,
   type StatusView,
 } from "./types.js";
+export { findOverlappingWork, renderOverlap } from "./overlap.js";
+export type { OverlapOptions, OverlapResult, OverlappingTask, ResourceOverlap } from "./overlap.js";

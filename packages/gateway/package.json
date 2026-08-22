@@ -1,0 +1,44 @@
+{
+  "name": "patchmesh-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "patchmesh-mcp": "dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-query": "workspace:*",
+    "patchmesh-recorder": "workspace:*",
+    "patchmesh-storage": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "description": "MCP server exposing the PatchMesh ledger back to coding agents.",
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme",
+  "engines": {
+    "node": ">=24"
+  }
+}

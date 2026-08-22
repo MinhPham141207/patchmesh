@@ -8,8 +8,8 @@
 
 ## Scope Verified
 
-M4 adds `@patchmesh/observation` and integrates it with the existing in-process
-`@patchmesh/adapters` MCP proxy. The observer captures Git repository/worktree and
+M4 adds `patchmesh-observation` and integrates it with the existing in-process
+`patchmesh-adapters` MCP proxy. The observer captures Git repository/worktree and
 revision metadata, filesystem state, Git blob values, and SHA-256 content hashes around
 one tool call. Snapshot differences become normalized `file.changed` events. The proxy
 stores those effects before `tool.completed` and links successfully stored effect IDs in
@@ -27,12 +27,12 @@ no findings, decisions, directives, detectors, projections, or AST facts.
 
 | Command | Result |
 | --- | --- |
-| `corepack pnpm --filter @patchmesh/observation test` | Passed: 16 observation tests |
-| `corepack pnpm --filter @patchmesh/observation typecheck` | Passed |
-| `corepack pnpm --filter @patchmesh/observation build` | Passed |
-| `corepack pnpm --filter @patchmesh/adapters test` | Passed: 14 adapter tests |
-| `corepack pnpm --filter @patchmesh/adapters typecheck` | Passed |
-| `corepack pnpm --filter @patchmesh/adapters build` | Passed |
+| `corepack pnpm --filter patchmesh-observation test` | Passed: 16 observation tests |
+| `corepack pnpm --filter patchmesh-observation typecheck` | Passed |
+| `corepack pnpm --filter patchmesh-observation build` | Passed |
+| `corepack pnpm --filter patchmesh-adapters test` | Passed: 14 adapter tests |
+| `corepack pnpm --filter patchmesh-adapters typecheck` | Passed |
+| `corepack pnpm --filter patchmesh-adapters build` | Passed |
 | `corepack pnpm --recursive test` | Passed: 70 workspace tests |
 | `corepack pnpm --recursive typecheck` | Passed for all 5 workspace packages |
 | `corepack pnpm --recursive build` | Passed for all 5 workspace packages |

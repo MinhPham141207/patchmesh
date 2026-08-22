@@ -12,7 +12,7 @@ focused verification ran)
 
 ## Scope Implemented
 
-M6 adds `@patchmesh/query` as the public read-service boundary, `apps/daemon` as an
+M6 adds `patchmesh-query` as the public read-service boundary, `apps/daemon` as an
 in-process composition layer, and `apps/cli` with the four scheduled read-only
 commands: `status`, `agents`, `events`, and `graph`.
 
@@ -26,9 +26,9 @@ decisions, validity, overlaps, stale state, or Phase 2 output.
 
 | Command | Result |
 | --- | --- |
-| `corepack pnpm --filter @patchmesh/query test` | Passed: 7 tests |
-| `corepack pnpm --filter @patchmesh/daemon test` | Passed: 2 tests |
-| `corepack pnpm --filter @patchmesh/cli test` | Passed: 4 tests |
+| `corepack pnpm --filter patchmesh-query test` | Passed: 7 tests |
+| `corepack pnpm --filter patchmesh-daemon test` | Passed: 2 tests |
+| `corepack pnpm --filter patchmesh test` | Passed: 4 tests |
 | `corepack pnpm --recursive test` | Passed: 95 workspace tests |
 | `corepack pnpm --recursive typecheck` | Passed for 8 workspace packages |
 | `corepack pnpm --recursive build` | Passed for 8 workspace packages |

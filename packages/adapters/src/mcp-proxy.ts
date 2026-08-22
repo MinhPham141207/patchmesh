@@ -6,6 +6,7 @@ import {
   deriveEvidenceFacts,
   deriveSymbolChangedEvents,
   configurationDigest,
+  languageForExtension,
   resolveLocalContractDependencies,
   type DerivedEvidenceFacts,
   type AnalysisCoverage,
@@ -13,7 +14,7 @@ import {
   type SourceFacts,
   type SymbolEvidenceFact,
   type SymbolEventContext,
-} from "@patchmesh/analyzers";
+} from "patchmesh-analyzers";
 import {
   parseEvent,
   ProtocolValidationError,
@@ -30,8 +31,8 @@ import {
   type ResourceVersion,
   type ToolCompletedEvent,
   type ToolRequestedEvent,
-} from "@patchmesh/protocol";
-import { projectWorkGraph } from "@patchmesh/storage";
+} from "patchmesh-protocol";
+import { projectWorkGraph, type AppendResult } from "patchmesh-storage";
 import {
   deriveCoverage,
   diffSnapshots,
@@ -44,7 +45,7 @@ import {
   type IncrementalObservationBoundary,
   type ObservationWindow,
   type ObservedFileChange,
-} from "@patchmesh/observation";
+} from "patchmesh-observation";
 import type {
   McpCallContext,
   McpProxyOptions,
@@ -73,14 +74,18 @@ function appendValidated(event: ProtocolEvent, eventStore: EventAppender): Proto
   return eventStore.append(parsed.value).event;
 }
 
-function appendProofValidated(event: ProtocolEvent, eventStore: EventAppender): ProtocolEvent {
-  const parsed = parseEvent(event);
-  if (parsed.value === null) throw new ProtocolValidationError(parsed.diagnostics);
-  if (eventStore.read !== undefined) {
-    const diagnostics = validateEventSet([...eventStore.read(), parsed.value]);
-    if (diagnostics.length > 0) throw new ProtocolValidationError(diagnostics);
-  }
-  return eventStore.append(parsed.value).event;
+type ProofAppendResult =
+  | { readonly status: "appended"; readonly results: readonly AppendResult[] }
+  | { readonly status: "unavailable" };
+
+function appendProofAtomic(events: readonly ProtocolEvent[], eventStore: EventAppender): ProofAppendResult {
+  const parsedEvents = events.map((event) => {
+    const parsed = parseEvent(event);
+    if (parsed.value === null) throw new ProtocolValidationError(parsed.diagnostics);
+    return parsed.value;
+  });
+  if (eventStore.appendAtomic === undefined) return { status: "unavailable" };
+  return { status: "appended", results: eventStore.appendAtomic(parsedEvents, { requireValidEventSet: true }) };
 }
 
 function randomHexId(): string {
@@ -365,7 +370,7 @@ function createDerivedEvidenceEvent(
   normalizedSignature: string | null,
   targetSnapshot?: McpCallContext["targetSnapshot"],
   sourceVersion?: ResourceVersion,
-  contractResourceId?: import("@patchmesh/protocol").ResourceId,
+  contractResourceId?: import("patchmesh-protocol").ResourceId,
 ): DerivedEvidenceEvent {
   if (targetSnapshot !== undefined && sourceVersion !== undefined && target.agentId !== null && target.taskId !== null) {
     const sourceEventId = sourceEventIds[0];
@@ -398,7 +403,7 @@ function createDerivedEvidenceEvent(
           } } : { kind: "resolver_confirmed_consumer_dependency", sourceAnalysis: {
             sourceEventId, sourceResourceId: sourceFacts.resource.resourceId, sourceVersion,
             analysisInputDigest: `sha256:${createHash("sha256").update(canonicalJson({ sourceResourceId: sourceFacts.resource.resourceId, sourceVersion })).digest("hex")}`,
-          }, resolver: { resolverId: "local-contract-resolver", version: "1" }, dependencyId: stableFactId as import("@patchmesh/protocol").DependencyId, consumerResourceId: sourceFacts.resource.resourceId, contractResourceId: contractResourceId ?? sourceFacts.resource.resourceId, resolution: "confirmed" },
+          }, resolver: { resolverId: "local-contract-resolver", version: "1" }, dependencyId: stableFactId as import("patchmesh-protocol").DependencyId, consumerResourceId: sourceFacts.resource.resourceId, contractResourceId: contractResourceId ?? sourceFacts.resource.resourceId, resolution: "confirmed" },
         } },
       };
     }
@@ -496,12 +501,12 @@ function priorSymbolVersions(
   changed: FileChangedEvent,
   targetSnapshot: McpCallContext["targetSnapshot"],
   facts: DerivedEvidenceFacts,
-): ReadonlyMap<import("@patchmesh/protocol").ResourceId, ResourceVersion> {
+): ReadonlyMap<import("patchmesh-protocol").ResourceId, ResourceVersion> {
   if (targetSnapshot === undefined || changed.payload.beforeVersion === null) return new Map();
   const byId = new Map(events.map((event) => [event.eventId, event] as const));
   const expectedConfigurationDigest = configurationDigest(facts.source.configuration);
   const expectedSymbols = new Set(facts.symbols.map((fact) => fact.resource.resourceId));
-  const candidates = new Map<import("@patchmesh/protocol").ResourceId, ResourceVersion[]>();
+  const candidates = new Map<import("patchmesh-protocol").ResourceId, ResourceVersion[]>();
   for (const evidence of events) {
     if (evidence.eventType !== "evidence.derived" || evidence.schemaVersion !== 3
       || evidence.payload.evidence.factKind !== "symbol"
@@ -540,7 +545,8 @@ function createDependentWriteEvent(
 ): DependentWriteEvent | null {
   const dependentWrite = call.dependentWrite;
   if (dependentWrite === undefined || context.taskId === null) return null;
-  if (context.targetSnapshot !== undefined && context.agentId !== null && dependentWrite.readToken !== undefined && dependentWrite.comparison !== undefined) {
+  if (context.targetSnapshot !== undefined) {
+    if (context.agentId === null || dependentWrite.readToken === undefined || dependentWrite.comparison === undefined) return null;
     return {
       schemaVersion: 3,
       eventId,
@@ -649,12 +655,7 @@ export class McpProxy {
     if (contentHash(content) !== event.payload.afterVersion.value) {
       return "changed source no longer matches observed version";
     }
-    const extension = extname(filePath).toLowerCase();
-    const language: SourceAnalysisInput["language"] = extension === ".ts" || extension === ".tsx"
-      ? "typescript"
-      : extension === ".js" || extension === ".jsx" || extension === ".mjs" || extension === ".cjs"
-        ? "javascript"
-        : "unsupported";
+    const language: SourceAnalysisInput["language"] = languageForExtension(extname(filePath));
     const facts = deriveEvidenceFacts({
       resource: event.payload.resource,
       version: event.payload.afterVersion,
@@ -701,27 +702,29 @@ export class McpProxy {
         },
       };
     });
-     try {
-       for (const [index, symbolEvent] of symbolEvents.entries()) {
-         appendValidated(symbolEvent, this.eventStore);
-         const fact = facts.symbols[index];
-         if (fact === undefined) return "derived symbol fact is missing its event";
-         const evidence = createDerivedEvidenceEvent(
-           symbolEvent,
-           this.createEventId(),
-           facts.source,
-           "symbol",
-           fact.resource.resourceId,
-            fact.sourceFacts.sourceEventIds,
-            fact.exported,
-            fact.coverageId,
-           fact.signature,
-           targetSnapshot,
-           event.payload.afterVersion,
-         );
-         if (evidence.schemaVersion === 3) appendProofValidated(evidence, this.eventStore);
-         else appendValidated(evidence, this.eventStore);
-       }
+    try {
+      const derivedEvents: ProtocolEvent[] = [];
+      for (const [index, symbolEvent] of symbolEvents.entries()) {
+        const fact = facts.symbols[index];
+        if (fact === undefined) return "derived symbol fact is missing its event";
+        const evidence = createDerivedEvidenceEvent(
+          symbolEvent,
+          this.createEventId(),
+          facts.source,
+          "symbol",
+          fact.resource.resourceId,
+          fact.sourceFacts.sourceEventIds,
+          fact.exported,
+          fact.coverageId,
+          fact.signature,
+          targetSnapshot,
+          event.payload.afterVersion,
+        );
+        derivedEvents.push(symbolEvent, evidence);
+      }
+      if (derivedEvents.length > 0 && appendProofAtomic(derivedEvents, this.eventStore).status === "unavailable") {
+        return "derived symbol event persistence failed";
+      }
     } catch {
       return "derived symbol event persistence failed";
     }
@@ -745,13 +748,13 @@ export class McpProxy {
       observedVersions,
     );
     try {
+      const derivedEvents: ProtocolEvent[] = [];
       for (const dependency of dependencies) {
         const sourceEventId = dependency.consumer.sourceFacts.sourceEventIds[0];
         const analysis = analyses.find((candidate) => candidate.facts.source.sourceEventIds[0] === sourceEventId);
         if (analysis === undefined) return "resolved dependency is missing its consumer source context";
-         const event = deriveDependencyChangedEvents([dependency], [this.createEventId()], analysis.context)[0];
+        const event = deriveDependencyChangedEvents([dependency], [this.createEventId()], analysis.context)[0];
         if (event === undefined) return "resolver did not produce a dependency event";
-        appendValidated(event, this.eventStore);
         const evidence = createDerivedEvidenceEvent(
           event,
           this.createEventId(),
@@ -761,15 +764,17 @@ export class McpProxy {
           // The proof's hash-bound analysis input is the consumer source.
           // The dependency event retains both consumer and contract evidence.
           dependency.consumer.sourceFacts.sourceEventIds,
-           false,
-           dependency.consumer.coverageId,
+          false,
+          dependency.consumer.coverageId,
           dependency.contract.signature,
           analysis.targetSnapshot,
           analysis.facts.source.version,
           dependency.contract.resource.resourceId,
         );
-        if (evidence.schemaVersion === 3) appendProofValidated(evidence, this.eventStore);
-        else appendValidated(evidence, this.eventStore);
+        derivedEvents.push(event, evidence);
+      }
+      if (derivedEvents.length > 0 && appendProofAtomic(derivedEvents, this.eventStore).status === "unavailable") {
+        return "derived dependency event persistence failed";
       }
     } catch {
       return "derived dependency event persistence failed";
@@ -1037,9 +1042,6 @@ export class McpProxy {
       observationGaps,
       outOfBandEventIds,
     );
-    const resolvedObservationGaps = attributedEffectIds.length === 0
-      ? observationGaps
-      : observationGaps.filter((gap) => !isSnapshotOriginGap(gap));
 
     let completedEvent: ProtocolEvent;
     try {
@@ -1066,24 +1068,6 @@ export class McpProxy {
         { cause: error },
       );
     }
-
-    const evidenceEventIds = [
-      requestEvent.eventId,
-      ...readEventIds,
-      ...effectEventIds,
-      ...outOfBandEventIds,
-      completedEvent.eventId,
-    ];
-    const coverage = this.observer === undefined
-      ? null
-      : deriveCoverage({
-          scope: `tool:${requestEvent.eventId}`,
-          modes: beforeCapture !== null && afterCapture !== null
-            ? ["intercepted", "verified"]
-            : ["intercepted", "unknown"],
-          gaps: resolvedObservationGaps,
-          evidenceEventIds,
-        });
 
     const persistedEvents = this.eventStore.read?.() ?? [];
     const presentedToken = call.dependentWrite?.readToken;
@@ -1115,32 +1099,96 @@ export class McpProxy {
       && candidateCoverageId === call.dependentWrite.comparison.coverageId;
     const proofAuthorityAvailable = this.proofAuthority.authoritativeIdentity && this.proofAuthority.taskLifecycle
       && this.proofAuthority.integrationTargetSnapshot && this.proofAuthority.observedReadVersion && this.proofAuthority.dependentWriteToken && this.proofAuthority.exactReportedEffects;
-    const useProofPath = context.targetSnapshot !== undefined && presentedToken !== undefined;
-    if (useProofPath && (!proofTokenMatches || !proofCandidateMatches || writeEffectCoverageId === null || coverage?.presentation !== "sufficient" || execution.outcome !== "succeeded")) {
+    const requiresProofPath = context.targetSnapshot !== undefined && call.dependentWrite !== undefined;
+    const completionLinkedAttributed = completedEvent.eventType === "tool.completed"
+      && completedEvent.payload.deterministicallyAttributedEffectEventIds?.includes(dependentWriteChange?.eventId as EventId) === true;
+    const preProofObservationGaps = attributedEffectIds.length === 0
+      ? observationGaps
+      : observationGaps.filter((gap) => !isSnapshotOriginGap(gap));
+    const observationCoverageSufficient = this.observer !== undefined
+      && beforeCapture !== null
+      && afterCapture !== null
+      && preProofObservationGaps.length === 0;
+    const proofPrerequisitesSatisfied = proofAuthorityAvailable && proofTokenMatches && proofCandidateMatches
+      && writeEffectCoverageId !== null && completionLinkedAttributed
+      && observationCoverageSufficient && execution.outcome === "succeeded";
+    let validatedProofEvent: DependentWriteEvent | null = null;
+    if (requiresProofPath && proofPrerequisitesSatisfied && dependentWriteChange !== null && writeEffectCoverageId !== null) {
+      const prospectiveProofEvent = createDependentWriteEvent(
+        call,
+        context,
+        dependentWriteChange,
+        writeEffectCoverageId,
+        this.createEventId(),
+        this.now(),
+        completedEvent.eventId,
+      );
+      if (prospectiveProofEvent?.schemaVersion === 3
+        && validateEventSet([...persistedEvents, prospectiveProofEvent]).length === 0) {
+        validatedProofEvent = prospectiveProofEvent;
+      }
+    }
+    if (validatedProofEvent !== null) {
+      try {
+        if (appendProofAtomic([validatedProofEvent], this.eventStore).status === "unavailable") {
+          validatedProofEvent = null;
+        }
+      } catch (error) {
+        if (error instanceof ProtocolValidationError) {
+          validatedProofEvent = null;
+        } else {
+          throw new McpProxyStorageError(
+            "MCP_DEPENDENT_WRITE_PERSIST_FAILED",
+            "dependent-write",
+            requestEvent.eventId,
+            execution.outcome,
+            { cause: error },
+          );
+        }
+      }
+    }
+    if (requiresProofPath && validatedProofEvent === null) {
       observationGaps.push({
         kind: "unverified",
         scope: "write.dependent",
-        reason: "proof-bearing dependent write lacks a matching token, candidate, succeeded completion, or sufficient coverage",
+        reason: "proof-bearing dependent write lacks authority, valid protocol bindings, a completion-linked effect, or sufficient coverage",
       });
     }
 
-    const completionLinkedAttributed = completedEvent.eventType === "tool.completed"
-      && completedEvent.payload.deterministicallyAttributedEffectEventIds?.includes(dependentWriteChange?.eventId as EventId) === true;
-    if (coverage !== null && dependentWriteChange !== null && hasDependentWriteDependency
-      && (!useProofPath || (proofAuthorityAvailable && proofTokenMatches && proofCandidateMatches && writeEffectCoverageId !== null && completionLinkedAttributed && coverage.presentation === "sufficient" && execution.outcome === "succeeded"))) {
+    const resolvedObservationGaps = attributedEffectIds.length === 0
+      ? observationGaps
+      : observationGaps.filter((gap) => !isSnapshotOriginGap(gap));
+    const evidenceEventIds = [
+      requestEvent.eventId,
+      ...readEventIds,
+      ...effectEventIds,
+      ...outOfBandEventIds,
+      completedEvent.eventId,
+    ];
+    const coverage = this.observer === undefined
+      ? null
+      : deriveCoverage({
+          scope: `tool:${requestEvent.eventId}`,
+          modes: beforeCapture !== null && afterCapture !== null
+            ? ["intercepted", "verified"]
+            : ["intercepted", "unknown"],
+          gaps: resolvedObservationGaps,
+          evidenceEventIds,
+        });
+
+    if (!requiresProofPath && coverage !== null && dependentWriteChange !== null && hasDependentWriteDependency) {
       const dependentWriteEvent = createDependentWriteEvent(
         call,
         context,
         dependentWriteChange,
-        useProofPath ? writeEffectCoverageId! : coverage.coverageId,
+        coverage.coverageId,
         this.createEventId(),
         this.now(),
         completedEvent.eventId,
       );
       if (dependentWriteEvent !== null) {
         try {
-          if (dependentWriteEvent.schemaVersion === 3) appendProofValidated(dependentWriteEvent, this.eventStore);
-          else appendValidated(dependentWriteEvent, this.eventStore);
+          appendValidated(dependentWriteEvent, this.eventStore);
         } catch (error) {
           if (error instanceof ProtocolValidationError) throw error;
           throw new McpProxyStorageError(

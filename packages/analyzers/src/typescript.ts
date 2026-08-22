@@ -1,3 +1,4 @@
+import { analyzePythonSource } from "./python.js";
 import type { DerivedImport, DerivedSymbol, SourceAnalysisInput, SourceAnalysisResult } from "./types.js";
 
 function sortedUnique(values: readonly string[]): readonly string[] {
@@ -51,6 +52,7 @@ export function analyzeSource(input: SourceAnalysisInput): SourceAnalysisResult 
       configuration: input.configuration, integrationTarget: input.integrationTarget,
     };
   }
+  if (input.language === "python") return analyzePythonSource(input);
   if (!hasBalancedBraces(input.content)) {
     return {
       symbols: [], imports: [], coverage: { status: "degraded", reason: "ambiguous_parse" },

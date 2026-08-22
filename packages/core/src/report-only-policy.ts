@@ -1,4 +1,4 @@
-import type { FindingType, TaskId } from "@patchmesh/protocol";
+import type { FindingType, TaskId } from "patchmesh-protocol";
 
 import type { DetectorFinding, ReportOnlyDecision } from "./types.js";
 

@@ -19,7 +19,7 @@ import type {
   ToolRequestedEvent,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 export const repositoryId = "repo_11111111-1111-4111-8111-111111111111" as RepositoryId;
 export const workspaceId = "ws_22222222-2222-4222-8222-222222222222" as WorkspaceId;

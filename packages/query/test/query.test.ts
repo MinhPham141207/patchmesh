@@ -15,8 +15,8 @@ import type {
   RepositoryId,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
-import { SqliteEventStore } from "@patchmesh/storage";
+} from "patchmesh-protocol";
+import { SqliteEventStore } from "patchmesh-storage";
 import { ReadServiceError, createReadServices } from "../src/index.js";
 import { redactValue } from "../src/redaction.js";
 import { parseTimeBound } from "../src/time.js";

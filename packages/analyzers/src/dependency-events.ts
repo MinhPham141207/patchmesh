@@ -4,7 +4,7 @@ import type {
   DependencyChangedEvent,
   DependencyId,
   EventId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 import type { ConsumerImportFact, SymbolEvidenceFact } from "./evidence-facts.js";
 import type { SymbolEventContext } from "./symbol-events.js";

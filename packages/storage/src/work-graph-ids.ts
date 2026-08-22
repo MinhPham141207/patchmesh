@@ -5,7 +5,7 @@ import type {
   LogicalResource,
   ResourceVersion,
   TaskId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import { canonicalDigest } from "./canonical-json.js";
 import type { GraphEdgeKind, ProjectionCoverageGap, ProjectionCoverageMode } from "./work-graph-types.js";
 

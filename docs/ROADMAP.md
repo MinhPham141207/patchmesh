@@ -4,6 +4,12 @@
 > progress and remains report-only; its exit gates are not met. Later capabilities remain
 > planned.
 
+> **Sequencing under review.** A proposed redesign reorders Phase 2 and later work into
+> independently shippable slices and moves quality gates to the point where PatchMesh
+> claims authority, rather than the point where a detector first exists. See
+> [`docs/implementation/DELIVERY_PLAN.md`](implementation/DELIVERY_PLAN.md). Phase 0 and
+> Phase 1 evidence below is unaffected.
+
 ## Purpose
 
 This roadmap defines build order, scope boundaries, and the evidence required before

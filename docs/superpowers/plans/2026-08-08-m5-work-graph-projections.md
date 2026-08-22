@@ -4,9 +4,9 @@
 
 **Goal:** Build a typed, in-memory, replayable Phase 1 work-graph projection over the existing immutable event stream.
 
-**Architecture:** Add a focused projector to `@patchmesh/storage` that implements the existing `ReplayReducer` contract and exposes `projectWorkGraph`, incremental `process`, and frozen `snapshot` APIs. The event store remains authoritative and graph state remains rebuildable in memory; no graph tables, coverage event, detector output, or policy output is added.
+**Architecture:** Add a focused projector to `patchmesh-storage` that implements the existing `ReplayReducer` contract and exposes `projectWorkGraph`, incremental `process`, and frozen `snapshot` APIs. The event store remains authoritative and graph state remains rebuildable in memory; no graph tables, coverage event, detector output, or policy output is added.
 
-**Tech Stack:** Strict TypeScript, pnpm workspace, Node.js >=22.5.0, existing `@patchmesh/protocol`, existing `@patchmesh/storage` replay/canonical JSON helpers, and `node:test`.
+**Tech Stack:** Strict TypeScript, pnpm workspace, Node.js >=22.5.0, existing `patchmesh-protocol`, existing `patchmesh-storage` replay/canonical JSON helpers, and `node:test`.
 
 ## Global Constraints
 
@@ -126,7 +126,7 @@ test("coverage identity is independent of input ordering", () => {
 
 - [ ] **Step 2: Run the focused test to verify it fails**
 
-Run: `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts`
+Run: `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts`
 
 Expected: FAIL because the graph types and identity helpers do not exist.
 
@@ -185,7 +185,7 @@ The version discriminator must include resource ID, all version-domain IDs, kind
 
 - [ ] **Step 5: Run focused tests and typecheck**
 
-Run: `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts` and `corepack pnpm --filter @patchmesh/storage typecheck`
+Run: `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts` and `corepack pnpm --filter patchmesh-storage typecheck`
 
 Expected: PASS for identity tests and strict typechecking.
 
@@ -224,7 +224,7 @@ test("projects resource observations and dependency evidence", () => {
 
 - [ ] **Step 2: Run focused tests to verify the mapping is red**
 
-Run: `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts`
+Run: `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts`
 
 Expected: FAIL because the projector returns no mapped graph facts.
 
@@ -242,7 +242,7 @@ For `task.completed`, add completion event and work-product IDs to the effective
 
 - [ ] **Step 6: Run focused tests and typecheck**
 
-Run: `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts` and `corepack pnpm --filter @patchmesh/storage typecheck`
+Run: `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts` and `corepack pnpm --filter patchmesh-storage typecheck`
 
 Expected: PASS for all resource, version, task, and dependency mapping tests.
 
@@ -282,7 +282,7 @@ test("correction changes projected attribution but not the source event", () => 
 
 - [ ] **Step 2: Run the focused tests to verify they fail**
 
-Run: `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts`
+Run: `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts`
 
 Expected: FAIL because corrections and coverage are not yet projected.
 
@@ -304,11 +304,11 @@ source sequence gap                    -> event-stream missing_sequence gap
 no effect evidence                     -> intercepted-only unknown
 ```
 
-Keep the coverage module independent of `@patchmesh/observation`; duplicate only the small persisted coverage shape needed by storage. Sort modes, gaps, and evidence before deriving `CoverageId` with the existing canonical digest helper. Recompute coverage when attribution corrections affect evidence.
+Keep the coverage module independent of `patchmesh-observation`; duplicate only the small persisted coverage shape needed by storage. Sort modes, gaps, and evidence before deriving `CoverageId` with the existing canonical digest helper. Recompute coverage when attribution corrections affect evidence.
 
 - [ ] **Step 5: Run focused tests and typecheck**
 
-Run: `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts` and `corepack pnpm --filter @patchmesh/storage typecheck`
+Run: `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts` and `corepack pnpm --filter patchmesh-storage typecheck`
 
 Expected: PASS for correction, immutable-source, and coverage behavior.
 
@@ -345,7 +345,7 @@ test("incremental and clean replay produce byte-equivalent snapshots", () => {
 
 - [ ] **Step 2: Run focused tests to verify missing integration behavior**
 
-Run: `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts`
+Run: `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts`
 
 Expected: FAIL for public APIs, canonical ordering, or incremental/rebuild equivalence until integration is complete.
 
@@ -363,7 +363,7 @@ Update `packages/storage/src/index.ts` to export graph types, `WorkGraphProjecto
 
 - [ ] **Step 6: Run focused tests, typecheck, and build**
 
-Run: `corepack pnpm --filter @patchmesh/storage test -- work-graph.test.ts`, `corepack pnpm --filter @patchmesh/storage typecheck`, and `corepack pnpm --filter @patchmesh/storage build`
+Run: `corepack pnpm --filter patchmesh-storage test -- work-graph.test.ts`, `corepack pnpm --filter patchmesh-storage typecheck`, and `corepack pnpm --filter patchmesh-storage build`
 
 Expected: PASS with generated declarations exposing only the intended public API.
 

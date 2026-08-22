@@ -1,12 +1,13 @@
 {
-  "name": "@patchmesh/cli",
+  "name": "patchmesh",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=24"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "bin": {
     "patchmesh": "dist/main.js"
   },
@@ -16,8 +17,29 @@
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
-    "@patchmesh/daemon": "workspace:*",
-    "@patchmesh/query": "workspace:*",
-    "@patchmesh/protocol": "workspace:*"
-  }
+    "patchmesh-daemon": "workspace:*",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-query": "workspace:*",
+    "patchmesh-recorder": "workspace:*"
+  },
+  "description": "A shared work ledger for coding agents: records what agents did, and hands it back so the next one does not repeat it.",
+  "keywords": [
+    "ai",
+    "agent",
+    "claude-code",
+    "mcp",
+    "coding-agent",
+    "ledger",
+    "observability"
+  ],
+  "license": "MIT",
+  "author": "MinhPham141207",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minhpham141207/patchmesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minhpham141207/patchmesh/issues"
+  },
+  "homepage": "https://github.com/minhpham141207/patchmesh#readme"
 }

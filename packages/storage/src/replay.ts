@@ -2,7 +2,7 @@ import {
   validateEventSet,
   type ProtocolEvent,
   type Source,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import { StorageError } from "./errors.js";
 
 export interface SourceSequenceGap {

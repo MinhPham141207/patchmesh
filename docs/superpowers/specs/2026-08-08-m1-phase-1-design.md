@@ -65,7 +65,7 @@ The workspace has two real packages and no empty future-package shells:
 Phase 0 JSON Schemas
         |
         v
-@patchmesh/protocol
+patchmesh-protocol
         |
         v
 @patchmesh/collector

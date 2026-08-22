@@ -7,7 +7,7 @@ import type {
   Source,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 import { evaluateReportOnlyPolicy, type ReportOnlyPolicyInput } from "./report-only-policy.js";
 import type { DetectorFinding } from "./types.js";

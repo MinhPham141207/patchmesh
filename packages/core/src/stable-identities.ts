@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DecisionId, FindingId } from "@patchmesh/protocol";
+import type { DecisionId, FindingId } from "patchmesh-protocol";
 import type { DetectorFinding, ReportOnlyDecision } from "./types.js";
 
 function digest(value: unknown): string {

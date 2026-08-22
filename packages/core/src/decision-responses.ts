@@ -9,7 +9,7 @@ import type {
   Source,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 export interface ResponseEventContext {
   readonly eventId: EventId;

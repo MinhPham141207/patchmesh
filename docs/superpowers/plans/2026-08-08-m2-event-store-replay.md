@@ -4,7 +4,7 @@
 
 **Goal:** Add an append-only SQLite event store and deterministic causal replay core for the normalized Phase 1 event stream.
 
-**Architecture:** A new `@patchmesh/storage` package depends only on `@patchmesh/protocol`. `SqliteEventStore` validates and stores canonical UTF-8 event bytes with SHA-256 digests; `ReplayDriver` resolves causal order in memory and returns no snapshot on failure. M2 stops before adapters, effects, graph projections, detectors, policies, daemon services, and CLI commands.
+**Architecture:** A new `patchmesh-storage` package depends only on `patchmesh-protocol`. `SqliteEventStore` validates and stores canonical UTF-8 event bytes with SHA-256 digests; `ReplayDriver` resolves causal order in memory and returns no snapshot on failure. M2 stops before adapters, effects, graph projections, detectors, policies, daemon services, and CLI commands.
 
 **Tech Stack:** TypeScript strict mode, pnpm workspace, Node's built-in `node:sqlite` `DatabaseSync`, SQLite migrations, Node's built-in `node:test` runner through `tsx`, and the existing Phase 0 protocol validator.
 
@@ -12,7 +12,7 @@
 
 - Use Node's built-in `node:sqlite` `DatabaseSync` API and document a minimum Node version that supports it; use Node `>=22.5.0` for the package.
 - Do not introduce an ORM or an additional SQLite wrapper dependency.
-- Keep `packages/storage` dependent on `@patchmesh/protocol` only; do not depend on the collector, adapters, gateway, projections, daemon, or CLI.
+- Keep `packages/storage` dependent on `patchmesh-protocol` only; do not depend on the collector, adapters, gateway, projections, daemon, or CLI.
 - Store canonical event JSON as UTF-8 bytes and hash it with SHA-256; recursively sort object keys and preserve array order.
 - Events are append-only. Do not expose update or delete operations, and never repair stored event bytes or metadata.
 - Allow an event to be appended before its causal parent; causal references remain application-level rather than SQLite foreign keys.
@@ -62,8 +62,8 @@ import type {
   EventId,
   EventType,
   Source,
-} from "@patchmesh/protocol";
-import type { ProtocolEvent } from "@patchmesh/protocol";
+} from "patchmesh-protocol";
+import type { ProtocolEvent } from "patchmesh-protocol";
 
 export interface EventQuery {
   readonly eventId?: EventId;
@@ -132,7 +132,7 @@ codes.
 
 **Interfaces:**
 
-- Consumes: the existing strict workspace and `@patchmesh/protocol` package metadata.
+- Consumes: the existing strict workspace and `patchmesh-protocol` package metadata.
 - Produces: `SqliteEventStore.open(filename)` plumbing and an initialized SQLite schema for Tasks 2 and 3.
 
 - [ ] **Step 1: Write failing migration and restart tests**
@@ -181,14 +181,14 @@ does not become part of the storage public API.
 Run:
 
 ```text
-corepack pnpm --filter @patchmesh/storage test
+corepack pnpm --filter patchmesh-storage test
 ```
 
 Expected: FAIL because the storage package and export do not exist.
 
 - [ ] **Step 2: Add the package and compiler configuration**
 
-Create `packages/storage/package.json` with package name `@patchmesh/storage`,
+Create `packages/storage/package.json` with package name `patchmesh-storage`,
 `"type": "module"`, `"engines": { "node": ">=22.5.0" }`, and these scripts:
 
 ```json
@@ -201,7 +201,7 @@ Create `packages/storage/package.json` with package name `@patchmesh/storage`,
 }
 ```
 
-Declare `@patchmesh/protocol` as a `workspace:*` dependency. Do not add a SQLite
+Declare `patchmesh-protocol` as a `workspace:*` dependency. Do not add a SQLite
 package because the implementation uses `node:sqlite`. Configure `tsconfig.json` to
 extend `../../tsconfig.base.json`, use `src` as `rootDir`, emit declarations and
 source maps to `dist`, and exclude `dist` and tests from production output.
@@ -268,8 +268,8 @@ Add a temporary `SqliteEventStore` shell with `open`, `read`, and `close` method
 the migration tests can execute. Export it from `src/index.ts`, then run:
 
 ```text
-corepack pnpm --filter @patchmesh/storage typecheck
-corepack pnpm --filter @patchmesh/storage test
+corepack pnpm --filter patchmesh-storage typecheck
+corepack pnpm --filter patchmesh-storage test
 ```
 
 Expected: package typecheck passes and both migration tests pass against temporary
@@ -289,7 +289,7 @@ SQLite files.
 
 **Interfaces:**
 
-- Consumes: the migration and database lifecycle from Task 1, plus `parseEvent` from `@patchmesh/protocol`.
+- Consumes: the migration and database lifecycle from Task 1, plus `parseEvent` from `patchmesh-protocol`.
 - Produces: `AppendResult`, `EventQuery`, `StorageError`, and the append/read behavior required by Task 3.
 
 - [ ] **Step 1: Write failing canonicalization and append tests**
@@ -345,7 +345,7 @@ Also add tests that:
 Run:
 
 ```text
-corepack pnpm --filter @patchmesh/storage test
+corepack pnpm --filter patchmesh-storage test
 ```
 
 Expected: FAIL because canonicalization and append/read behavior are not implemented.
@@ -423,8 +423,8 @@ than accessing a closed SQLite handle.
 Run:
 
 ```text
-corepack pnpm --filter @patchmesh/storage typecheck
-corepack pnpm --filter @patchmesh/storage test
+corepack pnpm --filter patchmesh-storage typecheck
+corepack pnpm --filter patchmesh-storage test
 ```
 
 Expected: canonicalization, validation, append, duplicate, conflict, restart,
@@ -444,7 +444,7 @@ immutability, filtering, and out-of-order append tests pass.
 
 **Interfaces:**
 
-- Consumes: immutable events returned by Task 2 and `validateEventSet` from `@patchmesh/protocol`.
+- Consumes: immutable events returned by Task 2 and `validateEventSet` from `patchmesh-protocol`.
 - Produces: `ReplayReducer`, `ReplayResult`, `SourceSequenceGap`, replay errors, and both `replay()` overloads.
 
 - [ ] **Step 1: Write failing replay convergence tests**
@@ -489,7 +489,7 @@ Add tests for:
 Run:
 
 ```text
-corepack pnpm --filter @patchmesh/storage test
+corepack pnpm --filter patchmesh-storage test
 ```
 
 Expected: FAIL because the replay driver and overloads are not implemented.
@@ -555,8 +555,8 @@ method other than raw event loading and in-memory replay. Export all replay type
 Run:
 
 ```text
-corepack pnpm --filter @patchmesh/storage typecheck
-corepack pnpm --filter @patchmesh/storage test
+corepack pnpm --filter patchmesh-storage typecheck
+corepack pnpm --filter patchmesh-storage test
 corepack pnpm typecheck
 corepack pnpm build
 corepack pnpm test
@@ -658,7 +658,7 @@ policies, CLI behavior, or full Phase 1 completion.
 
 ## Final Review Checklist
 
-- [ ] `@patchmesh/storage` depends only on `@patchmesh/protocol`.
+- [ ] `patchmesh-storage` depends only on `patchmesh-protocol`.
 - [ ] The storage package uses Node `>=22.5.0` and `node:sqlite` without an ORM or wrapper dependency.
 - [ ] Migrations are versioned, transactional, rerunnable, and never edited after application.
 - [ ] The `events` table stores canonical UTF-8 bytes, digest, all envelope metadata, and immutable insertion position.

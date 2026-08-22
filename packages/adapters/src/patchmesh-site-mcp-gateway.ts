@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { sanitizeDiagnostic } from "@patchmesh/observation";
-import { parseEvent, validateEventSet } from "@patchmesh/protocol";
-import { projectWorkGraph } from "@patchmesh/storage";
+import { sanitizeDiagnostic } from "patchmesh-observation";
+import { parseEvent, validateEventSet } from "patchmesh-protocol";
+import { projectWorkGraph } from "patchmesh-storage";
 import type {
   CoverageId,
   EventId,
@@ -9,7 +9,7 @@ import type {
   Source,
   TargetSnapshot,
   ToolCompletedEvent,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 import type { EventAppender } from "./types.js";
 import { digestHostAdapterCapabilities, type HostAdapterCapabilities, type HostAdapterCapabilityDigest } from "./host-adapter-capabilities.js";
 import { McpProxy } from "./mcp-proxy.js";
@@ -562,7 +562,7 @@ export class PatchMeshSiteMcpGateway {
         && candidate.taskId === second.taskId && candidate.agentId === second.agentId
         && candidate.worktreeId === second.worktreeId && candidate.workspaceId === second.workspaceId
         && candidate.repositoryId === second.repositoryId && candidate.symbolChangeEventIds.has(second.eventId));
-      if (matchingLifecycles.length !== 1) throw new Error(`debug: matching lifecycles=${matchingLifecycles.length}`);
+      if (matchingLifecycles.length !== 1) continue;
       const other = matchingLifecycles[0]!;
       if (!current.overlaps.has(other.lifecycleId) || canonicalJson(other.targetSnapshot) !== canonicalJson(current.targetSnapshot) || second.worktreeId === current.worktreeId || second.agentId === current.agentId) continue;
       const firstEvidences = sufficientEvidence.get(first.eventId) ?? [];

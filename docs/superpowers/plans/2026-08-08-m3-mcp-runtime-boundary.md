@@ -4,9 +4,9 @@
 
 **Goal:** Add an in-process MCP adapter that durably records `tool.requested` before execution and `tool.completed` after execution through the existing protocol and SQLite store.
 
-**Architecture:** Create a new `@patchmesh/adapters` package containing the MCP-specific `McpProxy`. It accepts per-call metadata, an injected executor, and an event appender satisfied by `SqliteEventStore`; it has no detector, policy, transport, effect-observation, or graph responsibilities. Request persistence is fail-closed, while post-execution persistence failures identify that execution already occurred.
+**Architecture:** Create a new `patchmesh-adapters` package containing the MCP-specific `McpProxy`. It accepts per-call metadata, an injected executor, and an event appender satisfied by `SqliteEventStore`; it has no detector, policy, transport, effect-observation, or graph responsibilities. Request persistence is fail-closed, while post-execution persistence failures identify that execution already occurred.
 
-**Tech Stack:** Strict TypeScript, pnpm workspace, Node `node:test` through `tsx`, `@patchmesh/protocol`, `@patchmesh/storage`, Node `crypto.randomUUID`, and temporary SQLite databases.
+**Tech Stack:** Strict TypeScript, pnpm workspace, Node `node:test` through `tsx`, `patchmesh-protocol`, `patchmesh-storage`, Node `crypto.randomUUID`, and temporary SQLite databases.
 
 ## Global Constraints
 
@@ -20,7 +20,7 @@
 - Do not persist tool output, raw error messages, credentials, environment values, or hidden model reasoning.
 - Treat completion persistence failure as post-execution storage failure; never claim execution was rolled back or skipped.
 - Keep the adapter report-only and allow-only; do not emit findings, decisions, directives, graph projections, or detector output.
-- Keep `@patchmesh/adapters` dependent only on `@patchmesh/protocol` and `@patchmesh/storage`; do not add transport or runtime-framework dependencies.
+- Keep `patchmesh-adapters` dependent only on `patchmesh-protocol` and `patchmesh-storage`; do not add transport or runtime-framework dependencies.
 - Use strict TypeScript with no `any`; preserve `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess` compatibility.
 - Run focused adapter tests, adapter typecheck/build, the full workspace test/typecheck/build suites, the Phase 0 validator and suite, and `git diff --check` before declaring M3 complete.
 
@@ -53,7 +53,7 @@ The following names and signatures are fixed for the plan:
 ```ts
 import type {
   AppendResult,
-} from "@patchmesh/storage";
+} from "patchmesh-storage";
 import type {
   CorrelationId,
   EventId,
@@ -65,7 +65,7 @@ import type {
   ToolName,
   WorkspaceId,
   WorktreeId,
-} from "@patchmesh/protocol";
+} from "patchmesh-protocol";
 
 export interface McpToolCall {
   readonly toolName: ToolName;
@@ -165,7 +165,7 @@ identifies the already-observed result.
 
 **Interfaces:**
 
-- Consumes: existing workspace compiler settings, `@patchmesh/protocol` identities/types, and `@patchmesh/storage` append types.
+- Consumes: existing workspace compiler settings, `patchmesh-protocol` identities/types, and `patchmesh-storage` append types.
 - Produces: the fixed public contracts above and a constructible `McpProxy` shell for Tasks 2 and 3.
 
 - [ ] **Step 1: Write the public-contract compile test**
@@ -224,7 +224,7 @@ replace it with a real typed fake as soon as the implementation exists. Do not u
 
 - [ ] **Step 2: Add package metadata and compiler configuration**
 
-Create `packages/adapters/package.json` with package name `@patchmesh/adapters`,
+Create `packages/adapters/package.json` with package name `patchmesh-adapters`,
 version `0.1.0`, private package metadata, ESM mode, `dist` exports, and these
 scripts:
 
@@ -238,7 +238,7 @@ scripts:
 }
 ```
 
-Declare `@patchmesh/protocol` and `@patchmesh/storage` as `workspace:*` dependencies.
+Declare `patchmesh-protocol` and `patchmesh-storage` as `workspace:*` dependencies.
 Extend `../../tsconfig.base.json`, use `src` as `rootDir`, emit declarations and source
 maps to `dist`, and exclude `dist` and tests from production output.
 
@@ -266,9 +266,9 @@ from `execute` until Task 2 replaces it. Export all public types, `McpProxy`, an
 Build the dependency packages first, then run:
 
 ```text
-corepack pnpm --filter @patchmesh/protocol build
-corepack pnpm --filter @patchmesh/storage build
-corepack pnpm --filter @patchmesh/adapters typecheck
+corepack pnpm --filter patchmesh-protocol build
+corepack pnpm --filter patchmesh-storage build
+corepack pnpm --filter patchmesh-adapters typecheck
 ```
 
 Expected: the new package typechecks; the contract test is still expected to fail at
@@ -292,7 +292,7 @@ git commit -m "feat: bootstrap MCP adapter package"
 
 **Interfaces:**
 
-- Consumes: `McpToolCall`, `McpCallContext`, `ToolExecutor`, `EventAppender`, and `McpProxyOptions` from Task 1; `parseEvent` and event types from `@patchmesh/protocol`.
+- Consumes: `McpToolCall`, `McpCallContext`, `ToolExecutor`, `EventAppender`, and `McpProxyOptions` from Task 1; `parseEvent` and event types from `patchmesh-protocol`.
 - Produces: a working `McpProxy.execute` happy path that appends validated request and completion events and returns both event IDs.
 
 - [ ] **Step 1: Replace the compile stub with a successful SQLite integration test**
@@ -327,7 +327,7 @@ exit code `0`, and `effectEventIds: []`.
 Run:
 
 ```text
-corepack pnpm --filter @patchmesh/adapters test
+corepack pnpm --filter patchmesh-adapters test
 ```
 
 Expected: FAIL because `execute` still throws its shell error.
@@ -374,8 +374,8 @@ introduce policy checks or directives between append and execution.
 - [ ] **Step 5: Run the happy-path test and typecheck**
 
 ```text
-corepack pnpm --filter @patchmesh/adapters test
-corepack pnpm --filter @patchmesh/adapters typecheck
+corepack pnpm --filter patchmesh-adapters test
+corepack pnpm --filter patchmesh-adapters typecheck
 ```
 
 Expected: the temporary-SQLite happy-path test passes and the package typecheck passes.
@@ -444,7 +444,7 @@ object nor its message in either stored event.
 Run:
 
 ```text
-corepack pnpm --filter @patchmesh/adapters test
+corepack pnpm --filter patchmesh-adapters test
 ```
 
 Expected: FAIL until result normalization and exception handling are implemented.
@@ -506,8 +506,8 @@ Do not assert or log raw error messages from the fake store.
 - [ ] **Step 6: Run focused tests and typecheck**
 
 ```text
-corepack pnpm --filter @patchmesh/adapters test
-corepack pnpm --filter @patchmesh/adapters typecheck
+corepack pnpm --filter patchmesh-adapters test
+corepack pnpm --filter patchmesh-adapters typecheck
 ```
 
 Expected: all success, failure, interruption, request-failure, completion-failure,
@@ -557,7 +557,7 @@ Add tests that assert:
 Use explicit assertions over snapshots. Run:
 
 ```text
-corepack pnpm --filter @patchmesh/adapters test
+corepack pnpm --filter patchmesh-adapters test
 ```
 
 Expected: all M3 adapter tests pass.
@@ -624,9 +624,9 @@ git commit -m "docs: record M3 MCP boundary evidence"
 - [ ] **Step 1: Run focused adapter verification**
 
 ```text
-corepack pnpm --filter @patchmesh/adapters test
-corepack pnpm --filter @patchmesh/adapters typecheck
-corepack pnpm --filter @patchmesh/adapters build
+corepack pnpm --filter patchmesh-adapters test
+corepack pnpm --filter patchmesh-adapters typecheck
+corepack pnpm --filter patchmesh-adapters build
 ```
 
 Expected: all adapter tests pass and package typecheck/build complete without errors.

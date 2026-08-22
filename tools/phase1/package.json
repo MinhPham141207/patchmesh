@@ -9,10 +9,10 @@
     "test": "tsx --test \"*.test.ts\""
   },
   "dependencies": {
-    "@patchmesh/adapters": "workspace:*",
-    "@patchmesh/core": "workspace:*",
-    "@patchmesh/observation": "workspace:*",
-    "@patchmesh/protocol": "workspace:*",
-    "@patchmesh/storage": "workspace:*"
+    "patchmesh-adapters": "workspace:*",
+    "patchmesh-core": "workspace:*",
+    "patchmesh-observation": "workspace:*",
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-storage": "workspace:*"
   }
 }
