@@ -1,5 +1,11 @@
 import type { ProtocolEvent } from "@patchmesh/protocol";
-import { logicalPathFor, resolveRepositoryIdentity, resourceIdForPath } from "@patchmesh/recorder";
+import {
+  logicalPathFor,
+  readInFlightCalls,
+  resolveRepositoryIdentity,
+  resourceIdForPath,
+  type InFlightCall,
+} from "@patchmesh/recorder";
 import { SqliteEventStore } from "@patchmesh/storage";
 
 /** One recorded call, reduced to what another agent needs in order to decide something. */
@@ -42,6 +48,12 @@ export interface RecallOptions {
 
 export interface RecallResult {
   readonly calls: readonly RecalledCall[];
+  /**
+   * Calls that have started and not reported back, read live from the journal.
+   *
+   * The ledger cannot answer this: ingest runs on Stop, so anything it holds has finished.
+   */
+  readonly inFlight: readonly InFlightCall[];
   /** Observed file changes in the same window. Empty until a turn has been observed. */
   readonly changes: readonly RecalledChange[];
   /** Changes that matched but were not returned. */
@@ -67,6 +79,8 @@ const DEFAULT_WITHIN_MINUTES = 240;
  * Stated on every answer: the ledger records which file was touched and whether its contents
  * differ, never what the difference means. Two agents changing one file may be collaborating.
  */
+const NEWLINE = "\n";
+
 const CAVEAT =
   "\nThis is a record of what happened, not a judgement. Same file does not mean same work.";
 
@@ -98,7 +112,15 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
   // everything. Silently widening "what happened to this file" into "what happened anywhere"
   // would hand back an answer to a question the caller did not ask.
   if (pathRequested && requestedPath === null) {
-    return { calls: [], changes: [], truncated: 0, truncatedChanges: 0, logicalPath: null, agents: [] };
+    return {
+      calls: [],
+      changes: [],
+      inFlight: [],
+      truncated: 0,
+      truncatedChanges: 0,
+      logicalPath: null,
+      agents: [],
+    };
   }
 
   const store = SqliteEventStore.open(options.ledgerPath);
@@ -168,9 +190,23 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
   matched.sort((left, right) => right.at.localeCompare(left.at));
   const calls = matched.slice(0, limit);
 
+  // Read live rather than from the ledger, and never fatal: an unreadable journal means the
+  // in-flight view is empty, not that the answer failed.
+  let inFlight: readonly InFlightCall[] = [];
+  try {
+    inFlight = readInFlightCalls({
+      worktreeRoot: options.worktreeRoot,
+      now: () => now,
+      excludeAgentId: options.excludeAgentId,
+    });
+  } catch {
+    inFlight = [];
+  }
+
   return {
     calls,
     changes,
+    inFlight,
     truncated: matched.length - calls.length,
     truncatedChanges: matchedChanges.length - changes.length,
     logicalPath: requestedPath,
@@ -187,6 +223,17 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
         ? `\`${requestedPath}\` (outside this repository, so nothing is recorded for it)`
         : "this repository";
 
+  const inFlightLines = result.inFlight.map((call) => {
+    const seconds = Math.round(call.runningForMs / 1000);
+    const what = call.operation === null ? call.hostToolName : `${call.hostToolName}: ${call.operation}`;
+    return `- ${call.agentId ?? "unattributed"} ${what} (running ${seconds}s)`;
+  });
+  // Deliberately first: work still in flight decides more than work already finished.
+  const inFlightSection =
+    result.inFlight.length === 0
+      ? ""
+      : `${result.inFlight.length} call(s) running right now:${NEWLINE}${inFlightLines.join(NEWLINE)}${NEWLINE}${NEWLINE}`;
+
   const changeLines = result.changes.map((change) => {
     const who = change.agentId ?? "unattributed";
     const task = change.taskId === null ? "no task" : change.taskId;
@@ -202,8 +249,9 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
     // A file written by a shell command is named by no tool argument, so changes can be the
     // only thing that answers a file-scoped question.
     if (result.changes.length > 0) {
-      return `No recorded tool call named ${scope}, but the filesystem shows it changed.${changeSection}${CAVEAT}`;
+      return `${inFlightSection}No recorded tool call named ${scope}, but the filesystem shows it changed.${changeSection}${CAVEAT}`;
     }
+    if (result.inFlight.length > 0) return `${inFlightSection}No completed activity recorded for ${scope}.${CAVEAT}`;
     return `No recorded agent activity for ${scope}.`;
   }
 
@@ -216,5 +264,5 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
   const header = `${result.calls.length} recorded call(s) for ${scope}, across ${result.agents.length} agent(s), most recent first:`;
   const footer =
     result.truncated > 0 ? `\n(${result.truncated} older matching call(s) not shown.)` : "";
-  return `${header}\n${lines.join("\n")}${footer}${changeSection}${CAVEAT}`;
+  return `${inFlightSection}${header}\n${lines.join("\n")}${footer}${changeSection}${CAVEAT}`;
 }

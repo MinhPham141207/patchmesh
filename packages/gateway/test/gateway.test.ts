@@ -212,3 +212,35 @@ test("a file written by a shell command is answerable from observed changes", as
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("recall reports work still running, which the ledger can never hold", async () => {
+  // Ingest runs on Stop, so anything in the ledger has finished. In-flight state exists only
+  // in the journal, and this is the collision guard the ledger could not provide.
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-gateway-inflight-"));
+  try {
+    mkdirSync(join(root, ".git"));
+    const journalPath = journalPathFor(root, ".patchmesh");
+    const ledgerPath = join(root, ".patchmesh", "ledger.db");
+    const at = "2026-08-21T12:00:00.000Z";
+
+    appendJournalEntry(journalPath, { session_id: SESSION, hook_event_name: "UserPromptSubmit" }, at);
+    appendJournalEntry(
+      journalPath,
+      { session_id: SESSION, hook_event_name: "PreToolUse", tool_use_id: "call_live", tool_name: "Bash", tool_input: { command: "pnpm check" } },
+      "2026-08-21T12:04:30.000Z",
+    );
+    ingestJournal({ worktreeRoot: root, journalPath, ledgerPath, now: NOW });
+
+    const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, now: NOW });
+    assert.equal(result.inFlight.length, 1, "the running call survives the drain");
+    assert.equal(result.inFlight[0]!.operation, "pnpm check");
+    assert.equal(result.inFlight[0]!.runningForMs, 30_000);
+
+    const rendered = renderRecall(result, undefined);
+    // Deliberately first: work still in flight decides more than work already finished.
+    assert.match(rendered, /^1 call\(s\) running right now:/u);
+    assert.match(rendered, /pnpm check \(running 30s\)/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -17,6 +17,13 @@
 
 const TURN_HOOK_EVENT = "UserPromptSubmit";
 
+/**
+ * The hook that reports a call is starting. It is journalled for the live in-flight view and
+ * is not a record of work done, so ingest must skip it: the same call arrives again as
+ * `PostToolUse`, and recording both would double every call in the ledger.
+ */
+const START_HOOK_EVENT = "PreToolUse";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -29,6 +36,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function isTurnMarker(payload: unknown): boolean {
   return isRecord(payload) && payload["hook_event_name"] === TURN_HOOK_EVENT;
+}
+
+/** Whether this entry announces a call rather than reporting one. See `readInFlightCalls`. */
+export function isCallStart(payload: unknown): boolean {
+  return isRecord(payload) && payload["hook_event_name"] === START_HOOK_EVENT;
 }
 
 export interface TurnFields {

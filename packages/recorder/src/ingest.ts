@@ -15,8 +15,9 @@ import type { AgentId } from "@patchmesh/protocol";
 import { observeTurnEffects } from "./effects.js";
 import { buildHookEvents, type HookPayload } from "./hook.js";
 import { agentIdForSession, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
-import { parseJournalLine } from "./journal.js";
-import { isTurnMarker, turnFieldsOf } from "./turn.js";
+import { ABANDONED_AFTER_MS } from "./inflight.js";
+import { appendJournalEntry, parseJournalLine, type JournalEntry } from "./journal.js";
+import { isCallStart, isTurnMarker, turnFieldsOf } from "./turn.js";
 
 export interface IngestResult {
   readonly ingested: number;
@@ -37,6 +38,11 @@ export interface IngestJournalOptions {
   readonly worktreeRoot: string;
   readonly journalPath: string;
   readonly ledgerPath: string;
+  /**
+   * Clock used to decide which unfinished calls are still worth carrying forward. Only tests
+   * supply it; a real drain reads the wall clock.
+   */
+  readonly now?: (() => Date) | undefined;
 }
 
 /** Suffix marking a journal that some ingest has taken responsibility for draining. */
@@ -77,6 +83,10 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   // in the journal and each one's marker must only claim its own calls. It spans claims so an
   // adopted journal does not lose the turn a crashed run had already opened.
   const turnTasks = new Map<string, TaskId | null>();
+  // A call that is still running when another session drains the shared journal must survive
+  // that drain. Without this, one agent's Stop erases the very in-flight work a second agent
+  // needs to see, which is precisely when a collision guard has to work.
+  const unfinished = new Map<string, JournalEntry>();
 
   mkdirSync(dirname(ledgerPath), { recursive: true });
   // Opening the store happens inside the claims' lifetime: a locked or corrupt ledger throws
@@ -84,7 +94,7 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   const store = SqliteEventStore.open(ledgerPath);
   try {
     for (const claimedPath of claimedPaths) {
-      const drained = drainClaim({ claimedPath, store, worktreeRoot, unprocessed, turnTasks });
+      const drained = drainClaim({ claimedPath, store, worktreeRoot, unprocessed, turnTasks, unfinished });
       ingested += drained.ingested;
       skipped += drained.skipped;
       turns += drained.turns;
@@ -97,6 +107,7 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
     writeFileSync(`${claimedPaths[0]!}.rejected`, `${unprocessed.join("\n")}\n`, "utf8");
   }
   for (const claimedPath of claimedPaths) rmSync(claimedPath, { force: true });
+  carryForward(journalPath, unfinished, (options.now ?? (() => new Date()))());
 
   return { ingested, skipped, turns, closedTurn: soleTurnOf(turnTasks), ledgerPath };
 }
@@ -173,10 +184,12 @@ interface DrainClaimOptions {
   readonly unprocessed: string[];
   /** Session id to the task its most recent turn opened. Mutated as markers are replayed. */
   readonly turnTasks: Map<string, TaskId | null>;
+  /** Starts seen with no completion yet, carried back to the live journal after the drain. */
+  readonly unfinished: Map<string, JournalEntry>;
 }
 
 function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: number; turns: number } {
-  const { claimedPath, store, worktreeRoot, unprocessed, turnTasks } = options;
+  const { claimedPath, store, worktreeRoot, unprocessed, turnTasks, unfinished } = options;
   let lines: string[];
   try {
     lines = readFileSync(claimedPath, "utf8").split("\n");
@@ -194,6 +207,18 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
       skipped += 1;
       continue;
     }
+    // A start is the live in-flight signal, not a record of work done. The same call arrives
+    // again as PostToolUse, so recording both would double every call in the ledger. It is
+    // remembered rather than dropped: a start whose completion never arrived belongs to a call
+    // still running, and draining the journal must not make it disappear.
+    if (isCallStart(entry.payload)) {
+      const callId = callIdOf(entry.payload);
+      if (callId !== null) unfinished.set(callId, entry);
+      continue;
+    }
+    const completedCallId = callIdOf(entry.payload);
+    if (completedCallId !== null) unfinished.delete(completedCallId);
+
     // A turn boundary is state, not a call. It carries no tool, so building events from it
     // would raise and file a well-formed entry as unrepresentable.
     if (isTurnMarker(entry.payload)) {
@@ -223,6 +248,32 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
     }
   }
   return { ingested, skipped, turns };
+}
+
+/**
+ * Return still-running starts to the live journal.
+ *
+ * Entries older than the abandoned cutoff are left behind: a session killed mid-call would
+ * otherwise be carried forever, growing the journal and making a dead call look live.
+ */
+function carryForward(journalPath: string, unfinished: ReadonlyMap<string, JournalEntry>, now: Date): void {
+  const oldest = now.getTime() - ABANDONED_AFTER_MS;
+  for (const entry of unfinished.values()) {
+    if (new Date(entry.at).getTime() < oldest) continue;
+    try {
+      appendJournalEntry(journalPath, entry.payload, entry.at);
+    } catch {
+      // The in-flight view loses one entry. Never worth failing an ingest that already
+      // succeeded in draining real work.
+    }
+  }
+}
+
+/** The host's own identifier for one call, which is what pairs a start with its completion. */
+function callIdOf(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>)["tool_use_id"];
+  return typeof value === "string" && value !== "" ? value : null;
 }
 
 /** Which session produced one journalled call, so its turn can be found. */

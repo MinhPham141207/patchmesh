@@ -44,6 +44,8 @@ export {
 } from "./record.js";
 export type { RecordHookOptions, RecordHookResult } from "./record.js";
 export { isRecognizedHostTool, normalizeTool } from "./tool-mapping.js";
-export { isTurnMarker, turnFieldsOf } from "./turn.js";
+export { isCallStart, isTurnMarker, turnFieldsOf } from "./turn.js";
 export type { TurnFields } from "./turn.js";
 export type { NormalizedTool } from "./tool-mapping.js";
+export { readInFlightCalls } from "./inflight.js";
+export type { InFlightCall, ReadInFlightOptions } from "./inflight.js";
