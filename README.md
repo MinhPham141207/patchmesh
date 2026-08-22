@@ -32,6 +32,29 @@ PatchMesh focuses on this question:
 
 > When has concurrent work stopped being independent?
 
+## Quick start
+
+```bash
+pnpm install && pnpm build
+node apps/cli/dist/main.js init
+```
+
+`init` merges the recorder's host hooks into `.claude/settings.local.json`, registers the
+`patchmesh` MCP server in `.mcp.json`, and adds `.patchmesh/` to `.gitignore`. It is additive
+and idempotent: hooks belonging to other tools are never modified, and re-running reports what
+is already configured rather than appending a second copy. Restart the agent session so it
+loads the hooks.
+
+Then work normally. Afterwards:
+
+```bash
+node apps/cli/dist/main.js events   --database .patchmesh/ledger.db
+node apps/cli/dist/main.js overlaps --database .patchmesh/ledger.db
+```
+
+Agents get the same ledger back over MCP as `patchmesh_recent_activity`,
+`patchmesh_overlapping_work`, and `patchmesh_recap`.
+
 ## Current Phase 1 slice
 
 The current implementation provides:

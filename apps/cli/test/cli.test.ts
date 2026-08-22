@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { EventId, ProtocolEvent } from "@patchmesh/protocol";
 import type { ReadServices, StatusView } from "@patchmesh/query";
 import type { WorkGraphSnapshot } from "@patchmesh/storage";
 import { runCli } from "../src/main.js";
+import { initializeRepository, renderInit } from "../src/init.js";
 
 const status: StatusView = {
   health: "degraded",
@@ -18,6 +22,27 @@ const status: StatusView = {
 };
 
 const emptyGraph: WorkGraphSnapshot = { nodes: [], edges: [], coverage: [] };
+// Files were observed changing but none was shared: "nothing contested" rather than the
+// distinct answer "nothing was seen, so nothing can be assessed".
+const emptyOverlaps = () => ({ overlaps: [], truncated: 0, logicalPath: null, filesObserved: 3 });
+/** A worktree root and a reader, so `overlaps` never needs a real checkout under test. */
+const overlapDeps = { worktreeRoot: "/repo", readOverlaps: emptyOverlaps };
+/**
+ * Status reporting that every detector's inputs were recorded.
+ *
+ * `stale` and `contracts` now decline to answer when the evidence they are typed against was
+ * never recorded, so a test about findings has to say the evidence exists or it will be
+ * testing the refusal instead.
+ */
+const evidenceRecorded = {
+  ...status,
+  eventTypeCounts: {
+    "file.read": 1,
+    "write.dependent": 1,
+    "symbol.changed": 1,
+    "dependency.changed": 1,
+  } as unknown as StatusView["eventTypeCounts"],
+};
 const services = {
   getStatus: () => status,
   listAgents: () => ({ agents: [] }),
@@ -79,6 +104,7 @@ test("every detector finding type is reachable from a CLI command", async () => 
   const requested: string[] = [];
   const recordingServices = {
     ...services,
+    getStatus: () => evidenceRecorded,
     listFindings: (filters: { readonly findingType: string }) => {
       requested.push(filters.findingType);
       return { findings: [], coverageWarnings: [] };
@@ -86,14 +112,14 @@ test("every detector finding type is reachable from a CLI command", async () => 
   } as unknown as ReadServices;
 
   for (const command of ["overlaps", "stale", "contracts"]) {
-    const result = await runCli([command], { services: recordingServices });
+    const result = await runCli([command], { services: recordingServices, ...overlapDeps });
     assert.equal(result.exitCode, 0, `${command} should succeed`);
   }
 
-  // The three detector finding types must each have a command; a detector whose
-  // output no command surfaces is unreachable coordination output.
+  // Every detector's output must still be reachable from some command; output no command
+  // surfaces is unreachable coordination output. `overlaps` is no longer one of them - it is
+  // answered from observed file changes rather than from a derived finding.
   assert.deepEqual(requested, [
-    "same_symbol_overlap",
     "stale_read_before_write",
     "exported_contract_invalidation",
   ]);
@@ -143,6 +169,7 @@ test("write commands keep machine output unchanged under --json", async () => {
 test("findings commands surface coverage warnings alongside an empty result", async () => {
   const degradedServices = {
     ...services,
+    getStatus: () => evidenceRecorded,
     listFindings: () => ({
       findings: [],
       coverageWarnings: [{ kind: "unverified", scope: "write.dependent" }],
@@ -184,13 +211,34 @@ test("events JSON renders one stable redacted page record", async () => {
   assert.deepEqual(JSON.parse(result.stdout).events[0], event);
 });
 
-test("overlaps and stale use public finding-list services", async () => {
-  const overlaps = await runCli(["overlaps"], dependencies);
-  const stale = await runCli(["stale", "--json"], dependencies);
+test("overlaps answers from observed changes, not from the work-graph projection", async () => {
+  // It used to read `same_symbol_overlap` findings. On a hook-recorded ledger that projection
+  // yields no overlaps at all, so the command a user runs was the one that could not answer.
+  let sawFindingsCall = false;
+  const watchedServices = {
+    ...services,
+    listFindings: () => {
+      sawFindingsCall = true;
+      return { findings: [], coverageWarnings: [] };
+    },
+  } as unknown as ReadServices;
+
+  const overlaps = await runCli(["overlaps"], { services: watchedServices, ...overlapDeps });
 
   assert.equal(overlaps.exitCode, 0);
-  assert.match(overlaps.stdout, /No findings/);
-  assert.deepEqual(JSON.parse(stale.stdout), { findings: [], coverageWarnings: [] });
+  assert.equal(sawFindingsCall, false, "overlaps must not go through the finding list");
+  assert.match(overlaps.stdout, /No two tasks changed the same file/);
+});
+
+test("a detector whose evidence was never recorded says so instead of reporting no findings", async () => {
+  // Silence and inability are different answers. The stub status has no event-type counts, so
+  // neither detector's inputs exist - which is exactly the state of a hook-recorded ledger.
+  for (const command of ["stale", "contracts"]) {
+    const result = await runCli([command], dependencies);
+    assert.equal(result.exitCode, 0, `${command} is report-only and must not fail`);
+    assert.match(result.stdout, /can be derived from this event store/);
+    assert.match(result.stdout, /Missing evidence:/);
+  }
 });
 
 test("explain requires an ID and renders a report-only decision", async () => {
@@ -271,4 +319,103 @@ test("delivery rejects missing, malformed, and unavailable writer inputs", async
   assert.equal(invalidState.exitCode, 2);
   assert.match(invalidState.stderr, /delivery state/i);
   assert.equal(unavailable.exitCode, 3);
+});
+
+test("init wires the recorder without disturbing another tool's hooks", () => {
+  // A repository is more likely to have hooks from other tools than to have none, so merging
+  // beside what is already there is the normal case. Clobbering one would be a worse failure
+  // than not installing at all, because it breaks something that was working.
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-"));
+  try {
+    mkdirSync(join(root, ".claude"));
+    writeFileSync(
+      join(root, ".claude", "settings.local.json"),
+      JSON.stringify({
+        permissions: { allow: ["Bash(ls)"] },
+        hooks: { PreToolUse: [{ matcher: ".*", hooks: [{ type: "command", command: "othertool hook" }] }] },
+      }),
+      "utf8",
+    );
+    writeFileSync(join(root, ".gitignore"), "node_modules/\n", "utf8");
+
+    const result = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg" });
+    assert.equal(result.steps.every((step) => step.outcome !== "skipped"), true);
+
+    const settings = JSON.parse(readFileSync(join(root, ".claude", "settings.local.json"), "utf8")) as {
+      permissions: unknown;
+      hooks: Record<string, readonly { hooks: readonly { command: string }[] }[]>;
+    };
+    assert.deepEqual(settings.permissions, { allow: ["Bash(ls)"] }, "unrelated settings survive");
+    const preToolUse = settings.hooks["PreToolUse"]!.flatMap((group) => group.hooks.map((hook) => hook.command));
+    assert.equal(preToolUse.includes("othertool hook"), true, "another tool's hook must survive");
+    assert.equal(preToolUse.some((command) => command.includes("recorder")), true);
+    // In-flight visibility, the record of work done, and the turn boundary that gives work a
+    // task all come from different host events; missing one silently degrades attribution.
+    for (const event of ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"]) {
+      assert.ok(settings.hooks[event], `${event} must be wired`);
+    }
+    assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\.patchmesh\/$/mu);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init run twice changes nothing the second time", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-"));
+  try {
+    initializeRepository({ worktreeRoot: root, packageRoot: "/pkg" });
+    const again = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg" });
+    assert.deepEqual(
+      again.steps.map((step) => step.outcome),
+      ["unchanged", "unchanged", "unchanged"],
+      "a configured repository reports itself configured rather than being rewritten",
+    );
+    assert.match(renderInit(again, false), /Already configured/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init respects opting out of hooks and gitignore", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-"));
+  try {
+    const result = initializeRepository({
+      worktreeRoot: root,
+      packageRoot: "/pkg",
+      installHooks: false,
+      updateGitignore: false,
+    });
+    assert.deepEqual(result.steps.map((step) => step.outcome), ["skipped", "skipped", "skipped"]);
+    assert.equal(existsSync(join(root, ".claude", "settings.local.json")), false);
+    assert.equal(existsSync(join(root, ".gitignore")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prune requires an explicit retention cutoff", async () => {
+  // Deleting history is not something to do because a flag was forgotten.
+  const result = await runCli(["prune"], { services, pruner: { prune: () => ({ removed: 0, retained: 0 }) } });
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /--older-than/);
+});
+
+test("prune reports what survived, not only what went", async () => {
+  let asked: Date | null = null;
+  const result = await runCli(["prune", "--older-than", "30"], {
+    services,
+    pruner: {
+      prune: (options: { readonly olderThan: Date }) => {
+        asked = options.olderThan;
+        return { removed: 7, retained: 93 };
+      },
+    },
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /Removed 7 event\(s\)/);
+  assert.match(result.stdout, /93 event\(s\) retained/);
+  assert.notEqual(asked, null);
+  // Thirty days back, not thirty days forward, and not "now".
+  assert.ok((asked as unknown as Date).getTime() < Date.now());
 });

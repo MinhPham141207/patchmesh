@@ -6,7 +6,9 @@
   "engines": {
     "node": ">=22.5.0"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "bin": {
     "patchmesh": "dist/main.js"
   },
@@ -17,7 +19,8 @@
   },
   "dependencies": {
     "@patchmesh/daemon": "workspace:*",
+    "@patchmesh/protocol": "workspace:*",
     "@patchmesh/query": "workspace:*",
-    "@patchmesh/protocol": "workspace:*"
+    "@patchmesh/recorder": "workspace:*"
   }
 }
