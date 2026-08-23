@@ -6,7 +6,8 @@
     "dist"
   ],
   "bin": {
-    "patchmesh-mcp": "dist/bin.js"
+    "patchmesh-mcp": "dist/bin.js",
+    "patchmesh-session-start": "dist/session-start-bin.js"
   },
   "exports": {
     ".": {

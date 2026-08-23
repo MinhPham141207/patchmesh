@@ -78,11 +78,34 @@ async function runTurn(repo: Repo, sessionId: string, at: string, write: () => v
     ledgerPath: repo.ledgerPath,
     snapshotPath: repo.snapshotPath,
     turn: drained.closedTurn,
+    // One clock for the whole fixture. Without this the calls carry the fixture's timestamps
+    // and the observed changes carry the wall clock, so "was this worker still active when
+    // that one wrote" compared two dates years apart and answered by accident.
+    now: () => at,
   });
   return drained.closedTurn?.taskId ?? null;
 }
 
-test("two tasks changing one file are reported as an overlap", async () => {
+/**
+ * Leave a session still working after somebody else has written.
+ *
+ * Contention means both workers were in flight, so a fixture that runs one session to
+ * completion and only then starts another is *sequence* and must not be reported. Every test
+ * below that wants a real overlap has to keep the first session making calls past the second
+ * session's write, because that is the thing being detected.
+ */
+async function keepWorking(repo: Repo, sessionId: string, at: string): Promise<void> {
+  const journalPath = journalPathFor(repo.root, ".patchmesh");
+  appendJournalEntry(journalPath, { session_id: sessionId, hook_event_name: "UserPromptSubmit" }, at);
+  appendJournalEntry(
+    journalPath,
+    { session_id: sessionId, tool_name: "Read", tool_input: { file_path: "shared.ts" }, tool_response: {} },
+    at,
+  );
+  ingestJournal({ worktreeRoot: repo.root, journalPath, ledgerPath: repo.ledgerPath });
+}
+
+test("two workers in flight over one file are reported as an overlap", async () => {
   const repo = repository();
   try {
     writeFileSync(join(repo.root, "shared.ts"), "original\n", "utf8");
@@ -93,6 +116,9 @@ test("two tasks changing one file are reported as an overlap", async () => {
     const second = await runTurn(repo, SECOND_SESSION, "2026-08-21T12:10:00.000Z", () => {
       writeFileSync(join(repo.root, "shared.ts"), "second task edit\n", "utf8");
     });
+    // The first session had not finished when the second wrote, which is what makes this
+    // contention rather than one session picking up where another left off.
+    await keepWorking(repo, FIRST_SESSION, "2026-08-21T12:15:00.000Z");
     assert.notEqual(first, second);
 
     const result = findOverlappingWork({ worktreeRoot: repo.root, ledgerPath: repo.ledgerPath, now: NOW });
@@ -100,10 +126,43 @@ test("two tasks changing one file are reported as an overlap", async () => {
     const overlap = result.overlaps[0]!;
     assert.equal(overlap.logicalPath, "shared.ts");
     assert.deepEqual(new Set(overlap.tasks.map((task) => task.taskId)), new Set([first, second]));
+    // The evidence for the claim, carried on the finding so a reader can check it.
+    assert.equal(overlap.contention.earlierWorkerLastActiveAt > overlap.contention.laterWriteAt, true);
 
     const rendered = renderOverlap(result, undefined);
-    assert.match(rendered, /changed by more than one task/u);
+    assert.match(rendered, /changed by two workers at once/u);
+    assert.match(rendered, /why: .* was still working at/u);
     assert.match(rendered, /not a judgement/u);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test("two workers writing one file in sequence is not contention", async () => {
+  // The distinction the command could not make until now. It reported every file two workers
+  // had touched inside whatever window the caller chose, so the answer was a function of the
+  // knob: against this repository's own ledger `--within 30` gave nothing, `--within 120` gave
+  // nine, and anything from eight hours out gave twenty and never moved again. Of those twenty,
+  // thirteen were workers who had each stopped before the next began.
+  const repo = repository();
+  try {
+    writeFileSync(join(repo.root, "shared.ts"), "original\n", "utf8");
+    await baseline(repo);
+    await runTurn(repo, FIRST_SESSION, "2026-08-21T12:00:00.000Z", () => {
+      writeFileSync(join(repo.root, "shared.ts"), "first task edit\n", "utf8");
+    });
+    // The first session never acts again: it had finished, and the second built on its work.
+    await runTurn(repo, SECOND_SESSION, "2026-08-21T12:10:00.000Z", () => {
+      writeFileSync(join(repo.root, "shared.ts"), "second task edit\n", "utf8");
+    });
+
+    const result = findOverlappingWork({ worktreeRoot: repo.root, ledgerPath: repo.ledgerPath, now: NOW });
+    assert.equal(result.overlaps.length, 0, "sequence is not contention");
+    // Counted and declared, not silently dropped: a reader who remembers this being reported
+    // needs to know it was reclassified rather than lost.
+    assert.equal(result.sequential, 1);
+    assert.equal(result.filesObserved, 1);
+    assert.match(renderOverlap(result, undefined), /in sequence, each finishing before the next began/u);
   } finally {
     rmSync(repo.root, { recursive: true, force: true });
   }
@@ -156,6 +215,9 @@ test("a file the repository ignores is not reported as contested work", async ()
       writeFileSync(join(repo.root, "cache", "state.db"), "more churn\n", "utf8");
       writeFileSync(join(repo.root, "real.ts"), "second\n", "utf8");
     });
+    // Real contention on both files, so the ignore filter is what decides the outcome rather
+    // than the contention rule quietly doing it first.
+    await keepWorking(repo, FIRST_SESSION, "2026-08-21T12:15:00.000Z");
 
     const result = findOverlappingWork({ worktreeRoot: repo.root, ledgerPath: repo.ledgerPath, now: NOW });
     assert.deepEqual(
@@ -196,6 +258,7 @@ test("a caller can ask only about overlaps its own task is part of", async () =>
     await runTurn(repo, SECOND_SESSION, "2026-08-21T12:10:00.000Z", () => {
       writeFileSync(join(repo.root, "shared.ts"), "second\n", "utf8");
     });
+    await keepWorking(repo, FIRST_SESSION, "2026-08-21T12:15:00.000Z");
 
     const mine = findOverlappingWork({
       worktreeRoot: repo.root,

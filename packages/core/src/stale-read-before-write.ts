@@ -10,6 +10,29 @@ import type {
 
 import type { DetectorFinding } from "./types.js";
 
+/**
+ * STRUCTURALLY UNREACHABLE from hook-recorded traffic. This is not unimplemented work.
+ *
+ * `detectStaleReadBeforeWrite` requires `DependentWriteEvidence` carrying
+ * `dependsOnReadEventId` and a `readTokenDigest` -- a write that explicitly declares which
+ * read it depended on. That contract was designed for the proxied `McpProxy` path, which has
+ * an authority model and can demand the declaration. Claude Code's hooks declare no such
+ * dependency, and deriving one would be exactly the requested-path inference M7 bans.
+ *
+ * The second blocker is independent and permanent: reads leave no trace. The write half of
+ * this problem was solved by observing the filesystem, but a write leaves a difference on
+ * disk and a read leaves nothing at all. Measured on a live ledger: 4 `read_file` calls
+ * carried a path, against 182 shell commands that read and carried none.
+ *
+ * So `patchmesh stale` cannot report findings from hook traffic, and no amount of
+ * implementation changes that. It correctly declines rather than lying, and it should stop
+ * being counted as remaining work. The useful question -- "this file changed after you last
+ * touched it" -- is a weaker, time-based reframing that belongs in the `PreToolUse` advisory
+ * rather than here. See docs/problems/PM-07.
+ *
+ * The detector is kept, not deleted: it is correct, it is tested, and it works on the proxied
+ * path it was written for.
+ */
 export interface ResourceReadEvidence {
   readonly eventId: EventId;
   readonly taskId: TaskId;

@@ -4,8 +4,10 @@ import { fileURLToPath } from "node:url";
 import { createDaemon, type PatchMeshDaemon } from "patchmesh-daemon";
 import {
   findOverlappingWork,
+  measureTimeToResume,
   ReadServiceError,
   recapRecentWork,
+  renderResumeMetrics,
   type OverlapOptions,
   type OverlapResult,
   type ReadServices,
@@ -137,6 +139,15 @@ async function renderCommand(
   if (parsed.command === "recap") {
     if (worktreeRoot === null) {
       throw new ReadServiceError("unavailable", "recap needs a git worktree; run it inside the repository the ledger describes");
+    }
+    if (parsed.recapMetrics) {
+      // Measured here rather than through `ReadServices` for the same reason as recap itself:
+      // it opens the store directly, and the work-graph projection cannot answer it.
+      const metrics = measureTimeToResume({
+        ledgerPath: parsed.databasePath ?? "",
+        ...(parsed.agentFilters.agentId === undefined ? {} : { agent: parsed.agentFilters.agentId }),
+      });
+      return parsed.json ? `${JSON.stringify(metrics)}\n` : `${renderResumeMetrics(metrics)}\n`;
     }
     // The same answer `patchmesh_recap` gives an agent, given to the person. It was reachable
     // only over MCP, which meant the surface the product leads with could not be run by the

@@ -90,16 +90,24 @@ function withCorrectedAttribution(events: readonly ProtocolEvent[]): readonly Pr
   });
 }
 
+/**
+ * Coverage as a proportion, not a verdict.
+ *
+ * The previous shape asked "is any scope degraded" and answered `degraded` forever, because
+ * on a hook-recorded ledger some scope always is. What a reader can act on is the ratio and
+ * whether it moves; what they cannot act on is a constant. `observational` is the honest name
+ * for "some scopes are seen, some are not, and that is the design".
+ */
 function aggregateCoverage(events: readonly ProtocolEvent[]): StatusView["coverage"] {
   const snapshot = projectWorkGraph(events).snapshot;
   const modes = sortedUnique(snapshot.coverage.flatMap((coverage) => coverage.modes));
   const gaps = snapshot.coverage.flatMap((coverage) => coverage.gaps);
+  const total = snapshot.coverage.length;
+  const covered = snapshot.coverage.filter((coverage) => coverage.gaps.length === 0).length;
   return {
-    presentation: snapshot.coverage.some((coverage) => coverage.presentation === "degraded")
-      ? "degraded"
-      : snapshot.coverage.some((coverage) => coverage.presentation === "sufficient")
-        ? "sufficient"
-        : "unknown",
+    presentation: total === 0 ? "unknown" : covered === total ? "sufficient" : "observational",
+    covered,
+    total,
     modes,
     gaps,
   };
@@ -199,7 +207,11 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
       }
       const coverage = aggregateCoverage(events);
       return {
-        health: coverage.presentation === "degraded" || replay.sourceSequenceGaps.length > 0 ? "degraded" : "healthy",
+        // Health is about the recorder, not about how much of the world it can see. A missing
+        // source sequence means events were lost, which is a fault; an opaque shell read means
+        // a read left no trace, which is Tuesday. Folding the second into the first is what
+        // made `status` disagree with `doctor` on every run. See docs/problems/PM-12.
+        health: replay.sourceSequenceGaps.length > 0 ? "degraded" : "healthy",
         store: { state: "open", replayable: true },
         eventCount: events.length,
         eventTypeCounts,
@@ -218,7 +230,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
         agentCount: 0,
         taskCount: 0,
         nullAttributionEventCount: 0,
-        coverage: { presentation: "unknown", modes: [], gaps: [] },
+        coverage: { presentation: "unknown", covered: 0, total: 0, modes: [], gaps: [] },
         errorCategory: errorCategory(error),
       };
     }

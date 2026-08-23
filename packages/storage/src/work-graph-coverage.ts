@@ -71,6 +71,7 @@ function toolCoverage(
   request: ToolRequestedEvent,
   completion: ToolCompletedEvent | undefined,
   eventsById: ReadonlyMap<EventId, ProtocolEvent>,
+  observedEffectsByCause: ReadonlyMap<EventId, readonly EventId[]>,
 ): ProjectionCoverage {
   const evidenceEventIds: EventId[] = [request.eventId];
   const gaps: ProjectionCoverageGap[] = [];
@@ -107,13 +108,38 @@ function toolCoverage(
     }
   }
 
-  if (request.payload.opaque) {
+  /**
+   * Effects bound to this call by observation rather than declared by it.
+   *
+   * A hook recorder cannot declare its effects. `tool.completed` is written when the call
+   * returns, and the filesystem is not diffed until the turn drains, so `effectEventIds` is
+   * always empty on this path -- the linkage runs the other way, from the `file.changed`
+   * event back to the completion it was bound to. `effects.ts` sets that `causationId` only
+   * when exactly one call's window covered the change (`soleCallCovering`), so a non-null
+   * causation *is* the deterministic binding, and there is no weaker case to distinguish.
+   */
+  const boundEffectEventIds = observedEffectsByCause.get(completion.eventId) ?? [];
+  evidenceEventIds.push(...boundEffectEventIds);
+
+  const effectsObserved = completion.payload.effectEventIds.length > 0 || boundEffectEventIds.length > 0;
+  const effectsBound = effectsObserved && gaps.length === 0;
+
+  // An opaque call whose effects were observed and bound is not a coverage gap.
+  //
+  // Opacity is a statement about *intent*: the ledger does not know what `sed -i` was trying
+  // to do. It is not a statement about effect, and once the filesystem observation binds the
+  // write to this call the effect is known exactly as well as an `Edit` call's is. Counting
+  // it as missing conflated the two and made a shell-first agent look unobserved while its
+  // every write was in fact recorded -- which is how `Coverage` came to read `degraded`
+  // permanently and stopped carrying information. See docs/problems/PM-08 and PM-12.
+  //
+  // An opaque call with no observed effect stays a gap, and honestly so: most shell commands
+  // are reads, a read leaves nothing on disk, and nothing here knows what it looked at.
+  if (request.payload.opaque && !effectsBound) {
     gaps.push(gap("opaque", `tool:${request.eventId}`, "opaque operation effects are not prospectively enumerable", [request.eventId]));
     modes.push("unknown");
-  } else if ((completion.payload.effectEventIds.length > 0 || observedReadEventIds.length > 0) && gaps.length === 0) {
+  } else if ((effectsObserved || observedReadEventIds.length > 0) && gaps.length === 0) {
     modes.push("verified");
-  } else if (completion.payload.effectEventIds.length === 0) {
-    modes.push("unknown");
   } else {
     modes.push("unknown");
   }
@@ -128,14 +154,22 @@ export function deriveProjectionCoverage(
 ): readonly ProjectionCoverage[] {
   const eventsById = new Map(events.map((event) => [event.eventId, event] as const));
   const completionsByRequest = new Map<EventId, ToolCompletedEvent>();
+  // Observed changes indexed by the completion they were bound to, which is the only direction
+  // the hook path can express: the change is written after the completion and points back at it.
+  const observedEffectsByCause = new Map<EventId, EventId[]>();
   for (const event of events) {
     if (event.eventType === "tool.completed") completionsByRequest.set(event.payload.requestEventId, event);
+    if ((event.eventType === "file.changed" || event.eventType === "symbol.changed") && event.causationId !== null) {
+      const bound = observedEffectsByCause.get(event.causationId);
+      if (bound === undefined) observedEffectsByCause.set(event.causationId, [event.eventId]);
+      else bound.push(event.eventId);
+    }
   }
 
   const coverage: ProjectionCoverage[] = [];
   for (const event of events) {
     if (event.eventType === "tool.requested") {
-      coverage.push(toolCoverage(event, completionsByRequest.get(event.eventId), eventsById));
+      coverage.push(toolCoverage(event, completionsByRequest.get(event.eventId), eventsById, observedEffectsByCause));
     }
     if (event.eventType === "file.changed" || event.eventType === "symbol.changed") {
       const attribution = effectiveAttribution(event, corrections);

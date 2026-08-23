@@ -59,8 +59,23 @@ export interface StatusView {
   readonly agentCount: number;
   readonly taskCount: number;
   readonly nullAttributionEventCount: number;
+  /**
+   * How much of the observed work carries evidence, as a count rather than a verdict.
+   *
+   * `presentation` deliberately does not say `degraded`. A hook-recorded ledger always has
+   * some scope it cannot see into -- shell reads leave nothing on disk, and a few changes are
+   * genuinely unattributable -- so a verdict keyed on "any gap at all" is `degraded` on day
+   * one and stays there, which is a word that has stopped meaning anything by the time a real
+   * problem needs it. `observational` names the permanent, correct, expected state; the
+   * numbers below are what actually moves. Health is reserved for faults `doctor` would fail
+   * on. See docs/problems/PM-12 and PM-08.
+   */
   readonly coverage: {
-    readonly presentation: ProjectionCoverage["presentation"];
+    readonly presentation: "sufficient" | "observational" | "unknown";
+    /** Coverage scopes carrying no gap. */
+    readonly covered: number;
+    /** Coverage scopes in total; `covered / total` is the rate worth watching over time. */
+    readonly total: number;
     readonly modes: readonly ProjectionCoverageMode[];
     readonly gaps: readonly ProjectionCoverageGap[];
   };

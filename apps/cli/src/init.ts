@@ -38,8 +38,12 @@ export interface InitResult {
   readonly steps: readonly InitStep[];
 }
 
+/** Which package owns a hook binary. The recorder writes; the gateway is the one that reads. */
+type HookPackage = "recorder" | "gateway";
+
 interface HookWiring {
   readonly event: string;
+  readonly package: HookPackage;
   readonly binary: string;
   readonly timeoutSeconds: number;
 }
@@ -50,13 +54,21 @@ interface HookWiring {
  * `PreToolUse` is what makes in-flight work visible; `PostToolUse` is the record of work done;
  * `UserPromptSubmit` is the turn boundary that gives ordinary work a task. Draining runs on
  * both `Stop` and `SessionEnd` because a session can end without stopping cleanly.
+ *
+ * `SessionStart` is the only one that reads. Every other hook here puts something into the
+ * ledger, which is why PatchMesh recorded thousands of events and answered eight questions:
+ * recall existed but nothing in an agent's loop ever chose to ask for it. Its timeout is the
+ * longest of the per-session hooks because it pays the schema-compilation cost the recorder's
+ * flat import graph avoids -- once, before the first prompt, rather than on every call. It
+ * fails open like the rest. See docs/problems/PM-01.
  */
 const HOOKS: readonly HookWiring[] = [
-  { event: "UserPromptSubmit", binary: "bin.js", timeoutSeconds: 10 },
-  { event: "PreToolUse", binary: "bin.js", timeoutSeconds: 10 },
-  { event: "PostToolUse", binary: "bin.js", timeoutSeconds: 10 },
-  { event: "Stop", binary: "ingest-bin.js", timeoutSeconds: 60 },
-  { event: "SessionEnd", binary: "ingest-bin.js", timeoutSeconds: 60 },
+  { event: "SessionStart", package: "gateway", binary: "session-start-bin.js", timeoutSeconds: 15 },
+  { event: "UserPromptSubmit", package: "recorder", binary: "bin.js", timeoutSeconds: 10 },
+  { event: "PreToolUse", package: "recorder", binary: "bin.js", timeoutSeconds: 10 },
+  { event: "PostToolUse", package: "recorder", binary: "bin.js", timeoutSeconds: 10 },
+  { event: "Stop", package: "recorder", binary: "ingest-bin.js", timeoutSeconds: 60 },
+  { event: "SessionEnd", package: "recorder", binary: "ingest-bin.js", timeoutSeconds: 60 },
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -109,10 +121,16 @@ type InstallKind = "dependency" | "global" | "checkout";
 
 interface Binaries {
   readonly kind: InstallKind;
-  /** Hook command for a recorder binary, already quoted for the host config. */
-  readonly hook: (binary: string) => string;
+  /** Hook command for a binary in one of the hook-owning packages, quoted for the host config. */
+  readonly hook: (owner: HookPackage, binary: string) => string;
   readonly server: { readonly command: string; readonly args: readonly string[] };
 }
+
+/** npm package name for a hook owner, used for both dependency paths and Node resolution. */
+const HOOK_PACKAGE_NAMES: Readonly<Record<HookPackage, string>> = {
+  recorder: "patchmesh-recorder",
+  gateway: "patchmesh-gateway",
+};
 
 /** Forward slashes even on Windows: these strings land in JSON other people read and commit. */
 function posix(path: string): string {
@@ -169,14 +187,14 @@ function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
   if (existsSync(dependencyRecorder)) {
     return {
       kind: "dependency",
-      hook: (binary) => `node "${posix(join("node_modules", "patchmesh-recorder", "dist", binary))}"`,
+      hook: (owner, binary) => `node "${posix(join("node_modules", HOOK_PACKAGE_NAMES[owner], "dist", binary))}"`,
       server: { command: "node", args: [posix(join("node_modules", "patchmesh-gateway", "dist", "bin.js"))] },
     };
   }
   if (existsSync(join(packageRoot, "packages", "recorder", "dist", "bin.js"))) {
     return {
       kind: "checkout",
-      hook: (binary) => `node "${join(packageRoot, "packages", "recorder", "dist", binary)}"`,
+      hook: (owner, binary) => `node "${join(packageRoot, "packages", owner, "dist", binary)}"`,
       server: { command: "node", args: [join(packageRoot, "packages", "gateway", "dist", "bin.js")] },
     };
   }
@@ -186,13 +204,22 @@ function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
   // shareable name that does nothing. The committable form is the dependency branch above.
   const recorderDist = siblingDist("patchmesh-recorder");
   const gatewayDist = siblingDist("patchmesh-gateway");
-  const bareFor = (binary: string) => (binary === "bin.js" ? "patchmesh-record" : "patchmesh-ingest");
+  const distFor = (owner: HookPackage) => (owner === "recorder" ? recorderDist : gatewayDist);
+  // The bin names each package publishes. A binary with no bare name here would silently
+  // resolve to the wrong command, so the map is exhaustive rather than defaulted.
+  const bareNames: Readonly<Record<string, string>> = {
+    "bin.js": "patchmesh-record",
+    "ingest-bin.js": "patchmesh-ingest",
+    "session-start-bin.js": "patchmesh-session-start",
+  };
   return {
     kind: "global",
-    hook: (binary) => {
-      const bare = bareFor(binary);
-      if (onPath(bare) || recorderDist === null) return bare;
-      return `node "${posix(join(recorderDist, binary))}"`;
+    hook: (owner, binary) => {
+      const bare = bareNames[binary];
+      const dist = distFor(owner);
+      if (bare !== undefined && onPath(bare)) return bare;
+      if (dist === null) return bare ?? binary;
+      return `node "${posix(join(dist, binary))}"`;
     },
     server: onPath("patchmesh-mcp") || gatewayDist === null
       ? { command: "patchmesh-mcp", args: [] }
@@ -259,11 +286,20 @@ export function resolveHookTarget(command: string, worktreeRoot: string): HookTa
   return onPath(bare) ? "ok" : "missing";
 }
 
+/**
+ * Every binary PatchMesh installs as a hook, in all the spellings `resolveBinaries` writes.
+ *
+ * A binary missing from this list is not recognised as ours, so a second `init` appends a
+ * duplicate hook rather than reporting "unchanged" -- which is the failure this list was
+ * introduced to fix. Add here whenever `HOOKS` gains an entry.
+ */
 const RECORDER_BINARIES = [
   "recorder/dist/bin.js",
   "recorder/dist/ingest-bin.js",
+  "gateway/dist/session-start-bin.js",
   "patchmesh-record",
   "patchmesh-ingest",
+  "patchmesh-session-start",
 ] as const;
 
 /**
@@ -305,7 +341,7 @@ function installHooks(worktreeRoot: string, binaries: Binaries, force: boolean):
 
   let changed = false;
   for (const wiring of HOOKS) {
-    const command = binaries.hook(wiring.binary);
+    const command = binaries.hook(wiring.package, wiring.binary);
     if (mergeHook(hooks, wiring, command, force)) changed = true;
   }
   if (!changed) return { outcome: "unchanged", detail: "Claude Code hooks already installed" };

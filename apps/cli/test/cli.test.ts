@@ -24,7 +24,7 @@ const status: StatusView = {
 const emptyGraph: WorkGraphSnapshot = { nodes: [], edges: [], coverage: [] };
 // Files were observed changing but none was shared: "nothing contested" rather than the
 // distinct answer "nothing was seen, so nothing can be assessed".
-const emptyOverlaps = () => ({ overlaps: [], truncated: 0, logicalPath: null, filesObserved: 3 });
+const emptyOverlaps = () => ({ overlaps: [], truncated: 0, logicalPath: null, filesObserved: 3, sequential: 0 });
 /** A worktree root and a reader, so `overlaps` never needs a real checkout under test. */
 const overlapDeps = { worktreeRoot: "/repo", readOverlaps: emptyOverlaps };
 /**
@@ -227,7 +227,7 @@ test("overlaps answers from observed changes, not from the work-graph projection
 
   assert.equal(overlaps.exitCode, 0);
   assert.equal(sawFindingsCall, false, "overlaps must not go through the finding list");
-  assert.match(overlaps.stdout, /No two tasks changed the same file/);
+  assert.match(overlaps.stdout, /No two workers changed the same file at once/);
 });
 
 test("a detector whose evidence was never recorded says so instead of reporting no findings", async () => {
@@ -362,6 +362,15 @@ test("init wires the recorder without disturbing another tool's hooks", () => {
     for (const event of ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"]) {
       assert.ok(settings.hooks[event], `${event} must be wired`);
     }
+    // The one hook that reads. Without it PatchMesh records thousands of events and answers
+    // nothing, because nothing in an agent's loop ever chooses to ask. See docs/problems/PM-01.
+    assert.ok(settings.hooks["SessionStart"], "SessionStart must be wired");
+    const sessionStart = settings.hooks["SessionStart"]!.flatMap((group) => group.hooks.map((hook) => hook.command));
+    assert.equal(
+      sessionStart.some((command) => /gateway\/dist\/session-start-bin\.js|patchmesh-session-start/u.test(command.replaceAll("\\", "/"))),
+      true,
+      "the read-side hook resolves to the gateway binary, in whichever form this install calls for",
+    );
     assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\.patchmesh\/$/mu);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -177,6 +177,15 @@ export interface RecordTurnEffectsOptions {
   readonly turn: { readonly agentId: AgentId | null; readonly taskId: TaskId | null } | null;
   /** Call windows from the drain that just ran, for matching changes to calls. */
   readonly calls?: readonly EffectAttributionCall[] | undefined;
+  /**
+   * Clock for the observed changes. Defaults to the real one, which is right in production.
+   *
+   * Exposed because `ingestJournal` already takes one and this did not, so a test that pinned
+   * its calls to a fixture clock still got its file changes stamped with the wall clock. The
+   * two clocks then disagreed by years, and any assertion about what happened before what was
+   * really an assertion about which line of the test ran first.
+   */
+  readonly now?: (() => string) | undefined;
 }
 
 export interface RecordTurnEffectsResult {
@@ -208,6 +217,7 @@ export async function recordTurnEffects(options: RecordTurnEffectsOptions): Prom
     agentId: options.turn?.agentId ?? null,
     taskId: options.turn?.taskId ?? null,
     calls: options.calls,
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
 
   if (events.length > 0) {
