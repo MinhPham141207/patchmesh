@@ -7,7 +7,21 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Both platforms, because each one's breakage is invisible from the other and this project
+    # has now been bitten in both directions. Development happens on Windows, so Windows-only
+    # regressions never reached a red build until CI existed; and a test written there asserted
+    # that `\tmp\x` and `/tmp/x` name one directory, which is true on Windows and false on
+    # POSIX, so the suite was green on the developer's machine and red on every push. A single
+    # runner cannot catch either class.
+    #
+    # Windows is also where the product's own hard bugs have been: a detached child that opens
+    # a browser tab it cannot raise, a symlinked global install whose entry-point guard
+    # compared argv[1] literally, and a filesystem walk whose stat cost blew the hook budget.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 

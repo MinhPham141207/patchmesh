@@ -166,11 +166,18 @@ test("one directory keeps one identity across path spellings", () => {
   try {
     const canonical = resolveRepositoryIdentity(root);
     const spellings = [
-      root.split("/").join("\\"),
       root.split("\\").join("/"),
       `${root}${root.includes("\\") ? "\\" : "/"}`,
       join(root, "packages", ".."),
     ];
+    // A backslash separates directories on Windows and is a legal *filename character* on
+    // POSIX, so `\tmp\x` is the same directory as `/tmp/x` on one platform and a different
+    // path entirely on the other. Asserting it everywhere made this test assert something
+    // false on Linux, which is where CI runs: the suite was green on the developer's machine
+    // and red on every push. Platform-shaped spellings belong behind a platform check.
+    if (process.platform === "win32") {
+      spellings.push(root.split("/").join("\\"));
+    }
     if (/^[A-Za-z]:/u.test(root)) {
       spellings.push(root[0]!.toLowerCase() + root.slice(1), root[0]!.toUpperCase() + root.slice(1));
     }
