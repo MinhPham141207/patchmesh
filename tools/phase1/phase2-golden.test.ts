@@ -198,9 +198,33 @@ test("sequential MCP calls across linked worktrees do not manufacture concurrenc
 
         const events = store.read();
         const graph = projectWorkGraph(events).snapshot;
-        assert.equal(producer.coverage?.presentation, "degraded", JSON.stringify(producer.coverage?.gaps));
-        assert.equal(consumer.coverage?.presentation, "degraded", JSON.stringify(consumer.coverage?.gaps));
-        assert.equal(graph.coverage.filter((coverage) => coverage.presentation === "degraded").length, 2);
+        // How completely the watcher observed the write is a property of the platform's
+        // filesystem notification API, not of this scenario. On Windows the watcher supplies
+        // only a directory candidate ("unchanged descendants were not content-hashed") and
+        // coverage degrades; on Linux inotify names the file, nothing is left unverified, and
+        // the same run is honestly `sufficient`. Pinning "degraded" asserted a Windows
+        // artifact, so this test passed on the developer's machine and failed on the Linux
+        // runner CI actually uses.
+        //
+        // What is asserted instead is the honesty rule that matters everywhere: a call
+        // reports `degraded` exactly when it has gaps to declare, and the projection's
+        // degraded coverage agrees with the calls. The claim this test is named for -- that
+        // sequential work in two worktrees manufactures no concurrency evidence -- is
+        // asserted below and holds on both platforms.
+        const calls = [producer, consumer];
+        for (const call of calls) {
+          const gaps = call.coverage?.gaps ?? [];
+          assert.equal(
+            call.coverage?.presentation,
+            gaps.length > 0 ? "degraded" : "sufficient",
+            JSON.stringify(gaps),
+          );
+        }
+        const degradedCalls = calls.filter((call) => call.coverage?.presentation === "degraded").length;
+        assert.equal(
+          graph.coverage.filter((coverage) => coverage.presentation === "degraded").length,
+          degradedCalls,
+        );
         assert.equal(events.filter((event) => event.eventType === "file.changed").length, 2);
         assert.equal(events.filter((event) => event.eventType === "symbol.changed").length, 2);
 
