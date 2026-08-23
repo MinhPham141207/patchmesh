@@ -142,6 +142,28 @@ function onPath(command: string): boolean {
     existsSync(join(entry, command)) || extensions.some((ext) => existsSync(join(entry, command + ext))));
 }
 
+/**
+ * Where a sibling package's `dist` actually landed, according to Node's own resolution.
+ *
+ * npm links the bins of the package you name and never its dependencies', so `npm install -g
+ * patchmesh` leaves `patchmesh-record` off the PATH while the code sits in the install
+ * directory the whole time. Node can find it; the earlier code guessed a bare name instead and
+ * wrote a config that recorded nothing and reported nothing.
+ *
+ * `import.meta.resolve` rather than `createRequire().resolve`: these packages are ESM with an
+ * `exports` map offering only the `import` condition, so CJS resolution refuses them outright
+ * with ERR_PACKAGE_PATH_NOT_EXPORTED. For the same reason the package's main entry is resolved
+ * and its directory taken, rather than asking for the `dist/bin.js` subpath the map does not
+ * expose.
+ */
+function siblingDist(specifier: string): string | null {
+  try {
+    return dirname(fileURLToPath(import.meta.resolve(specifier)));
+  } catch {
+    return null;
+  }
+}
+
 function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
   const dependencyRecorder = join(worktreeRoot, "node_modules", "patchmesh-recorder", "dist", "bin.js");
   if (existsSync(dependencyRecorder)) {
@@ -158,12 +180,23 @@ function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
       server: { command: "node", args: [join(packageRoot, "packages", "gateway", "dist", "bin.js")] },
     };
   }
-  // Nothing local resolves, so the install that put this CLI on the PATH put its siblings
-  // there too. Bare names are what `ownsCommand` already recognizes.
+  // A global install. Bare names are preferred when the siblings really are on the PATH,
+  // because that is the one form that also works for a teammate who installed the same way.
+  // When they are not, the resolved path is machine specific but actually runs, which beats a
+  // shareable name that does nothing. The committable form is the dependency branch above.
+  const recorderDist = siblingDist("patchmesh-recorder");
+  const gatewayDist = siblingDist("patchmesh-gateway");
+  const bareFor = (binary: string) => (binary === "bin.js" ? "patchmesh-record" : "patchmesh-ingest");
   return {
     kind: "global",
-    hook: (binary) => (binary === "bin.js" ? "patchmesh-record" : "patchmesh-ingest"),
-    server: { command: "patchmesh-mcp", args: [] },
+    hook: (binary) => {
+      const bare = bareFor(binary);
+      if (onPath(bare) || recorderDist === null) return bare;
+      return `node "${posix(join(recorderDist, binary))}"`;
+    },
+    server: onPath("patchmesh-mcp") || gatewayDist === null
+      ? { command: "patchmesh-mcp", args: [] }
+      : { command: "node", args: [posix(join(gatewayDist, "bin.js"))] },
   };
 }
 
@@ -297,11 +330,14 @@ export function initializeRepository(options: InitOptions): InitResult {
   // A global install that is missing its siblings produces a config that looks correct and
   // records nothing. Say so here, where the user is standing, rather than leaving them to
   // discover an empty ledger later.
-  if (binaries.kind === "global" && options.installHooks !== false && !onPath("patchmesh-record")) {
+  // Only when the recorder is neither on the PATH nor resolvable from this install. Anything
+  // else means a working command was written, whether bare or resolved.
+  if (binaries.kind === "global" && options.installHooks !== false
+    && !onPath("patchmesh-record") && siblingDist("patchmesh-recorder") === null) {
     steps.push({
       outcome: "warning",
-      detail: "patchmesh-record is not on PATH - hooks will record nothing."
-        + " Install the siblings: npm install -g patchmesh-recorder patchmesh-gateway",
+      detail: "patchmesh-record could not be found - hooks will record nothing."
+        + " Reinstall with: npm install -g patchmesh",
     });
   }
 
@@ -339,11 +375,11 @@ export function renderInit(result: InitResult, json: boolean): string {
     // agents running at once before it can say anything at all.
     "Next session, ask what the last one did:",
     "  the patchmesh_recap MCP tool, or",
-    "  patchmesh agents   --database .patchmesh/ledger.db",
+    "  patchmesh agents",
     "",
     "Then what it recorded:",
-    "  patchmesh events   --database .patchmesh/ledger.db",
-    "  patchmesh overlaps --database .patchmesh/ledger.db",
+    "  patchmesh events",
+    "  patchmesh overlaps",
     "",
   );
   return lines.join("\n");

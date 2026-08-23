@@ -523,8 +523,18 @@ Recommended check:
 
 **Roadmap placement:** Phase 1 - Observe and Replay. Available, read-only.
 
-Inspect the current rebuildable work-graph projection. This command is read-only;
+Explore the current rebuildable work-graph projection. This command is read-only;
 the append-only event log remains the source of truth.
+
+By default it serves the projection as a local page and opens it in a browser. Four days of
+work in one repository projects to around a thousand nodes and edges, two thirds of them
+content-hash versions - printed as text that is a data dump rather than an answer, so the
+terminal gets a link and the page gets the graph.
+
+The page is bound to `127.0.0.1` and never to a routable address: a ledger names every file an
+agent touched in a private repository. It re-reads the ledger on every request, so leaving the
+tab open across an agent session and reloading shows the new work. Press `Ctrl+C` to stop
+serving.
 
 ### Usage
 
@@ -538,20 +548,47 @@ patchmesh graph [options]
 --agent <id>      Limit the projection to one agent
 --task <id>       Limit the projection to one task
 --resource <id>   Limit the projection to one resource
---json            Print machine-readable output
+--port <n>        Bind this loopback port instead of an ephemeral one
+--no-open         Serve without launching a browser
+--print           Print the projection as text instead of serving it
+--json            Print machine-readable output instead of serving it
 ```
 
-### Example output
+### What the page shows
+
+- **A stat strip** - events, agents, tasks, files, changes, and the two numbers that matter
+  most on a hook-recorded ledger: how many files more than one agent changed, and how many
+  changes arrived with no attribution at all.
+- **Map** - agents on the left, the files they touched on the right, grouped by directory and
+  expandable. Solid links are changes, dashed links are reads, and link weight is the number
+  of events behind it. A file is shaded by how many times it changed and outlined when more
+  than one agent changed it. Changes with no attribution get a row of their own rather than
+  being dropped, so the lines add up to the count above them.
+- **Files** - the same data as a sortable table: path, changes, agents, tasks, last touched.
+- **A detail panel** - for the selected agent, task, directory or file. A file shows its full
+  change history: when, by whom, what kind of change, and the before and after content hashes
+  the version nodes carry.
+
+Selecting anything dims everything it did not touch. `/` focuses the filter, `Escape` clears
+the selection.
+
+### Terminal output
 
 ```text
-WORK GRAPH
+Work graph at http://127.0.0.1:52413
+Reading /repo/.patchmesh/ledger.db
 
-Coverage:           degraded
-Coverage gap:       opaque tool effects
+The page re-reads the ledger on reload. Press Ctrl+C to stop serving.
+```
 
-agent:agent-b
-  -> task:session-refresh
-     -> symbol:src/db/pool.ts::releaseConnection
+`--print` renders the projection as text instead, naming nodes by path:
+
+```text
+WORK GRAPH (2 agent, 215 resource, 41 task, 696 version; 1244 edge(s))
+
+agent   agent_7a1033a6-93c4-46e2-a83c-c471f26765c2
+resource        packages/query/src/services.ts
+version packages/query/src/services.ts@2e6f071c
 ```
 
 ---

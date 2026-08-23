@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LEDGER_DIRECTORY, ledgerPathFor } from "patchmesh-recorder";
@@ -18,10 +20,26 @@ export interface GatewayOptions {
  * CLI afterwards. It is read-only and advisory by construction: PatchMesh is report-only, so
  * nothing here can pause, reject, or redirect the caller.
  */
+/**
+ * The version this build actually is, read from the package manifest beside it.
+ *
+ * It was a literal, so the handshake kept announcing 0.1.0 to every client no matter which
+ * release was running. Falls back rather than throwing: an unreadable manifest is not a reason
+ * to refuse to serve, and "0.0.0" is visibly wrong in a way a stale real version is not.
+ */
+function serverVersion(): string {
+  try {
+    const manifest = fileURLToPath(new URL("../package.json", import.meta.url));
+    return (JSON.parse(readFileSync(manifest, "utf8")) as { version?: string }).version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
 export function createGatewayServer(options: GatewayOptions): McpServer {
   const ledgerPath = options.ledgerPath ?? ledgerPathFor(options.worktreeRoot);
   const measurementPath = measurementPathFor(options.worktreeRoot, LEDGER_DIRECTORY);
-  const server = new McpServer({ name: "patchmesh", version: "0.1.0" });
+  const server = new McpServer({ name: "patchmesh", version: serverVersion() });
 
   server.registerTool(
     "patchmesh_recent_activity",

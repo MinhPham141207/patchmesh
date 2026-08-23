@@ -12,6 +12,12 @@ export interface ParsedArgs {
   readonly agentFilters: AgentFilters;
   readonly eventQuery: EventListQuery;
   readonly graphFilters: GraphFilters;
+  /**
+   * How `graph` should answer. `site` serves the explorer and is the default, because a
+   * thousand rows of nodes and edges is a data dump rather than an answer; `text` and `json`
+   * stay reachable for a pipe.
+   */
+  readonly graphOutput: { readonly mode: "site" | "text" | "json"; readonly port: number | null; readonly open: boolean };
   readonly decisionId: DecisionId | null;
   /** How far back `overlaps` looks, in minutes. Null uses the query's own default. */
   readonly withinMinutes: number | null;
@@ -56,7 +62,8 @@ export function usageText(): string {
     "  agents                     Observed agents and their tasks",
     "  events                     Durable event page (--raw, --follow, --type, --since,",
     "                             --until, --limit, --cursor)",
-    "  graph                      Work-graph projection (--resource)",
+    "  graph                      Open the work-graph explorer in a browser (--resource,",
+    "                             --print, --port <n>, --no-open)",
     "  overlaps                   Files more than one worker changed (--resource, --within)",
     "  stale                      Stale-read-before-write findings (needs proxy-recorded",
     "                             read and dependent-write evidence)",
@@ -113,6 +120,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       agentFilters: {},
       eventQuery: {},
       graphFilters: {},
+      graphOutput: { mode: "site", port: null, open: true },
       decisionId: null,
       feedback: null,
       delivery: null,
@@ -131,6 +139,9 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let cursor: EventListQuery["cursor"];
   let resourceId: string | undefined;
   let withinMinutes: number | null = null;
+  let graphPrint = false;
+  let graphPort: number | null = null;
+  let graphOpen = true;
   let initHooks = true;
   let initGitignore = true;
   let initForce = false;
@@ -181,6 +192,15 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       continue;
     }
     if (option === "--resource" && (command === "graph" || command === "overlaps")) { resourceId = value(argv, index, option); index += 1; continue; }
+    if (option === "--print" && command === "graph") { graphPrint = true; continue; }
+    if (option === "--no-open" && command === "graph") { graphOpen = false; continue; }
+    if (option === "--port" && command === "graph") {
+      const port = Number(value(argv, index, option));
+      if (!Number.isInteger(port) || port < 0 || port > 65535) throw new ReadServiceError("usage", "--port takes a whole number between 0 and 65535");
+      graphPort = port;
+      index += 1;
+      continue;
+    }
     if (option === "--within" && command === "overlaps") {
       const minutes = Number(value(argv, index, option));
       if (!Number.isInteger(minutes) || minutes <= 0) throw new ReadServiceError("usage", "--within takes a positive whole number of minutes");
@@ -263,6 +283,11 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       ...(until === undefined ? {} : { until }),
       ...(limit === undefined ? {} : { limit }),
       ...(cursor === undefined ? {} : { cursor }),
+    },
+    graphOutput: {
+      mode: json ? "json" : graphPrint ? "text" : "site",
+      port: graphPort,
+      open: graphOpen,
     },
     graphFilters: {
       ...(agentId === undefined ? {} : { agentId }),

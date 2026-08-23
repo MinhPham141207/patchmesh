@@ -34,33 +34,22 @@ Check with `node --version`.
 ### Globally (recommended for personal use)
 
 ```bash
-npm install -g patchmesh patchmesh-recorder patchmesh-gateway
+npm install -g patchmesh
 ```
 
-> **Install all three.** `patchmesh` is the CLI you type; `patchmesh-recorder` provides the
-> hook binaries that do the recording; `patchmesh-gateway` provides the MCP server agents read
-> through. `npm install -g patchmesh` alone links only the CLI — the hooks would be configured
-> and silently record nothing, because a hook that cannot find its binary fails open and exits
-> 0. Verify with the command below rather than assuming.
-
-Verify all four commands resolve — this should print four paths:
-
-```bash
-command -v patchmesh patchmesh-record patchmesh-ingest patchmesh-mcp
-```
-
-If fewer than four appear, the missing binaries belong to a package that did not get installed.
+That is the whole install. The CLI carries the recorder and the MCP server as dependencies, and
+`patchmesh init` resolves them from wherever npm put them — so the hooks work even though npm
+links only the CLI's own binary onto your PATH.
 
 ### Per repository (recommended for teams)
 
 ```bash
-npm install -D patchmesh patchmesh-recorder patchmesh-gateway
+npm install -D patchmesh
 npx patchmesh init
 ```
 
-A dependency install lets `init` write **repository-relative** paths, which is the only form
-safe to commit — a global install writes bare binary names, which are correct only on machines
-that also installed globally.
+Prefer this if `.mcp.json` is committed. A dependency install lets `init` write
+**repository-relative** paths, which is the only form that resolves on a teammate's machine.
 
 ### From a clone
 
@@ -130,7 +119,7 @@ surface that pays off first, and it needs no concurrency at all.
 ```bash
 patchmesh status                  # store health, counts, observation coverage
 patchmesh events --limit 50       # durable event page (--type, --since, --follow, --raw)
-patchmesh graph                   # work-graph projection, by path
+patchmesh graph                   # open the work-graph explorer in a browser
 patchmesh overlaps                # files more than one worker changed (--within <minutes>)
 patchmesh explain <decision-id>   # full explanation for one decision
 ```

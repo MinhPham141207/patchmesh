@@ -469,6 +469,8 @@ test("a single coverage gap still names the scope that fell short", async () => 
 });
 
 test("graph names resources by path and nests versions under the file they belong to", async () => {
+  // `--print` because `graph` now serves the explorer by default; the text rendering it used
+  // to produce is still reachable for a pipe and still has to name paths rather than hashes.
   // The node carries `resource.locator`; printing `resource:res_<sha256>` discarded data the
   // projection already held and made the command 1,145 lines of indistinguishable hex.
   const snapshot = {
@@ -495,7 +497,7 @@ test("graph names resources by path and nests versions under the file they belon
     edges: [{ edgeId: "edge_1", kind: "changes", fromNodeId: null, toNodeId: "resource:res_abc", evidenceEventIds: [] }],
     coverage: [],
   } as unknown as WorkGraphSnapshot;
-  const result = await runCli(["graph"], {
+  const result = await runCli(["graph", "--print"], {
     ...overlapDeps,
     services: {
       ...services,
@@ -572,29 +574,37 @@ test("a report command on a repository with no ledger answers instead of failing
   }
 });
 
-test("a global install missing its sibling binaries is reported, not written silently", async () => {
+test("a global install writes a command that resolves even with nothing on PATH", async () => {
   // `npm install -g patchmesh` links this package's bin and nothing else: the recorder and the
-  // gateway are separate packages, so their bins never reach the PATH. The config written for
-  // that install is syntactically fine and completely inert -- hooks fail open and exit 0, so
-  // nothing is recorded and nothing says why. Verified against a real global install before
-  // this test existed.
+  // gateway are separate packages whose bins npm never links. The config written for that
+  // install used to name bare binaries that were not there -- syntactically fine and completely
+  // inert, because hooks fail open and exit 0. The code was present the whole time; only the
+  // PATH entry was missing, so resolution finds what a guessed name could not.
   const root = mkdtempSync(join(tmpdir(), "patchmesh-init-global-"));
   const path = process.env["PATH"];
   try {
     mkdirSync(join(root, ".git"));
-    // An empty PATH and a packageRoot holding no build force the `global` branch with the
-    // sibling binaries genuinely absent, which is the situation being reported.
+    // An empty PATH plus a packageRoot holding no build forces the `global` branch with no bare
+    // name available, which is exactly the broken install being guarded against.
     process.env["PATH"] = "";
     const result = initializeRepository({ worktreeRoot: root, packageRoot: join(root, "absent") });
 
-    const warning = result.steps.find((step) => step.outcome === "warning");
-    assert.ok(warning, "a global install with no recorder on PATH must warn");
-    assert.match(warning.detail, /npm install -g patchmesh-recorder patchmesh-gateway/);
+    assert.equal(result.steps.some((step) => step.outcome === "warning"), false,
+      "the recorder resolves from this install, so there is nothing to warn about");
 
-    // The config is still written: bare names are correct once the siblings are installed, so
-    // refusing would make the fix harder rather than easier.
-    assert.match(readFileSync(join(root, ".mcp.json"), "utf8"), /patchmesh-mcp/);
-    assert.match(renderInit(result, false), /\[!!\]/);
+    const settings = readFileSync(join(root, ".claude", "settings.local.json"), "utf8");
+    const mcp = readFileSync(join(root, ".mcp.json"), "utf8");
+
+    // The point: every path written must name a file that exists, not a hopeful bare name.
+    // Both configs are JSON, so the entries are read out rather than pattern-matched.
+    const referenced = [settings, mcp]
+      .flatMap((config) => [...JSON.stringify(JSON.parse(config)).matchAll(/[^"\\ ]+\.js/g)])
+      .map((match) => match[0]);
+
+    assert.ok(referenced.length > 0, "a global install with nothing on PATH must resolve real paths");
+    for (const target of referenced) {
+      assert.ok(existsSync(target), `command must point at a file that exists: ${target}`);
+    }
   } finally {
     process.env["PATH"] = path;
     rmSync(root, { recursive: true, force: true });

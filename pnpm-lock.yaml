@@ -26,6 +26,9 @@ importers:
       patchmesh-daemon:
         specifier: workspace:*
         version: link:../daemon
+      patchmesh-gateway:
+        specifier: workspace:*
+        version: link:../../packages/gateway
       patchmesh-protocol:
         specifier: workspace:*
         version: link:../../packages/protocol

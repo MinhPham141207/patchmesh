@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { existsSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createDaemon, type PatchMeshDaemon } from "patchmesh-daemon";
 import {
   findOverlappingWork,
@@ -13,6 +13,7 @@ import {
 import type { EventType } from "patchmesh-protocol";
 import { findWorktreeRoot, ledgerPathFor } from "patchmesh-recorder";
 import { parseArgs, usageText, type ParsedArgs } from "./args.js";
+import { renderGraphServerBanner, startGraphServer, type GraphServer, type GraphServerOptions } from "./graph-server.js";
 import { initializeRepository, renderInit } from "./init.js";
 import {
   renderAgents,
@@ -47,12 +48,31 @@ export interface CliDependencies {
    * through `ReadServices`, because the work-graph projection cannot answer it.
    */
   readonly readOverlaps?: (options: OverlapOptions) => OverlapResult;
+  /**
+   * Starts the work-graph site. Injected so a test can drive the real server on an ephemeral
+   * port without the command reaching for the user's browser.
+   */
+  readonly serveGraph?: (options: GraphServerOptions) => Promise<GraphServer>;
 }
 
 export interface CliResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
+  /**
+   * Set by commands that keep running after they have printed. `main` waits on it before
+   * closing the store, so the served page can keep answering from a live ledger rather than
+   * from a snapshot taken at launch.
+   */
+  readonly hold?: Promise<void>;
+}
+
+/** Stop serving when the process is interrupted, so Ctrl+C ends the command rather than the run. */
+function stopOnAbort(signal: AbortSignal, server: GraphServer): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) { server.close(); resolve(); return; }
+    signal.addEventListener("abort", () => { server.close(); resolve(); }, { once: true });
+  });
 }
 
 function exitCode(error: ReadServiceError): number {
@@ -158,6 +178,26 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
   try {
     const parsed = parseArgs(argv);
     const worktreeRoot = dependencies.worktreeRoot ?? findWorktreeRoot(process.cwd());
+    // Serving is handled before `renderCommand` because it is the one command that outlives
+    // its own output: it returns a handle the caller has to hold, not a rendered string.
+    if (parsed.command === "graph" && parsed.graphOutput.mode === "site") {
+      const ledger = parsed.databasePath ?? "";
+      const server = await (dependencies.serveGraph ?? startGraphServer)({
+        services: dependencies.services,
+        filters: parsed.graphFilters,
+        ledger,
+        ...(parsed.graphOutput.port === null ? {} : { port: parsed.graphOutput.port }),
+        open: parsed.graphOutput.open,
+      });
+      return {
+        exitCode: 0,
+        stdout: renderGraphServerBanner(server.url, ledger),
+        stderr: "",
+        hold: dependencies.signal === undefined
+          ? server.closed
+          : Promise.race([server.closed, stopOnAbort(dependencies.signal, server)]),
+      };
+    }
     return {
       exitCode: 0,
       stdout: await renderCommand(
@@ -279,9 +319,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       pruner: daemon,
       signal: controller.signal,
     });
-    process.removeListener("SIGINT", onInterrupt);
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);
+    if (result.hold !== undefined) await result.hold;
+    process.removeListener("SIGINT", onInterrupt);
     return result.exitCode;
   } catch (error) {
     const result = error instanceof ReadServiceError
@@ -294,7 +335,27 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * Was this module run as the program, rather than imported by a test?
+ *
+ * Compared against the *resolved* path of `argv[1]`, not its literal value. A global install
+ * puts a symlink on `PATH` -- `npm link` always, and a package manager's global store often --
+ * so `argv[1]` is the link while `import.meta.url` is what it points at. Comparing the two
+ * strings made every symlinked install exit 0 with no output at all: the CLI loaded, decided
+ * it was a library, and returned.
+ */
+function runAsProgram(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === fileURLToPath(import.meta.url);
+  } catch {
+    // `argv[1]` did not resolve to a file on disk, so this is not that file.
+    return false;
+  }
+}
+
+if (runAsProgram()) {
   const code = await main();
   process.exitCode = code;
 }
