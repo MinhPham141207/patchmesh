@@ -50,6 +50,19 @@ function coverageGapLines(gaps: readonly CoverageGap[]): readonly string[] {
   });
 }
 
+/**
+ * Coverage as a rate the reader can watch, with the word second and the number first.
+ *
+ * `observational` on its own is no more actionable than `degraded` was. What tells someone
+ * whether recording is going well is the proportion and its direction over time, so that is
+ * what leads. See docs/problems/PM-12.
+ */
+function coverageSummary(coverage: StatusView["coverage"]): string {
+  if (coverage.total === 0) return coverage.presentation;
+  const percent = Math.round((coverage.covered / coverage.total) * 100);
+  return `${percent}% (${coverage.covered}/${coverage.total} scopes) ${coverage.presentation}`;
+}
+
 /** Structural shape of a prune result, declared locally for the same reason as `AppendResult`. */
 interface PruneResult {
   readonly removed: number;
@@ -116,7 +129,7 @@ export function renderStatus(status: StatusView, json: boolean): string {
     `Agents observed:   ${status.agentCount}`,
     `Tasks observed:    ${status.taskCount}`,
     `Null attribution:  ${status.nullAttributionEventCount}`,
-    `Coverage:          ${status.coverage.presentation}`,
+    `Coverage:          ${coverageSummary(status.coverage)}`,
   ];
   for (const line of coverageGapLines(status.coverage.gaps)) lines.push(`Coverage gap:      ${line}`);
   return `${lines.join("\n")}\n`;

@@ -224,6 +224,20 @@ test("status exposes observation counts but no Phase 2 state", () => withFixture
   assert.equal(Object.hasOwn(status, "pausedTasks"), false);
 }));
 
+test("health describes the recorder; coverage describes how much it can see", () => withFixtureStore((store) => {
+  const status = createReadServices({ reader: store }).getStatus();
+
+  // The fixture has coverage gaps, which is the permanent and correct state of a
+  // hook-recorded ledger. That must not read as a fault: `status` said `degraded` on day one
+  // and every day after, while `doctor` reported every check green. See docs/problems/PM-12.
+  assert.equal(status.coverage.gaps.length > 0, true);
+  assert.equal(status.health, "healthy");
+  // The word carries no verdict any more, and the numbers beside it are what actually move.
+  assert.equal(status.coverage.presentation, "observational");
+  assert.equal(status.coverage.total > 0, true);
+  assert.equal(status.coverage.covered <= status.coverage.total, true);
+}));
+
 test("status counts immutable finding feedback events", () => {
   const store = SqliteEventStore.open(":memory:");
   try {

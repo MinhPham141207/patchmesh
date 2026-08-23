@@ -23,6 +23,14 @@ export interface ParsedArgs {
   readonly withinMinutes: number | null;
   /** How many tasks `recap` describes. Null uses the recap's own default. */
   readonly recapLimit: number | null;
+  /**
+   * `recap --metrics`: report time-to-resume instead of the recap itself.
+   *
+   * It lives under `recap` rather than as its own command because it measures exactly what
+   * recap is for — the orientation a resumed session pays for — and a separate command would
+   * invite reading the two as unrelated numbers.
+   */
+  readonly recapMetrics: boolean;
   readonly init: { readonly hooks: boolean; readonly gitignore: boolean; readonly force: boolean };
   /** Retention cutoff for `prune`, in days. Null means the command was not asked for one. */
   readonly olderThanDays: number | null;
@@ -63,6 +71,7 @@ export function usageText(): string {
     "Report-only commands:",
     "  recap                      What previous sessions did (--within <minutes>, --limit <n>,",
     "                             --agent) — start here",
+    "  recap --metrics            Calls an agent makes before its first change (time to resume)",
     "  status                     Store health, counts, and observation coverage",
     "  agents                     Observed agents and their tasks",
     "  events                     Durable event page (--raw, --follow, --type, --since,",
@@ -118,6 +127,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       databasePath: null,
       withinMinutes: null,
       recapLimit: null,
+      recapMetrics: false,
       olderThanDays: null,
       init: { hooks: true, gitignore: true, force: false },
       json: false,
@@ -146,6 +156,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let resourceId: string | undefined;
   let withinMinutes: number | null = null;
   let recapLimit: number | null = null;
+  let recapMetrics = false;
   let graphPrint = false;
   let graphPort: number | null = null;
   let initHooks = true;
@@ -251,6 +262,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       index += 1;
       continue;
     }
+    if (option === "--metrics" && command === "recap") { recapMetrics = true; continue; }
     if (option === "--limit" && command === "recap") {
       const parsed = Number(value(argv, index, option));
       if (!Number.isInteger(parsed) || parsed <= 0) throw new ReadServiceError("usage", "--limit takes a positive whole number of tasks");
@@ -282,6 +294,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     databasePath,
     withinMinutes,
     recapLimit,
+    recapMetrics,
     olderThanDays,
     init: { hooks: initHooks, gitignore: initGitignore, force: initForce },
     json,

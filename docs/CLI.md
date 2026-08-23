@@ -287,15 +287,15 @@ patchmesh status [options]
 ```text
 PatchMesh status
 
-Health:            degraded
+Health:            healthy
 Store:             open
 Replayable:        true
 Events recorded:   1,482
 Agents observed:   3
 Tasks observed:    2
 Null attribution:  3
-Coverage:          degraded
-Coverage gap:      opaque tool effects
+Coverage:          62% (918/1482 scopes) observational
+Coverage gap:      opaque (412) opaque operation effects are not prospectively enumerable
 ```
 
 ---
@@ -636,6 +636,7 @@ patchmesh recap [--within <minutes>] [--limit <n>] [--agent <id>] [--json]
 --within <minutes>         How far back to look (default 1440, one day)
 --limit <n>                How many tasks to describe (default 5, maximum 25)
 --agent <id>               Narrow to one agent's work
+--metrics                  Report time to resume instead of the recap itself
 --json                     Print machine-readable output
 ```
 
@@ -672,13 +673,27 @@ gaps instead of overlaps. The same question was already answered for agents over
 
 ### What counts as an overlap
 
-Two conditions, both required:
+Three conditions, all required:
 
 - **Two distinct workers.** A different agent, a subagent running beside its parent, or a
   second worktree of the same repository. One agent's own consecutive turns are sequence, not
-  contention, and are not reported.
+  contention, and are not reported. A change with no attribution is not a participant either:
+  an unknown worker is not a distinct one.
+- **Both were in flight.** The earlier writer must still have been making calls after the later
+  one wrote. If it had stopped, the second was building on settled work, which is what
+  collaboration looks like — that is reported as a count of sequential files, not as contention.
 - **A file the repository tracks.** Paths `.gitignore` covers are excluded, so another tool's
   cache is not reported as contested work.
+
+Without the second condition the answer was a function of `--within` rather than of the work:
+on this repository's own ledger the old rule gave 0 overlaps at 30 minutes, 9 at two hours, and
+20 at anything from eight hours out — of which 13 were sequential edits to popular files.
+Precision against a labelled corpus of real recorded rows went from about 0.35 to 1.0. The gate
+that holds it there runs in `pnpm check`; see
+[docs/measurements/overlap-precision.md](measurements/overlap-precision.md).
+
+Each reported file carries a `why:` line naming the two writes and the moment the earlier worker
+was last active, so the claim can be checked rather than taken on trust.
 
 ### Usage
 
@@ -703,17 +718,21 @@ patchmesh overlaps --within 480 --database .patchmesh/ledger.db
 ### Example output
 
 ```text
-1 file(s) in this repository changed by more than one task:
-- `packages/gateway/src/server.ts` changed by 2 tasks:
+1 file(s) in this repository were changed by two workers at once:
+- `packages/gateway/src/server.ts` — two workers in flight, across 2 task(s) that changed it:
     - 2026-08-22T07:46:13.891Z agent_b48c1c15 (task_771fe0be) modified
     - 2026-08-22T07:12:04.220Z agent_7a1033a6.sub.a79bd1f2 (task_a79bd1f2) modified
-This is a record of what happened, not a judgement. Two tasks touching one file may be
-collaboration, a rebase, or divergence.
+    why: agent_7a1033a6.sub.a79bd1f2 wrote at 2026-08-22T07:12:04.220Z and was still working
+         at 2026-08-22T07:58:11.006Z, after agent_b48c1c15 wrote at 2026-08-22T07:46:13.891Z.
+4 further file(s) were changed by two workers in sequence and are not reported as contention.
+This is a record of what happened, not a judgement. Both workers were in flight over the same
+file, which is not the same as saying either is wrong.
 ```
 
-When nothing is contested, "no two tasks changed the same file" and "no file changes were
-observed at all" are reported as different answers. The second is an absence of evidence, not
-evidence of independence.
+When nothing is contested, three answers stay distinct: "no two workers changed the same file
+at once", the count of files they changed *in sequence*, and "no file changes were observed at
+all". The last is an absence of evidence, not evidence of independence — and the middle one is
+why a file you know two people edited can correctly report as uncontested.
 
 ---
 

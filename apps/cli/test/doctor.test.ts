@@ -32,7 +32,7 @@ function writeHooks(root: string, command: string, events: readonly string[]): v
   writeFileSync(join(root, ".claude", "settings.local.json"), JSON.stringify({ hooks }), "utf8");
 }
 
-const ALL_HOOKS = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
+const ALL_HOOKS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
 
 test("an unwired repository is reported as not recording, not as empty", () => {
   const root = temporaryRepository();

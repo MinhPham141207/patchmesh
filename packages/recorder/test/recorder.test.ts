@@ -6,8 +6,11 @@ import { test } from "node:test";
 import { parseEvent, validateEventSet } from "patchmesh-protocol";
 import { SqliteEventStore } from "patchmesh-storage";
 import {
+  appendJournalEntry,
   buildHookEvents,
   findWorktreeRoot,
+  ingestJournal,
+  journalPathFor,
   ledgerPathFor,
   ledgerRootFor,
   logicalPathFor,
@@ -206,6 +209,14 @@ test("linked worktrees of one repository share a repository identity", () => {
       resolveRepositoryIdentity(linked).worktreeId,
       resolveRepositoryIdentity(main).worktreeId,
     );
+    // The workspace is the set of checkouts sharing a ledger, so two linked worktrees are one
+    // workspace. Giving them separate ids put their events in one database wearing labels that
+    // could never be compared, and every detector that pairs events on workspace equality was
+    // blind across worktrees as a result. See docs/problems/PM-03.
+    assert.equal(
+      resolveRepositoryIdentity(linked).workspaceId,
+      resolveRepositoryIdentity(main).workspaceId,
+    );
   } finally {
     rmSync(main, { recursive: true, force: true });
     rmSync(linked, { recursive: true, force: true });
@@ -287,5 +298,57 @@ test("recording is skipped rather than thrown when no worktree contains the hook
     assert.equal(typeof result.reason, "string");
   } finally {
     rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("two linked worktrees drain into the shared ledger without losing either one's events", async () => {
+  const main = temporaryWorktree();
+  const linked = mkdtempSync(join(tmpdir(), "patchmesh-linked-"));
+  try {
+    writeFileSync(join(linked, ".git"), `gitdir: ${join(main, ".git", "worktrees", "feature")}\n`);
+    const ledgerPath = ledgerPathFor(main);
+    assert.equal(ledgerPathFor(linked), ledgerPath, "the premise: one database, two checkouts");
+
+    // Sharing the ledger introduced genuine multi-writer contention on one SQLite file, which
+    // PM-03 flagged as the part that needed a test rather than an assumption. Each worktree
+    // keeps its own journal (the snapshot is a diff baseline of one checkout's files), so the
+    // contention is exactly at the append.
+    const sessions = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
+    const roots = [main, linked];
+    const drains = roots.map((root, index) => async () => {
+      const journalPath = journalPathFor(root, ".patchmesh");
+      for (let call = 0; call < 12; call += 1) {
+        appendJournalEntry(
+          journalPath,
+          { ...hookPayload({ tool_input: { file_path: `src/file-${index}-${call}.ts` } }), session_id: sessions[index] },
+          new Date(Date.UTC(2026, 7, 23, 12, index, call)).toISOString(),
+        );
+      }
+      return ingestJournal({ worktreeRoot: root, journalPath, ledgerPath });
+    });
+
+    const results = await Promise.all(drains.map((drain) => drain()));
+    for (const result of results) assert.equal(result.ingested > 0, true, "each worktree ingested its own calls");
+
+    const store = SqliteEventStore.open(ledgerPath);
+    try {
+      const events = store.read();
+      // The set validator, not per-event parsing: an interleaved append is exactly the shape
+      // that produces a valid-looking event which is invalid as a member of the set.
+      assert.deepEqual(validateEventSet(events), []);
+
+      const worktreeIds = new Set(events.map((event) => event.worktreeId));
+      assert.equal(worktreeIds.size, 2, "both checkouts are present in one ledger");
+      const workspaceIds = new Set(events.map((event) => event.workspaceId));
+      assert.equal(workspaceIds.size, 1, "and they share one workspace, so they can be compared");
+
+      const requested = events.filter((event) => event.eventType === "tool.requested");
+      assert.equal(requested.length, 24, "no writer's events were dropped under contention");
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(linked, { recursive: true, force: true });
   }
 });

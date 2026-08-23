@@ -137,7 +137,7 @@ export interface AttributionCorrectedPayload {
   readonly evidenceEventIds: readonly EventId[];
 }
 
-export type FindingType = "same_symbol_overlap" | "stale_read_before_write" | "exported_contract_invalidation";
+export type FindingType = "same_symbol_overlap" | "stale_read_before_write" | "exported_contract_invalidation" | "concurrent_file_write";
 export type FindingStatus = "open" | "dismissed" | "resolved";
 export type ConfidenceBand = "low" | "medium" | "high";
 export type Severity = "info" | "warning" | "critical";
@@ -524,6 +524,41 @@ export interface DecisionDeliveryChangedEvent extends BaseEvent {
   readonly payload: DecisionDeliveryChangedPayload;
 }
 
+/**
+ * WHICH OF THESE ARE ACTUALLY PRODUCED, as measured against a live ledger on 2026-08-23.
+ *
+ * Three of the sixteen event types below exist in recorded data: `tool.requested`,
+ * `tool.completed` and `file.changed`. The other thirteen have never been written by any
+ * recorder, which is the ceiling on every detector in the product -- `stale` is typed against
+ * `file.read` and `write.dependent`, `contracts` against `symbol.changed` and
+ * `dependency.changed`, `feedback` against `finding.created`, and none of those inputs exist.
+ *
+ * The protocol was specified against an imagined runtime and the recorder was later built
+ * against the real one; the two have never been reconciled. Marked rather than deleted,
+ * because the design work behind the authority model is worth keeping and because the next
+ * reader should not spend a day rediscovering it. See docs/problems/PM-05.
+ *
+ * Reachable by observation, not yet emitted:
+ * - `symbol.changed`, `dependency.changed` -- derivable at ingest by parsing changed files off
+ *   disk with `patchmesh-analyzers`. No inference from shell commands, so the M7 ban on
+ *   requested-path inference is untouched. This is the work that makes `contracts` live.
+ * - `task.completed` -- a projection of turn state the recorder already holds.
+ * - `finding.created`, `finding.feedback.created`, `decision.created`, `validity.changed`,
+ *   `decision.delivery.changed` -- reachable once any detector produces a finding.
+ * - `attribution.corrected`, `evidence.derived` -- reachable, unused so far.
+ *
+ * STRUCTURALLY UNREACHABLE from hook-recorded traffic, and not pending work:
+ * - `file.read`, `symbol.read` -- a write leaves a difference on disk and a read leaves
+ *   nothing at all. Measured: 4 `read_file` calls carried a path against 182 shell commands
+ *   that read and carried none. Recovering the path means parsing intent out of shell
+ *   commands, which M7 bans.
+ * - `write.dependent` -- requires a write that explicitly declares which read it depends on
+ *   (`dependsOnReadEventId` plus a `readTokenDigest`). That contract was designed for the
+ *   proxied `McpProxy` path with an authority model; Claude Code's hooks declare no such
+ *   dependency and deriving one is inference again. This is why `detectStaleReadBeforeWrite`
+ *   cannot report findings from hook traffic no matter how much implementation work is done.
+ *   See docs/problems/PM-07.
+ */
 export type Phase1InputEvent =
   | ToolRequestedEvent
   | ToolCompletedEvent

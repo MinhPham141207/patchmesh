@@ -185,12 +185,22 @@ function identityKey(value: string): string {
 export function resolveRepositoryIdentity(worktreeRoot: string): RepositoryIdentity {
   const canonicalWorktree = identityKey(worktreeRoot);
   const canonicalRepository = identityKey(repositoryKey(worktreeRoot));
+  // The workspace is the set of checkouts that share a ledger, which is what `ledgerRootFor`
+  // already decides. Hashing the worktree instead gave every linked worktree its own workspace,
+  // so events from two worktrees landed in one database carrying ids that could never be
+  // compared -- and the detectors that pair two events on workspace equality
+  // (`exported-contract-invalidation.ts`, `stale-read-before-write.ts`) were structurally unable
+  // to see across worktrees even though the rows sat side by side. `overlaps` escaped only
+  // because it keys a worker on agent and worktree and never reads this field.
+  //
+  // Unchanged for an ordinary single-worktree checkout: `ledgerRootFor(<root>)` is `<root>`, so
+  // the derived id is byte-identical and no existing ledger is orphaned. Only linked worktrees
+  // move, and they move onto the workspace they were always meant to share.
+  const canonicalWorkspace = identityKey(ledgerRootFor(worktreeRoot));
   return {
     worktreeRoot: canonicalPath(worktreeRoot),
     repositoryId: `repo_${deterministicUuid("patchmesh:repository", canonicalRepository)}` as RepositoryId,
-    // One checkout is one workspace in S1. A multi-checkout workspace needs its own
-    // grouping decision and must not be guessed from a path.
-    workspaceId: `ws_${deterministicUuid("patchmesh:workspace", canonicalWorktree)}` as WorkspaceId,
+    workspaceId: `ws_${deterministicUuid("patchmesh:workspace", canonicalWorkspace)}` as WorkspaceId,
     worktreeId: `wt_${deterministicUuid("patchmesh:worktree", canonicalWorktree)}` as WorktreeId,
   };
 }

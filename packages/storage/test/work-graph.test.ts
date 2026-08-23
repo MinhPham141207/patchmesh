@@ -413,6 +413,35 @@ test("reports degraded coverage for opaque and unresolved effects", () => {
   assert.equal(unresolved.some((value) => value.gaps.some((gap) => gap.kind === "unverified")), true);
 });
 
+test("an opaque call whose effect was bound by observation is not a coverage gap", () => {
+  // The shape a hook recorder actually produces: `effectEventIds` is empty because the
+  // completion is written before the filesystem is diffed, and the change points back at the
+  // completion instead. `effects.ts` sets that causation only when exactly one call's window
+  // covered the change, so it is the deterministic binding.
+  const boundChange: FileChangedEvent = {
+    ...fileChanged,
+    eventId: "evt_00000000000000000000000000000041",
+    correlationId: opaqueToolRequest.correlationId,
+    causationId: opaqueToolCompletion.eventId,
+  };
+  const coverage = projectOrdered([opaqueToolRequest, opaqueToolCompletion, boundChange]).snapshot.coverage;
+  const toolScope = coverage.find((value) => value.scope === `tool:${opaqueToolRequest.eventId}`);
+
+  assert.ok(toolScope, "the opaque call still has a coverage scope");
+  // Opacity is about intent, not effect. The write is known; what the command meant is not.
+  assert.equal(toolScope.gaps.some((gap) => gap.kind === "opaque"), false);
+  assert.equal(toolScope.presentation, "sufficient");
+  assert.equal(toolScope.evidenceEventIds.includes(boundChange.eventId), true);
+});
+
+test("an opaque call with no observed effect stays a gap, because a read leaves no trace", () => {
+  const coverage = projectOrdered([opaqueToolRequest, opaqueToolCompletion]).snapshot.coverage;
+  const toolScope = coverage.find((value) => value.scope === `tool:${opaqueToolRequest.eventId}`);
+
+  assert.ok(toolScope);
+  assert.equal(toolScope.gaps.some((gap) => gap.kind === "opaque"), true);
+});
+
 test("reports unattributed out-of-band coverage and interception-only coverage", () => {
   const outOfBand = projectOrdered([outOfBandChange]).snapshot.coverage;
   const replay = projectOrdered([toolRequest, noEffectCompletion]);
