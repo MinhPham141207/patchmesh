@@ -5,15 +5,19 @@ import { createDaemon, type PatchMeshDaemon } from "patchmesh-daemon";
 import {
   findOverlappingWork,
   ReadServiceError,
+  recapRecentWork,
   type OverlapOptions,
   type OverlapResult,
   type ReadServices,
+  type RecapOptions,
+  type RecapResult,
   type StatusView,
 } from "patchmesh-query";
 import type { EventType } from "patchmesh-protocol";
 import { findWorktreeRoot, ledgerPathFor } from "patchmesh-recorder";
 import { parseArgs, usageText, type ParsedArgs } from "./args.js";
 import { renderGraphServerBanner, startGraphServer, type GraphServer, type GraphServerOptions } from "./graph-server.js";
+import { diagnose, renderDoctor } from "./doctor.js";
 import { initializeRepository, renderInit } from "./init.js";
 import {
   renderAgents,
@@ -26,6 +30,7 @@ import {
   renderGraph,
   renderOverlaps,
   renderPrune,
+  renderRecap,
   renderStatus,
 } from "./render.js";
 
@@ -48,6 +53,8 @@ export interface CliDependencies {
    * through `ReadServices`, because the work-graph projection cannot answer it.
    */
   readonly readOverlaps?: (options: OverlapOptions) => OverlapResult;
+  /** Reads a recap. Injected for the same reason as `readOverlaps`: it opens the store itself. */
+  readonly readRecap?: (options: RecapOptions) => RecapResult;
   /**
    * Starts the work-graph site. Injected so a test can drive the real server on an ephemeral
    * port without the command reaching for the user's browser.
@@ -105,6 +112,7 @@ async function renderCommand(
   pruner: CliDependencies["pruner"],
   worktreeRoot: string | null,
   readOverlaps: (options: OverlapOptions) => OverlapResult,
+  readRecap: (options: RecapOptions) => RecapResult,
   signal?: AbortSignal,
 ): Promise<string> {
   if (parsed.command === "help") return `${usageText()}\n`;
@@ -125,6 +133,25 @@ async function renderCommand(
     if (parsed.olderThanDays === null) throw new ReadServiceError("usage", "prune requires --older-than <days>");
     const cutoff = new Date(Date.now() - parsed.olderThanDays * 24 * 60 * 60_000);
     return renderPrune(pruner.prune({ olderThan: cutoff }), cutoff, parsed.json);
+  }
+  if (parsed.command === "recap") {
+    if (worktreeRoot === null) {
+      throw new ReadServiceError("unavailable", "recap needs a git worktree; run it inside the repository the ledger describes");
+    }
+    // The same answer `patchmesh_recap` gives an agent, given to the person. It was reachable
+    // only over MCP, which meant the surface the product leads with could not be run by the
+    // user reading the README that recommends it.
+    return renderRecap(
+      readRecap({
+        worktreeRoot,
+        ledgerPath: parsed.databasePath ?? "",
+        ...(parsed.agentFilters.agentId === undefined ? {} : { agent: parsed.agentFilters.agentId }),
+        ...(parsed.withinMinutes === null ? {} : { withinMinutes: parsed.withinMinutes }),
+        ...(parsed.recapLimit === null ? {} : { limit: parsed.recapLimit }),
+      }),
+      parsed.agentFilters.agentId ?? undefined,
+      parsed.json,
+    );
   }
   if (parsed.command === "status") return renderStatus(services.getStatus(), parsed.json);
   if (parsed.command === "agents") return renderAgents(services.listAgents(parsed.agentFilters), parsed.json);
@@ -178,6 +205,13 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
   try {
     const parsed = parseArgs(argv);
     const worktreeRoot = dependencies.worktreeRoot ?? findWorktreeRoot(process.cwd());
+    // Handled before `renderCommand` because it is the one report whose exit code carries the
+    // answer. Every other command exits 0 when it successfully reports bad news; a health check
+    // that did the same could not be used to gate anything.
+    if (parsed.command === "doctor") {
+      const report = diagnose({ worktreeRoot });
+      return { exitCode: report.healthy ? 0 : 3, stdout: renderDoctor(report, parsed.json), stderr: "" };
+    }
     // Serving is handled before `renderCommand` because it is the one command that outlives
     // its own output: it returns a handle the caller has to hold, not a rendered string.
     if (parsed.command === "graph" && parsed.graphOutput.mode === "site") {
@@ -187,7 +221,6 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
         filters: parsed.graphFilters,
         ledger,
         ...(parsed.graphOutput.port === null ? {} : { port: parsed.graphOutput.port }),
-        open: parsed.graphOutput.open,
       });
       return {
         exitCode: 0,
@@ -208,6 +241,7 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
         dependencies.pruner,
         worktreeRoot,
         dependencies.readOverlaps ?? findOverlappingWork,
+        dependencies.readRecap ?? recapRecentWork,
         dependencies.signal,
       ),
       stderr: "",
@@ -221,7 +255,10 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
 /** Commands that answer without reading the ledger, so they must not require one. */
 function needsNoStore(argv: readonly string[]): boolean {
   const command = argv[0];
-  return command === "init" || command === "help" || command === "--help" || command === "-h";
+  // `doctor` belongs here for the same reason `init` does, and more strongly: it is the
+  // command you run *because* the ledger is missing, so gating it behind one would refuse to
+  // answer exactly the question it exists for.
+  return command === "init" || command === "doctor" || command === "help" || command === "--help" || command === "-h";
 }
 
 /**
@@ -231,7 +268,7 @@ function needsNoStore(argv: readonly string[]): boolean {
  * missing store means they recorded nothing. Exiting 0 there would report success for work
  * that did not happen.
  */
-const REPORT_ONLY = new Set(["status", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain"]);
+const REPORT_ONLY = new Set(["status", "recap", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain"]);
 
 /**
  * What a repository looks like before it has been worked in.

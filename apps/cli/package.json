@@ -21,7 +21,8 @@
     "patchmesh-gateway": "workspace:*",
     "patchmesh-protocol": "workspace:*",
     "patchmesh-query": "workspace:*",
-    "patchmesh-recorder": "workspace:*"
+    "patchmesh-recorder": "workspace:*",
+    "patchmesh-storage": "workspace:*"
   },
   "description": "A shared work ledger for coding agents: records what agents did, and hands it back so the next one does not repeat it.",
   "keywords": [

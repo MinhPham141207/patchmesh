@@ -8,6 +8,8 @@ import { SqliteEventStore } from "patchmesh-storage";
 import {
   buildHookEvents,
   findWorktreeRoot,
+  ledgerPathFor,
+  ledgerRootFor,
   logicalPathFor,
   normalizeOperation,
   normalizeTool,
@@ -200,6 +202,62 @@ test("linked worktrees of one repository share a repository identity", () => {
   } finally {
     rmSync(main, { recursive: true, force: true });
     rmSync(linked, { recursive: true, force: true });
+  }
+});
+
+test("linked worktrees of one repository record into one ledger", () => {
+  const main = temporaryWorktree();
+  const linked = mkdtempSync(join(tmpdir(), "patchmesh-linked-"));
+  try {
+    writeFileSync(join(linked, ".git"), `gitdir: ${join(main, ".git", "worktrees", "feature")}\n`);
+    // The whole point: two roots, one database, so cross-worktree overlap has somewhere to
+    // look. `overlaps` already treats two worktrees as two workers; before this it had two
+    // separate files and could never see both.
+    assert.equal(ledgerPathFor(linked), ledgerPathFor(main));
+    assert.equal(ledgerRootFor(linked), main);
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(linked, { recursive: true, force: true });
+  }
+});
+
+test("a primary worktree keeps the ledger it already has", () => {
+  const main = temporaryWorktree();
+  try {
+    // Existing installs must not have their ledger moved out from under them, so the
+    // ordinary single-worktree path has to resolve exactly as it did before.
+    assert.equal(ledgerRootFor(main), main);
+    assert.equal(ledgerPathFor(main), join(main, ".patchmesh", "ledger.db"));
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+  }
+});
+
+test("a submodule keeps its own ledger rather than the superproject's", () => {
+  const superproject = temporaryWorktree();
+  const submodule = mkdtempSync(join(tmpdir(), "patchmesh-submodule-"));
+  try {
+    // A submodule's pointer resolves under `.git/modules`, not `.git/worktrees`. It is a
+    // different repository, so folding its ledger into the superproject's would merge the
+    // work of two repositories into one history.
+    writeFileSync(
+      join(submodule, ".git"),
+      `gitdir: ${join(superproject, ".git", "modules", "vendor")}\n`,
+    );
+    assert.equal(ledgerRootFor(submodule), submodule);
+  } finally {
+    rmSync(superproject, { recursive: true, force: true });
+    rmSync(submodule, { recursive: true, force: true });
+  }
+});
+
+test("an unreadable git pointer falls back to the worktree rather than guessing", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-badgit-"));
+  try {
+    writeFileSync(join(root, ".git"), "this is not a gitdir pointer\n");
+    assert.equal(ledgerRootFor(root), root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

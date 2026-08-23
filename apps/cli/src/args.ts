@@ -1,7 +1,7 @@
 import type { DecisionDelivery, DecisionId, EventType, FindingId, FindingFeedback } from "patchmesh-protocol";
 import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters } from "patchmesh-query";
 
-export type CommandName = "init" | "prune" | "status" | "agents" | "events" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "help";
+export type CommandName = "init" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "help";
 
 export interface ParsedArgs {
   readonly command: CommandName;
@@ -17,10 +17,12 @@ export interface ParsedArgs {
    * thousand rows of nodes and edges is a data dump rather than an answer; `text` and `json`
    * stay reachable for a pipe.
    */
-  readonly graphOutput: { readonly mode: "site" | "text" | "json"; readonly port: number | null; readonly open: boolean };
+  readonly graphOutput: { readonly mode: "site" | "text" | "json"; readonly port: number | null };
   readonly decisionId: DecisionId | null;
-  /** How far back `overlaps` looks, in minutes. Null uses the query's own default. */
+  /** How far back `overlaps` and `recap` look, in minutes. Null uses the query's own default. */
   readonly withinMinutes: number | null;
+  /** How many tasks `recap` describes. Null uses the recap's own default. */
+  readonly recapLimit: number | null;
   readonly init: { readonly hooks: boolean; readonly gitignore: boolean; readonly force: boolean };
   /** Retention cutoff for `prune`, in days. Null means the command was not asked for one. */
   readonly olderThanDays: number | null;
@@ -37,7 +39,7 @@ export interface ParsedArgs {
   } | null;
 }
 
-const commands = new Set<CommandName>(["init", "prune", "status", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "help"]);
+const commands = new Set<CommandName>(["init", "doctor", "prune", "status", "recap", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "help"]);
 const eventTypes = new Set<EventType>([
   "tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read",
   "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected",
@@ -54,16 +56,19 @@ export function usageText(): string {
     "Setup:",
     "  init                       Wire PatchMesh into this repository (--force, --no-hooks,",
     "                             --no-gitignore)",
+    "  doctor                     Check that recording is actually working here",
     "",
     "  prune --older-than <days> Delete events past a retention cutoff, keeping replay intact",
     "",
     "Report-only commands:",
+    "  recap                      What previous sessions did (--within <minutes>, --limit <n>,",
+    "                             --agent) — start here",
     "  status                     Store health, counts, and observation coverage",
     "  agents                     Observed agents and their tasks",
     "  events                     Durable event page (--raw, --follow, --type, --since,",
     "                             --until, --limit, --cursor)",
-    "  graph                      Open the work-graph explorer in a browser (--resource,",
-    "                             --print, --port <n>, --no-open)",
+    "  graph                      Serve the work-graph explorer and print its link",
+    "                             (--resource, --print, --port <n>)",
     "  overlaps                   Files more than one worker changed (--resource, --within)",
     "  stale                      Stale-read-before-write findings (needs proxy-recorded",
     "                             read and dependent-write evidence)",
@@ -112,6 +117,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       command,
       databasePath: null,
       withinMinutes: null,
+      recapLimit: null,
       olderThanDays: null,
       init: { hooks: true, gitignore: true, force: false },
       json: false,
@@ -120,7 +126,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       agentFilters: {},
       eventQuery: {},
       graphFilters: {},
-      graphOutput: { mode: "site", port: null, open: true },
+      graphOutput: { mode: "site", port: null },
       decisionId: null,
       feedback: null,
       delivery: null,
@@ -139,9 +145,9 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let cursor: EventListQuery["cursor"];
   let resourceId: string | undefined;
   let withinMinutes: number | null = null;
+  let recapLimit: number | null = null;
   let graphPrint = false;
   let graphPort: number | null = null;
-  let graphOpen = true;
   let initHooks = true;
   let initGitignore = true;
   let initForce = false;
@@ -193,7 +199,6 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     }
     if (option === "--resource" && (command === "graph" || command === "overlaps")) { resourceId = value(argv, index, option); index += 1; continue; }
     if (option === "--print" && command === "graph") { graphPrint = true; continue; }
-    if (option === "--no-open" && command === "graph") { graphOpen = false; continue; }
     if (option === "--port" && command === "graph") {
       const port = Number(value(argv, index, option));
       if (!Number.isInteger(port) || port < 0 || port > 65535) throw new ReadServiceError("usage", "--port takes a whole number between 0 and 65535");
@@ -201,7 +206,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       index += 1;
       continue;
     }
-    if (option === "--within" && command === "overlaps") {
+    if (option === "--within" && (command === "overlaps" || command === "recap")) {
       const minutes = Number(value(argv, index, option));
       if (!Number.isInteger(minutes) || minutes <= 0) throw new ReadServiceError("usage", "--within takes a positive whole number of minutes");
       withinMinutes = minutes;
@@ -246,6 +251,13 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       index += 1;
       continue;
     }
+    if (option === "--limit" && command === "recap") {
+      const parsed = Number(value(argv, index, option));
+      if (!Number.isInteger(parsed) || parsed <= 0) throw new ReadServiceError("usage", "--limit takes a positive whole number of tasks");
+      recapLimit = parsed;
+      index += 1;
+      continue;
+    }
     if (option === "--limit" && command === "events") {
       const parsed = Number(value(argv, index, option));
       if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new ReadServiceError("usage", "limit must be a positive integer");
@@ -269,6 +281,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     command,
     databasePath,
     withinMinutes,
+    recapLimit,
     olderThanDays,
     init: { hooks: initHooks, gitignore: initGitignore, force: initForce },
     json,
@@ -287,7 +300,6 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     graphOutput: {
       mode: json ? "json" : graphPrint ? "text" : "site",
       port: graphPort,
-      open: graphOpen,
     },
     graphFilters: {
       ...(agentId === undefined ? {} : { agentId }),

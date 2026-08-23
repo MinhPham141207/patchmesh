@@ -38,6 +38,9 @@ importers:
       patchmesh-recorder:
         specifier: workspace:*
         version: link:../../packages/recorder
+      patchmesh-storage:
+        specifier: workspace:*
+        version: link:../../packages/storage
 
   apps/daemon:
     dependencies:

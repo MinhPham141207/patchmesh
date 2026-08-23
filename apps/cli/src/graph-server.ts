@@ -1,5 +1,4 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { spawn } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import type { GraphFilters, ReadServices } from "patchmesh-query";
 import { buildGraphSiteModel } from "./graph-model.js";
@@ -11,7 +10,6 @@ export interface GraphServerOptions {
   readonly ledger: string;
   /** Loopback port to bind. Zero asks the OS for a free one, which is the default. */
   readonly port?: number;
-  readonly open?: boolean;
 }
 
 export interface GraphServer {
@@ -19,27 +17,6 @@ export interface GraphServer {
   /** Resolves once the server stops, so the caller can hold the process open until then. */
   readonly closed: Promise<void>;
   close(): void;
-}
-
-/**
- * Hand the page to the browser the user already has open.
- *
- * Failure here is deliberately silent: the URL is printed either way, and a machine without a
- * desktop browser is a normal place to run this. Never worth failing the command over.
- */
-function openInBrowser(url: string): void {
-  const command = process.platform === "win32"
-    ? { file: "cmd", args: ["/c", "start", "", url] }
-    : process.platform === "darwin"
-      ? { file: "open", args: [url] }
-      : { file: "xdg-open", args: [url] };
-  try {
-    const child = spawn(command.file, command.args, { stdio: "ignore", detached: true });
-    child.on("error", () => {});
-    child.unref();
-  } catch {
-    // See above: opening a browser is a convenience, not part of the command's contract.
-  }
 }
 
 function send(response: ServerResponse, status: number, type: string, body: string): void {
@@ -89,7 +66,6 @@ export function startGraphServer(options: GraphServerOptions): Promise<GraphServ
       const address = server.address() as AddressInfo;
       const url = `http://127.0.0.1:${address.port}`;
       const closed = new Promise<void>((done) => server.once("close", () => done()));
-      if (options.open !== false) openInBrowser(url);
       resolve({
         url,
         closed,
@@ -102,13 +78,21 @@ export function startGraphServer(options: GraphServerOptions): Promise<GraphServ
   });
 }
 
-/** What the terminal says while the page is being served. */
+/**
+ * What the terminal says while the page is being served.
+ *
+ * The command prints the address and stops there. It deliberately does not launch a browser:
+ * a command that seizes the screen decides for the user where to look, and on Windows the
+ * launched tab lands behind the terminal anyway, so the "convenience" reads as a failure.
+ * The URL goes on its own line because every terminal worth using makes that clickable.
+ */
 export function renderGraphServerBanner(url: string, ledger: string): string {
   return [
     `Work graph at ${url}`,
     `Reading ${ledger}`,
     "",
-    "The page re-reads the ledger on reload. Press Ctrl+C to stop serving.",
+    "Open the link above when you want it. The page re-reads the ledger on reload,",
+    "so it stays current while you work. Press Ctrl+C to stop serving.",
     "",
   ].join("\n");
 }

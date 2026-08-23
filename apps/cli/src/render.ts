@@ -8,9 +8,10 @@ import type {
   GraphNode,
   GraphView,
   OverlapResult,
+  RecapResult,
   StatusView,
 } from "patchmesh-query";
-import { renderOverlap } from "patchmesh-query";
+import { renderOverlap, renderRecap as renderRecapText } from "patchmesh-query";
 
 /** Structural shape of one projection coverage gap, matching `ProjectionCoverageGap`. */
 interface CoverageGap {
@@ -286,6 +287,19 @@ export function renderDecisionExplanation(view: DecisionExplanation, json: boole
 export function renderOverlaps(result: OverlapResult, json: boolean): string {
   if (json) return `${JSON.stringify(result)}\n`;
   return `${renderOverlap(result, result.logicalPath ?? undefined)}\n`;
+}
+
+/**
+ * Render a recap for a person, using the same text an agent gets over MCP.
+ *
+ * Deliberately not a second rendering. The recap's wording is the product of measuring what an
+ * agent actually needed - what a task committed, which files it touched, what it must not claim
+ * - and a person reading a terminal needs the same things. Two renderings would drift, and the
+ * CLI's would be the one nobody measured.
+ */
+export function renderRecap(result: RecapResult, agent: string | undefined, json: boolean): string {
+  if (json) return `${JSON.stringify(result)}\n`;
+  return `${renderRecapText(result, agent)}\n`;
 }
 
 /**

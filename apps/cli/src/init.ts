@@ -209,10 +209,54 @@ function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
  * appended a second copy of every hook. Recognizing the binaries holds wherever it is installed
  * and whatever the install is called.
  */
-function ownsCommand(value: unknown): boolean {
+export function ownsCommand(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const normalized = value.replaceAll("\\", "/");
   return RECORDER_BINARIES.some((binary) => normalized.includes(binary));
+}
+
+/** The host events the recorder is wired to, in the order they matter. Read by `doctor`. */
+export const HOOK_EVENTS: readonly string[] = HOOKS.map((wiring) => wiring.event);
+
+/**
+ * Does an installed hook command actually run anything on this machine?
+ *
+ * The three forms `resolveBinaries` writes fail differently, and all three fail silently. A
+ * quoted path can point into a checkout that has been deleted or a global install that has
+ * been upgraded out from under it; a bare name is only correct while the package that owns it
+ * is still linked onto the PATH. Either way the host runs the command, gets a non-zero exit or
+ * nothing at all, and the hook's fail-open contract swallows it.
+ *
+ * Three answers, not two. `unknown` exists because a hook command is a string the *host*
+ * expands before running it, and a config this tool did not write may reference variables only
+ * the host can resolve. The first version of this returned a boolean and reported a working
+ * five-hook install -- 3,241 recorded events, a live journal -- as five broken commands,
+ * because the commands read `$CLAUDE_PROJECT_DIR/...`. Claiming breakage that cannot be
+ * demonstrated is worse than declining to check: it sends people to reinstall something that
+ * was never wrong.
+ *
+ * A relative path is resolved against the worktree, because that is the working directory the
+ * host runs hooks in and the form `init` deliberately writes for a committed config.
+ */
+export type HookTarget = "ok" | "missing" | "unknown";
+
+/** Host-expanded variables this can substitute itself, and what the host substitutes. */
+function expandHostVariables(value: string, worktreeRoot: string): string {
+  return value.replaceAll(/\$\{?CLAUDE_PROJECT_DIR\}?/gu, worktreeRoot);
+}
+
+export function resolveHookTarget(command: string, worktreeRoot: string): HookTarget {
+  const quoted = /"([^"]+)"/u.exec(command);
+  if (quoted !== null) {
+    const expanded = expandHostVariables(quoted[1]!, worktreeRoot);
+    // Anything still holding a variable is the host's to resolve, not this command's to judge.
+    if (expanded.includes("$")) return "unknown";
+    return existsSync(join(worktreeRoot, expanded)) || existsSync(expanded) ? "ok" : "missing";
+  }
+  const bare = expandHostVariables(command.trim(), worktreeRoot).split(/\s+/u)[0] ?? "";
+  if (bare === "") return "unknown";
+  if (bare.includes("$")) return "unknown";
+  return onPath(bare) ? "ok" : "missing";
 }
 
 const RECORDER_BINARIES = [

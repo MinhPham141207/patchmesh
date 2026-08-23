@@ -61,6 +61,19 @@ export function openDatabase(filename: string): DatabaseSync {
   try {
     database.exec("PRAGMA foreign_keys = ON");
     database.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+    // One ledger now serves every worktree of a repository, so a reader and a writer are
+    // routinely different processes in different checkouts. In the default rollback-journal
+    // mode a writer locks the whole database, so an ingest draining one worktree would stall
+    // `events --follow` or the served graph page in another. WAL lets readers proceed while a
+    // write is in flight, and the busy timeout above covers writer-against-writer.
+    //
+    // Fails open: an in-memory database and a filesystem that cannot support shared-memory
+    // both refuse the switch, and refusing it costs concurrency rather than correctness.
+    try {
+      database.exec("PRAGMA journal_mode = WAL");
+    } catch {
+      // Keep the rollback journal rather than failing to open the store at all.
+    }
     applyMigrations(database);
     return database;
   } catch (error) {
