@@ -4,7 +4,7 @@ import type { EventId, ProtocolEvent } from "patchmesh-protocol";
 import type { ReadServices } from "patchmesh-query";
 import type { WorkGraphSnapshot } from "patchmesh-storage";
 import { buildGraphSiteModel, parentAgentId } from "../src/graph-model.js";
-import { startGraphServer } from "../src/graph-server.js";
+import { renderGraphServerBanner, startGraphServer } from "../src/graph-server.js";
 import { runCli } from "../src/main.js";
 
 /**
@@ -133,7 +133,7 @@ test("the server answers with the page and with a model rebuilt per request", as
   let reads = 0;
   const { services } = fixture();
   const counting = { ...services, getGraph: (filters?: unknown) => { reads += 1; return services.getGraph(filters as never); } } as ReadServices;
-  const server = await startGraphServer({ services: counting, filters: {}, ledger: "/ledger", open: false });
+  const server = await startGraphServer({ services: counting, filters: {}, ledger: "/ledger" });
   try {
     const page = await fetch(server.url);
     assert.equal(page.status, 200);
@@ -160,7 +160,7 @@ test("the server answers with the page and with a model rebuilt per request", as
 });
 
 test("the server binds loopback only, because a ledger names a private repository's files", async () => {
-  const server = await startGraphServer({ services: fixture().services, filters: {}, ledger: "/ledger", open: false });
+  const server = await startGraphServer({ services: fixture().services, filters: {}, ledger: "/ledger" });
   try {
     assert.match(server.url, /^http:\/\/127\.0\.0\.1:\d+$/);
   } finally {
@@ -176,8 +176,7 @@ test("graph serves by default and holds until the server stops", async () => {
     services,
     worktreeRoot: "/repo",
     serveGraph: async (options) => {
-      assert.equal(options.open, true);
-      const server = await startGraphServer({ ...options, open: false });
+      const server = await startGraphServer(options);
       started = server;
       return server;
     },
@@ -192,22 +191,22 @@ test("graph serves by default and holds until the server stops", async () => {
   await result.hold;
 });
 
-test("--no-open serves without reaching for a browser, and --port picks the binding", async () => {
+test("--port picks the binding", async () => {
   const { services } = fixture();
-  let seen: { port?: number; open?: boolean } | null = null;
-  const result = await runCli(["graph", "--no-open", "--port", "0"], {
+  let seen: number | undefined;
+  const result = await runCli(["graph", "--port", "0"], {
     services,
     worktreeRoot: "/repo",
     serveGraph: async (options) => {
-      seen = { ...(options.port === undefined ? {} : { port: options.port }), open: options.open };
-      const server = await startGraphServer({ ...options, open: false });
+      seen = options.port;
+      const server = await startGraphServer(options);
       server.close();
       return server;
     },
   });
 
   assert.equal(result.exitCode, 0);
-  assert.deepEqual(seen, { port: 0, open: false });
+  assert.equal(seen, 0);
   await result.hold;
 });
 
@@ -250,4 +249,24 @@ test("the binary runs when PATH reaches it through a symlink", async (t) => {
 
   assert.match(viaLink, /Usage: patchmesh/);
   assert.equal(viaLink, direct);
+});
+
+test("the banner hands over a link and nothing else", async () => {
+  // The command prints the address and stops. A command that seizes the screen decides for
+  // the user where to look, and the launched tab lands behind the terminal anyway.
+  const banner = renderGraphServerBanner("http://127.0.0.1:1", "/ledger");
+
+  assert.match(banner, /http:\/\/127\.0\.0\.1:1/);
+  assert.match(banner, /Open the link above when you want it/);
+  assert.match(banner, /Ctrl\+C/);
+  assert.equal(/browser|opening/i.test(banner), false);
+});
+
+test("serving never launches anything, so no child process is spawned", async () => {
+  // The launcher is gone, not merely defaulted off: nothing in this module may reach for a
+  // browser, a shell, or any other process.
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../src/graph-server.ts", import.meta.url), "utf8");
+
+  assert.equal(/child_process|spawn|exec/.test(source), false);
 });

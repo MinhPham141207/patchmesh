@@ -4,9 +4,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LEDGER_DIRECTORY, ledgerPathFor } from "patchmesh-recorder";
 import { measurementPathFor, recordAnswer } from "./measure.js";
-import { findOverlappingWork, renderOverlap } from "patchmesh-query";
+import { findOverlappingWork, recapRecentWork, renderOverlap, renderRecap } from "patchmesh-query";
 import { recallRecentActivity, renderRecall } from "./recall.js";
-import { recapRecentWork, renderRecap } from "./recap.js";
 
 export interface GatewayOptions {
   readonly worktreeRoot: string;

@@ -75,30 +75,77 @@ export function findWorktreeRoot(startDirectory: string): string | null {
 }
 
 /**
- * A linked worktree stores `gitdir: <common>/worktrees/<name>`. Reducing that back to
- * the common directory lets sibling worktrees of one repository share a repositoryId,
- * which is what makes cross-worktree comparison possible later.
+ * The common git directory this worktree belongs to, or null if it cannot be established
+ * without spawning git.
+ *
+ * A primary worktree's own `.git` directory is the same location a linked worktree's
+ * `gitdir:` pointer resolves back to, so both branches agree. The `/worktrees/` marker is
+ * what distinguishes a linked worktree from a submodule: a submodule's pointer resolves to
+ * `<super>/.git/modules/<name>`, which is its own repository and must not be reduced to the
+ * superproject's.
  */
-function repositoryKey(worktreeRoot: string): string {
+function commonGitDirectory(worktreeRoot: string): string | null {
   const gitPath = join(worktreeRoot, ".git");
   let stat;
   try {
     stat = statSync(gitPath);
   } catch {
-    return worktreeRoot;
+    return null;
   }
-  // Key on the common git directory in both branches: a primary worktree's own `.git`
-  // directory is the same location a linked worktree's `gitdir:` pointer resolves back
-  // to, so sibling worktrees of one repository agree on repositoryId.
-  if (stat.isDirectory()) return gitPath;
+  if (stat.isDirectory()) return separatorNormalized(gitPath);
   try {
     const contents = readFileSync(gitPath, "utf8").trim();
     const match = /^gitdir:\s*(.+)$/u.exec(contents);
-    if (match === null) return worktreeRoot;
-    const gitdir = resolve(worktreeRoot, match[1]!.trim());
-    const marker = `${separatorNormalized(gitdir)}`;
-    const worktreesIndex = marker.lastIndexOf("/worktrees/");
-    return worktreesIndex === -1 ? gitdir : marker.slice(0, worktreesIndex);
+    if (match === null) return null;
+    const gitdir = separatorNormalized(resolve(worktreeRoot, match[1]!.trim()));
+    const worktreesIndex = gitdir.lastIndexOf("/worktrees/");
+    return worktreesIndex === -1 ? gitdir : gitdir.slice(0, worktreesIndex);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A linked worktree stores `gitdir: <common>/worktrees/<name>`. Reducing that back to
+ * the common directory lets sibling worktrees of one repository share a repositoryId,
+ * which is what makes cross-worktree comparison possible later.
+ */
+function repositoryKey(worktreeRoot: string): string {
+  return commonGitDirectory(worktreeRoot) ?? worktreeRoot;
+}
+
+/**
+ * Which checkout owns the ledger for this worktree: the repository's *primary* worktree.
+ *
+ * `git worktree add` gives one repository several roots. Keying the ledger on the root the
+ * hook fired in gave each of them a private database, so two agents working the same
+ * repository in two worktrees recorded into two files that no query could join -- and
+ * cross-worktree overlap, which `findOverlappingWork` is already written to detect ("two
+ * worktrees are two workers by definition"), had no shared store to detect it in.
+ *
+ * Reducing to the primary worktree rather than to the git directory keeps the ledger where
+ * it already is for the ordinary single-worktree case: `<root>/.git` reduces to `<root>`,
+ * the same path as before, so no existing ledger moves and nothing has to be migrated.
+ *
+ * Filesystem only, like everything else a hook may reach: `git rev-parse --git-common-dir`
+ * would answer this directly and cost a subprocess on every recorded call.
+ *
+ * Falls back to the worktree itself whenever the primary cannot be established -- a bare
+ * repository has no primary worktree, a submodule is its own repository, and an unreadable
+ * pointer is not something to guess at. A private ledger is a worse answer than a shared
+ * one; no ledger would be worse than both.
+ */
+export function ledgerRootFor(worktreeRoot: string): string {
+  const commonDirectory = commonGitDirectory(worktreeRoot);
+  if (commonDirectory === null || !commonDirectory.endsWith("/.git")) return worktreeRoot;
+  // Back to the platform's own separators. `commonGitDirectory` works in the normalized form
+  // because that is what the `/worktrees/` marker is matched against, but this value becomes a
+  // path on disk: returning `C:/x` where every other caller produces `C:\x` gives one ledger
+  // two spellings, which is the shape of the bug that once split one checkout into two
+  // worktree identities.
+  const primary = resolve(dirname(commonDirectory));
+  try {
+    return statSync(primary).isDirectory() ? primary : worktreeRoot;
   } catch {
     return worktreeRoot;
   }

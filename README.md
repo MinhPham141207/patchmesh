@@ -80,12 +80,27 @@ reports what is already configured instead of appending a second copy.
 **Then restart your agent session** so the host loads the new hooks. Nothing is recorded until
 you do.
 
+To check that it took:
+
+```bash
+patchmesh doctor
+```
+
+Both hook binaries always exit 0, so a broken PatchMesh is silent by design — and silence looks
+exactly like an idle repository. `doctor` is what tells the two apart. It exits non-zero only
+when recording is actually broken.
+
 Useful flags: `--force` (overwrite existing entries), `--no-hooks`, `--no-gitignore`, `--json`.
 
 ### What gets recorded
 
 Tool calls and observed file changes, written to `.patchmesh/ledger.db` inside your repository.
 Nothing leaves your machine.
+
+`git worktree` gives one repository several roots; they all record into the primary worktree's
+ledger, so work done in a feature worktree is visible from the main one and the other way
+around. The journal and the filesystem snapshot stay per-worktree, because a snapshot is a diff
+baseline of one checkout's files.
 
 Payloads pass through a **key whitelist** before the first disk write — only fields the recorder
 actually reads are kept, with credential-pattern redaction as a backstop and text capped at 512
@@ -107,19 +122,21 @@ any subdirectory, so no flags are needed.
 ### Start here — what did the last session do?
 
 ```bash
-patchmesh agents      # workers and their tasks, subagents nested under parents
+patchmesh recap       # tasks, spans, calls, files changed, and the commits each task landed
 ```
 
-Or let the agent ask for itself: the **`patchmesh_recap`** MCP tool summarizes previous sessions
-— tasks, spans, call counts, files changed, and the commits each task landed. This is the
-surface that pays off first, and it needs no concurrency at all.
+This is the surface that pays off first: it returns real value on a single agent working alone
+and needs no concurrency at all. Agents ask the same question for themselves through the
+**`patchmesh_recap`** MCP tool, which returns the same answer — one implementation, so the two
+cannot drift.
 
 ### The rest
 
 ```bash
+patchmesh agents                  # workers and their tasks, subagents nested under parents
 patchmesh status                  # store health, counts, observation coverage
 patchmesh events --limit 50       # durable event page (--type, --since, --follow, --raw)
-patchmesh graph                   # open the work-graph explorer in a browser
+patchmesh graph                   # serve the work-graph explorer, print its link
 patchmesh overlaps                # files more than one worker changed (--within <minutes>)
 patchmesh explain <decision-id>   # full explanation for one decision
 ```
@@ -172,8 +189,11 @@ Stated plainly, because a green test suite is not evidence that a product works:
 - **One file's contention is only visible across drains.** Snapshot diffing sees final state, so
   a file written by two agents inside one drain window yields one change and one surviving
   mtime. A property of the approach, not a bug.
-- **Two worktrees keep two ledgers.** The ledger lives at the worktree root, so cross-worktree
-  overlap has no shared store to query. Ledger scope is an open decision.
+- **Two worktrees now share one ledger**, so cross-worktree overlap works — staged with the
+  real binaries in two linked worktrees contending on one file, and `overlaps` reports it from
+  either side. What is still unproven is the same thing as above: no team has run it. The
+  ledger lives under the repository's *primary* worktree, so a single-worktree checkout is
+  unaffected and nothing had to be migrated.
 - **Reads are invisible, and observing harder will not fix it.** A write leaves a difference on
   disk; a read leaves no trace at all. Recovering it would mean parsing intent out of shell
   commands, which this project does not do.

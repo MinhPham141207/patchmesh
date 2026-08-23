@@ -40,15 +40,17 @@ not mutation of the original event. See [Event Protocol V1](protocol/events.md) 
 | `agents` | Phase 1 - Observe and Replay | Available, read-only |
 | `events` | Phase 1 - Observe and Replay | Available, read-only |
 | `graph` | Phase 1 - Observe and Replay | Available, read-only |
+| `recap` | Recorder slice - continuity | Available, read-only, report-only |
 | `overlaps` | Recorder slice - recall | Available, read-only, report-only |
 | `stale` | Phase 2 - Deterministic Detection | Available, report-only; declines without proxy-recorded evidence |
 | `contracts` | Phase 2 - Deterministic Detection | Available, report-only; declines without proxy-recorded evidence |
 | `explain` | Phase 2 - Deterministic Detection | Available, read-only, report-only |
 | `feedback` | Phase 2 - Deterministic Detection | Available, append-only, report-only |
 | `init` | Recorder slice - setup | Available, writes host configuration |
+| `doctor` | Recorder slice - setup | Available, read-only; exits non-zero when recording is broken |
 | `prune` | Recorder slice - retention | Available, deletes events past a cutoff |
 | `start`, `stop` | Unscheduled support designs | Not available |
-| `follow`, `inspect`, `doctor` | Unscheduled support designs | Not available |
+| `follow`, `inspect` | Unscheduled support designs | Not available |
 | `watch` | Deferred dashboard design | Not available |
 
 The detailed unscheduled sections below preserve design work only. They are not MVP
@@ -526,10 +528,14 @@ Recommended check:
 Explore the current rebuildable work-graph projection. This command is read-only;
 the append-only event log remains the source of truth.
 
-By default it serves the projection as a local page and opens it in a browser. Four days of
+By default it serves the projection as a local page and prints the link. Four days of
 work in one repository projects to around a thousand nodes and edges, two thirds of them
 content-hash versions - printed as text that is a data dump rather than an answer, so the
 terminal gets a link and the page gets the graph.
+
+Nothing is launched for you. The command prints the address and holds the server open; follow
+the link when you want it, in whichever browser you want it in. Most terminals make the URL
+clickable.
 
 The page is bound to `127.0.0.1` and never to a routable address: a ledger names every file an
 agent touched in a private repository. It re-reads the ledger on every request, so leaving the
@@ -549,7 +555,6 @@ patchmesh graph [options]
 --task <id>       Limit the projection to one task
 --resource <id>   Limit the projection to one resource
 --port <n>        Bind this loopback port instead of an ephemeral one
---no-open         Serve without launching a browser
 --print           Print the projection as text instead of serving it
 --json            Print machine-readable output instead of serving it
 ```
@@ -578,7 +583,8 @@ the selection.
 Work graph at http://127.0.0.1:52413
 Reading /repo/.patchmesh/ledger.db
 
-The page re-reads the ledger on reload. Press Ctrl+C to stop serving.
+Open the link above when you want it. The page re-reads the ledger on reload,
+so it stays current while you work. Press Ctrl+C to stop serving.
 ```
 
 `--print` renders the projection as text instead, naming nodes by path:
@@ -594,6 +600,63 @@ version packages/query/src/services.ts@2e6f071c
 ---
 
 # Coordination Inspection
+
+## `patchmesh recap`
+
+**Roadmap placement:** Recorder slice - continuity. Available, read-only, report-only.
+
+What previous sessions did here: tasks, spans, call counts, files changed, and the commits each
+task landed.
+
+This is the surface that pays off first, and the one to start with. It returns real value on a
+single agent working alone and needs no concurrency at all, which is the workflow almost every
+reader actually has - `overlaps` needs two agents running at once before it can say anything.
+
+It is the same answer the `patchmesh_recap` MCP tool gives an agent, rendered for a person.
+Deliberately one implementation: the recap's wording is the product of measuring what an agent
+needed in order to resume instead of re-deriving, and a person reading a terminal needs the
+same things. Two renderings would drift, and the CLI's would be the one nobody measured.
+
+### Bounds
+
+A recap is a summary, so it is bounded twice: in how many tasks it describes and in how much it
+says about each. An unbounded recap is just the ledger again, and re-reading the ledger is not
+cheaper than re-reading the code. Defaults are one day back and five tasks; both truncations
+are reported rather than silent.
+
+### Usage
+
+```bash
+patchmesh recap [--within <minutes>] [--limit <n>] [--agent <id>] [--json]
+```
+
+### Options
+
+```text
+--within <minutes>         How far back to look (default 1440, one day)
+--limit <n>                How many tasks to describe (default 5, maximum 25)
+--agent <id>               Narrow to one agent's work
+--json                     Print machine-readable output
+```
+
+### Example output
+
+```text
+3 recent task(s) in this repository, most recent first:
+- task_c2f162a4-6c09-4341-a5f0-5d16b4e95e6b
+  agent_c460874d-db62-471e-a101-d2791ce85c48, 2026-08-23T03:12:59.094Z to 2026-08-23T03:17:28.865Z, 13 call(s)
+  changed: README.md, apps/cli/src/args.ts, apps/cli/src/main.ts (+3 more)
+  committed: Bind observed changes to the calls that caused them
+(40 older task(s) not shown.)
+61 call(s) belong to no task and are not summarized here.
+This is what was done, not what it means. A changed file is not a finished intention.
+```
+
+Calls belonging to no task are counted and declared rather than folded into somebody else's
+task. `committed:` is a timing claim, not a statement of purpose: a task may land no commits or
+several, and one commit may carry work from several tasks.
+
+---
 
 ## `patchmesh overlaps`
 
@@ -894,55 +957,65 @@ decision.delivery.changed
 
 ## `patchmesh doctor`
 
-**Roadmap placement:** Unscheduled support design. Not available.
+**Roadmap placement:** Recorder slice - setup. Available, read-only.
 
-Check whether PatchMesh can reliably observe the repository and configured runtimes.
+Check whether PatchMesh is actually recording in this repository.
+
+Both hook binaries always exit `0` by design - a recorder that can break an agent session gets
+uninstalled - so every failure is silent, and every silent failure looks exactly like an idle
+repository. Hooks that were never loaded, a global install missing its recorder binary, and a
+repository nobody has worked in yet all present the same way: an empty ledger and no
+explanation. This command is the other half of failing open. It changes nothing; it says which
+of those states the repository is in.
+
+It never requires, and never creates, the ledger it is diagnosing - the most useful moment to
+run it is before one exists.
 
 ### Usage
 
 ```bash
-patchmesh doctor [options]
-```
-
-### Options
-
-```text
---fix     Apply safe automatic fixes
---json    Print machine-readable diagnostics
+patchmesh doctor [--json]
 ```
 
 ### Checks
 
 ```text
-Git repository
-Configuration validity
-Daemon availability
-Database access
-Runtime hook installation
-MCP proxy configuration
-Filesystem watcher
-Git diff collection
-Tree-sitter parsers
-Event ingestion
-Agent identity propagation
-Tool bypass risk
-Log directory permissions
+node        The runtime can open the event store at all (node:sqlite needs Node 24+)
+repository  A git worktree was found, and whether it is a linked one
+hooks       PatchMesh's hooks are present in .claude/settings.local.json
+recorder    The binaries those hooks name actually resolve on this machine
+mcp         The patchmesh MCP server is registered in .mcp.json
+gitignore   .patchmesh/ is kept out of version control
+ledger      The ledger exists, how many events it holds, and how recent they are
+journal     Entries waiting to be drained, interrupted drains, unrepresentable entries
 ```
+
+A hook command whose path the host expands (`$CLAUDE_PROJECT_DIR/...`) is reported as
+unverified rather than broken. Claiming a failure that cannot be demonstrated sends people to
+reinstall something that was never wrong.
 
 ### Example output
 
 ```text
-PATCHMESH READINESS
+[OK] node: v24.15.0
+[OK] repository: D:\patchmesh
+[OK] hooks: all 5 hooks installed
+[OK] mcp: MCP server registered in .mcp.json
+[OK] gitignore: .patchmesh/ is ignored
+[OK] ledger: 3241 event(s) in D:\patchmesh\.patchmesh\ledger.db, latest 2026-08-23T03:17:28.865Z
+[OK] journal: 108 entr(ies) waiting for the next drain
 
-[OK] Git repository detected
-[OK] Configuration loaded
-[OK] SQLite database writable
-[OK] Claude Code hooks installed
-[OK] Filesystem watcher active
-[OK] Agent IDs present in tool events
-[WARN] Direct shell access may bypass tool-level intent tracking
-[WARN] Coverage is degraded: shell effects are verified after execution
+PatchMesh is recording.
 ```
+
+### Exit code
+
+`0` when nothing is broken, `3` when something is. This is the one report whose exit code
+carries the answer: every other command exits `0` when it has successfully reported bad news,
+which is correct for a report and useless for a health check meant to gate anything.
+
+Warnings do not make the exit code non-zero. A configured repository with no ledger yet has
+nothing wrong with it.
 
 ---
 

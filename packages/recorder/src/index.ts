@@ -6,6 +6,7 @@ export {
   createEventId,
   deterministicUuid,
   findWorktreeRoot,
+  ledgerRootFor,
   logicalPathFor,
   resolveRepositoryIdentity,
   resourceIdForPath,

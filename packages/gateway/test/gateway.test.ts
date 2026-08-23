@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { commitsWithin, readCommitsSince } from "../src/label.js";
+import { commitsWithin, readCommitsSince } from "patchmesh-query";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
