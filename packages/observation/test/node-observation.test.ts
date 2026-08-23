@@ -16,7 +16,25 @@ import {
   type ObservationContext,
 } from "../src/index.js";
 
-const settleWatcher = () => new Promise<void>((resolve) => setTimeout(resolve, 50));
+/**
+ * Give the OS watcher time to deliver what was just written.
+ *
+ * There is no observable signal to poll here — the journal these tests are about is internal
+ * to the boundary, and the only public way to read it is to open a window, which is the thing
+ * under test. So this is a wait, and the only honest question is how long.
+ *
+ * It was 50ms, which is a number that holds on an idle developer machine and nowhere else.
+ * `fs.watch` delivery is not bounded by anything: on a loaded CI runner, with a virtualised
+ * disk and a virus scanner in the path, it can take an order of magnitude longer. A test that
+ * assumes otherwise passes locally forever and fails on someone else's machine — the same
+ * shape as the platform-pinned assertions that kept this repository's CI red on Linux from the
+ * day it was added.
+ *
+ * The cost of being generous is bounded and small: this runs three times in the whole suite.
+ * The cost of being wrong is a red build that reproduces nowhere.
+ */
+const WATCHER_SETTLE_MS = 750;
+const settleWatcher = () => new Promise<void>((resolve) => setTimeout(resolve, WATCHER_SETTLE_MS));
 
 function reconciliationHarness() {
   const pending: Array<() => Promise<void>> = [];
