@@ -43,12 +43,40 @@ export interface ResumeMetrics {
   /** Bounds of the measured window, so a frozen baseline says what it was measured over. */
   readonly firstEventAt: string | null;
   readonly lastEventAt: string | null;
+  /**
+   * The cohort this reading covers, echoed back so a frozen artifact states its own scope.
+   *
+   * A median with no cohort attached is not comparable to anything: the whole use of this
+   * command now is comparing sessions that started before an intervention against sessions
+   * that started after it.
+   */
+  readonly cohort: { readonly since: string | null; readonly until: string | null };
+  /** Sessions excluded because they started outside the cohort, so a small `n` explains itself. */
+  readonly excludedByCohort: number;
 }
 
 export interface ResumeMetricsOptions {
   readonly ledgerPath: string;
   /** Narrow to one agent. Omitted means every agent that worked here. */
   readonly agent?: string | undefined;
+  /**
+   * Select a cohort of sessions by when each session **started**, not by event time.
+   *
+   * This distinction is the whole point of the flag, and getting it wrong makes the number
+   * meaningless. A session is a single unit of orientation: it starts cold, works out where it
+   * is, and eventually changes something. Filtering its *events* by time cuts that unit in half
+   * and reports the remainder as though it were a whole session.
+   *
+   * It is not hypothetical. When `SessionStart` injection was installed here, exactly one
+   * session was running, and it had begun five hours earlier. Splitting on event time would
+   * have put its orientation in the control arm and its later work in the treatment arm, and
+   * produced a treatment median from a session that was never treated. Splitting on session
+   * start puts it wholly in the arm it belongs to.
+   *
+   * ISO timestamps, compared as strings against the session's first observed event.
+   */
+  readonly since?: string | undefined;
+  readonly until?: string | undefined;
   /**
    * Count subagents as their own agents rather than folding them into a parent.
    *
@@ -128,7 +156,16 @@ export function measureTimeToResume(options: ResumeMetricsOptions): ResumeMetric
     byAgent.set(agentId, accumulator);
   }
 
+  // The cohort is applied here, after every event has been seen, because a session's start is
+  // not known until its earliest event has been read. Filtering during the scan would need the
+  // answer before it could be computed.
+  const inCohort = (accumulator: Accumulator): boolean =>
+    (options.since === undefined || accumulator.firstEventAt >= options.since)
+    && (options.until === undefined || accumulator.firstEventAt <= options.until);
+  const excludedByCohort = [...byAgent.values()].filter((accumulator) => !inCohort(accumulator)).length;
+
   const agents: AgentResumeMeasurement[] = [...byAgent.entries()]
+    .filter(([, accumulator]) => inCohort(accumulator))
     .map(([agentId, accumulator]) => ({
       agentId,
       callsBeforeFirstChange: accumulator.callsBeforeFirstChange,
@@ -154,6 +191,8 @@ export function measureTimeToResume(options: ResumeMetricsOptions): ResumeMetric
     eventCount: events.length,
     firstEventAt,
     lastEventAt,
+    cohort: { since: options.since ?? null, until: options.until ?? null },
+    excludedByCohort,
   };
 }
 
@@ -169,8 +208,16 @@ export function renderResumeMetrics(metrics: ResumeMetrics): string {
     `Never changed:     ${metrics.agentsWithoutChange}`,
     `Events read:       ${metrics.eventCount}`,
     `Window:            ${metrics.firstEventAt ?? "n/a"} to ${metrics.lastEventAt ?? "n/a"}`,
-    "",
   ];
+  if (metrics.cohort.since !== null || metrics.cohort.until !== null) {
+    // Stated rather than implied: a cohort reading and a whole-history reading look identical
+    // otherwise, and confusing the two is how a treatment median gets compared against itself.
+    lines.push(
+      `Cohort:            sessions started ${metrics.cohort.since ?? "any time"} to ${metrics.cohort.until ?? "now"}`,
+      `Excluded:          ${metrics.excludedByCohort} session(s) started outside it`,
+    );
+  }
+  lines.push("");
   for (const agent of metrics.agents) {
     const value = agent.callsBeforeFirstChange === null
       ? `never changed a file (${agent.totalCalls} call(s))`

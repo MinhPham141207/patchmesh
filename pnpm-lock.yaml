@@ -140,6 +140,9 @@ importers:
 
   packages/recorder:
     dependencies:
+      patchmesh-analyzers:
+        specifier: workspace:*
+        version: link:../analyzers
       patchmesh-observation:
         specifier: workspace:*
         version: link:../observation

@@ -26,6 +26,11 @@ export type {
 } from "./ingest.js";
 export { ignoredByRepository, observeTurnEffects, readSnapshot, writeSnapshot } from "./effects.js";
 export type { ObserveTurnEffectsOptions, StoredSnapshot, TurnEffects } from "./effects.js";
+// Exported so the version-drift guard can be tested directly. Racing a real drain against a
+// second write cannot test it: when the snapshot happens to catch the newer content, analyzing
+// that content is correct, so the test would be asserting a coin flip.
+export { deriveAnalysisEvents, latestSymbolVersions } from "./symbols.js";
+export type { SymbolDerivationOptions } from "./symbols.js";
 export {
   appendJournalEntry,
   JOURNAL_FILENAME,

@@ -115,6 +115,42 @@ test("an agent that never changed anything is reported apart from the median, no
   }
 });
 
+test("a cohort selects sessions by when they started, not events by when they happened", async () => {
+  const repo = repository();
+  try {
+    writeFileSync(join(repo.root, "seed.ts"), "seed\n", "utf8");
+    await baseline(repo);
+
+    // One session that starts early and keeps working past the cutoff. This is the shape that
+    // matters: when SessionStart injection was installed here, exactly one session was running
+    // and it had begun five hours earlier. Splitting on event time would put its orientation in
+    // one arm and its later work in the other, and report a treatment median for a session that
+    // was never treated.
+    await runTurn(repo, "2026-08-21T11:00:00.000Z", [read("seed.ts"), read("seed.ts")], () => {});
+    await runTurn(repo, "2026-08-21T12:30:00.000Z", [read("seed.ts")], () => {
+      writeFileSync(join(repo.root, "one.ts"), "changed\n", "utf8");
+    });
+
+    const cutoff = "2026-08-21T12:00:00.000Z";
+
+    const before = measureTimeToResume({ ledgerPath: repo.ledgerPath, until: cutoff });
+    assert.equal(before.measuredAgents, 1, "the session started before the cutoff, so it is in this arm");
+    assert.equal(before.agents[0]!.callsBeforeFirstChange, 3, "the whole session counts, including work after the cutoff");
+    assert.equal(before.excludedByCohort, 0);
+
+    const after = measureTimeToResume({ ledgerPath: repo.ledgerPath, since: cutoff });
+    assert.equal(after.agents.length, 0, "a session that started earlier is not in the later arm");
+    assert.equal(after.excludedByCohort, 1, "and it is counted as excluded rather than silently dropped");
+    assert.equal(after.medianCalls, null);
+
+    // The reading states its own scope, or it is not comparable to anything.
+    assert.deepEqual(before.cohort, { since: null, until: cutoff });
+    assert.match(renderResumeMetrics(before), /Cohort:\s+sessions started any time to/u);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
 test("nothing recorded is said plainly rather than reported as a median of nothing", () => {
   const repo = repository();
   try {

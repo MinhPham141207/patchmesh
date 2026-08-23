@@ -21,6 +21,7 @@
     "test": "tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
+    "patchmesh-analyzers": "workspace:*",
     "patchmesh-observation": "workspace:*",
     "patchmesh-protocol": "workspace:*",
     "patchmesh-storage": "workspace:*"

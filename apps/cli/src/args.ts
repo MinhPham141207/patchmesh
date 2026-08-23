@@ -254,6 +254,16 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       index += 1;
       continue;
     }
+    // `recap --metrics` takes the same two bounds, but means something different by them: they
+    // select sessions by when each one started, not events by when they happened. See
+    // `ResumeMetricsOptions.since`.
+    if (["--since", "--until"].includes(option) && command === "recap") {
+      const optionValue = value(argv, index, option);
+      if (option === "--since") since = optionValue;
+      if (option === "--until") until = optionValue;
+      index += 1;
+      continue;
+    }
     if (["--since", "--until", "--cursor"].includes(option) && command === "events") {
       const optionValue = value(argv, index, option);
       if (option === "--since") since = optionValue;
@@ -286,7 +296,13 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   if (command === "feedback" && disposition === null) throw new ReadServiceError("usage", "feedback requires a disposition");
   if (command === "delivery" && deliveryDecisionId === null) throw new ReadServiceError("usage", "delivery requires a decision ID");
   if (command === "delivery" && deliveryState === null) throw new ReadServiceError("usage", "delivery requires a state");
-  if (command !== "events" && (raw || follow || eventType !== undefined || since !== undefined || until !== undefined || limit !== undefined || cursor !== undefined)) {
+  if (command === "recap" && !recapMetrics && (since !== undefined || until !== undefined)) {
+    throw new ReadServiceError("usage", "--since and --until apply to recap --metrics; use --within for a recap");
+  }
+  if (command !== "events" && (raw || follow || eventType !== undefined || limit !== undefined || cursor !== undefined)) {
+    throw new ReadServiceError("usage", "event options require the events command");
+  }
+  if (command !== "events" && command !== "recap" && (since !== undefined || until !== undefined)) {
     throw new ReadServiceError("usage", "event options require the events command");
   }
   return {

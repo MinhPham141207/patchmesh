@@ -8,6 +8,7 @@ import { SqliteEventStore } from "patchmesh-storage";
 import {
   appendJournalEntry,
   buildHookEvents,
+  deriveAnalysisEvents,
   findWorktreeRoot,
   ingestJournal,
   journalPathFor,
@@ -17,6 +18,7 @@ import {
   normalizeOperation,
   normalizeTool,
   recordHook,
+  recordTurnEffects,
   resolveRepositoryIdentity,
 } from "../src/index.js";
 
@@ -350,5 +352,102 @@ test("two linked worktrees drain into the shared ledger without losing either on
   } finally {
     rmSync(main, { recursive: true, force: true });
     rmSync(linked, { recursive: true, force: true });
+  }
+});
+
+test("an observed change to a supported source file also records its symbols", async () => {
+  const root = temporaryWorktree();
+  try {
+    const ledgerPath = join(root, ".patchmesh", "ledger.db");
+    const snapshotPath = join(root, ".patchmesh", "snapshot.json");
+    const journalPath = journalPathFor(root, ".patchmesh");
+
+    writeFileSync(join(root, "seed.ts"), "export const seed = 1;\n", "utf8");
+    await recordTurnEffects({ worktreeRoot: root, ledgerPath, snapshotPath, turn: null });
+
+    const at = "2026-08-23T12:00:00.000Z";
+    appendJournalEntry(journalPath, { session_id: "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17", hook_event_name: "UserPromptSubmit" }, at);
+    appendJournalEntry(journalPath, hookPayload({ tool_name: "Edit", tool_input: { file_path: "api.ts" } }), at);
+    const drained = ingestJournal({ worktreeRoot: root, journalPath, ledgerPath });
+    writeFileSync(join(root, "api.ts"), "export function greet(name: string): string { return name; }\n", "utf8");
+    await recordTurnEffects({ worktreeRoot: root, ledgerPath, snapshotPath, turn: drained.closedTurn, now: () => at });
+
+    const store = SqliteEventStore.open(ledgerPath);
+    try {
+      const events = store.read();
+      const symbols = events.filter((event) => event.eventType === "symbol.changed");
+      assert.equal(symbols.length > 0, "at least one exported symbol is recorded" && symbols.length > 0);
+
+      const greet = symbols.find((event) => event.payload.resource.locator.includes("greet"));
+      assert.ok(greet, `expected a symbol for greet, got ${symbols.map((s) => s.payload.resource.locator).join(", ")}`);
+      // The causal parent must be the file change that proved the file moved, or the symbol is
+      // a claim with nothing behind it.
+      const parent = events.find((event) => event.eventId === greet.causationId);
+      assert.equal(parent?.eventType, "file.changed");
+      assert.equal(greet.correlationId, parent.correlationId, "a child shares its parent's correlation");
+      assert.equal(greet.taskId, parent.taskId, "and its attribution");
+
+      // The rule that matters and that per-event parsing cannot see: the whole set has to
+      // replay. A correlation may hold only one root, and adding children to an existing
+      // correlation is exactly where that invariant gets broken silently.
+      assert.deepEqual(validateEventSet(events), []);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("a file that no longer matches the version observed is not analyzed as that version", () => {
+  // Tested directly rather than by racing a drain against a second write: when the snapshot
+  // happens to catch the newer content, analyzing that content is correct, so a race would be
+  // asserting a coin flip. The rule is about the guard, so the guard is what gets the test.
+  const root = temporaryWorktree();
+  try {
+    writeFileSync(join(root, "api.ts"), "export function present(): void {}\n", "utf8");
+    const identity = resolveRepositoryIdentity(root);
+    const source = { kind: "watcher" as const, sourceId: "source_patchmesh_observer", instanceId: identity.worktreeId.slice(3) };
+    const resource = { resourceId: `res_${"a".repeat(64)}`, repositoryId: identity.repositoryId, kind: "file" as const, locator: "api.ts" };
+    const version = {
+      resourceId: resource.resourceId,
+      domain: { repositoryId: identity.repositoryId, workspaceId: identity.workspaceId, worktreeId: identity.worktreeId },
+      kind: "content_hash" as const,
+      // A hash the file on disk does not have: the content moved on after it was observed.
+      value: "0".repeat(64),
+      evidenceEventIds: ["evt_00000000000000000000000000000001"],
+    };
+    const change = {
+      schemaVersion: 1 as const,
+      eventId: "evt_00000000000000000000000000000001",
+      eventType: "file.changed" as const,
+      source,
+      timestamp: "2026-08-23T12:00:00.000Z",
+      repositoryId: identity.repositoryId,
+      workspaceId: identity.workspaceId,
+      worktreeId: identity.worktreeId,
+      agentId: null,
+      taskId: null,
+      correlationId: "corr_00000000000000000000000000000001",
+      causationId: null,
+      sourceSequence: null,
+      payload: { resource, beforeVersion: null, afterVersion: version, changeKind: "modified" as const },
+    };
+
+    const derived = deriveAnalysisEvents({
+      identity,
+      source,
+      changes: [change as never],
+      priorSymbolVersions: new Map(),
+      now: () => "2026-08-23T12:00:01.000Z",
+      nextEventId: () => "evt_00000000000000000000000000000002",
+    });
+
+    // A signature that never existed at the observed version is a fabricated fact, which is
+    // worse than a missing one.
+    assert.deepEqual(derived, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

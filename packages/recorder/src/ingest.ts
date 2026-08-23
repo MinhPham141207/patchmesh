@@ -14,7 +14,8 @@ import { SqliteEventStore } from "patchmesh-storage";
 import type { AgentId } from "patchmesh-protocol";
 import { observeTurnEffects, type EffectAttributionCall } from "./effects.js";
 import { buildHookEvents, type HookPayload } from "./hook.js";
-import { agentIdForSession, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
+import { agentIdForSession, createEventId, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
+import { deriveAnalysisEvents, latestSymbolVersions } from "./symbols.js";
 import { ABANDONED_AFTER_MS } from "./inflight.js";
 import { appendJournalEntry, parseJournalLine, type JournalEntry } from "./journal.js";
 import {
@@ -226,6 +227,29 @@ export async function recordTurnEffects(options: RecordTurnEffectsOptions): Prom
     try {
       // One append per change: a file that cannot be represented must not discard the rest.
       for (const event of events) store.appendAtomic([event]);
+
+      // Symbols are derived after the changes are durable, and appended separately. Each one
+      // names its `file.changed` as causal parent, so the parent must already be in the ledger;
+      // and deriving them cannot be allowed to cost the observations, which are the thing this
+      // function exists to record. A parse failure loses symbols, never file changes.
+      try {
+        const symbols = deriveAnalysisEvents({
+          identity,
+          source: {
+            kind: "watcher",
+            sourceId: "source_patchmesh_observer",
+            instanceId: identity.worktreeId.slice("wt_".length),
+          },
+          changes: events,
+          priorSymbolVersions: latestSymbolVersions(store.read({ eventTypes: ["symbol.changed"] })),
+          now: options.now ?? (() => new Date().toISOString()),
+          nextEventId: () => createEventId(),
+        });
+        for (const symbol of symbols) store.appendAtomic([symbol]);
+      } catch {
+        // Deliberately silent, like every other recorder failure: this runs after a session
+        // ends and has no one to report to. The observations above are already committed.
+      }
     } finally {
       store.close();
     }

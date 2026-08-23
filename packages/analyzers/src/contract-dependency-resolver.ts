@@ -6,11 +6,33 @@ import type { ResolvedContractDependency } from "./dependency-events.js";
 
 const supportedExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] as const;
 
+/**
+ * Compiled-output extensions a TypeScript source file is imported as.
+ *
+ * Under NodeNext resolution a TypeScript file imports its sibling as `./lib.js`, because the
+ * specifier has to name the file that will exist at runtime. The source on disk — and the file
+ * whose contracts are recorded — is `lib.ts`. Matching the specifier literally therefore
+ * resolves nothing in any project using the convention, including this one: every import looked
+ * for a `.js` file that no analyzer had ever produced facts for, so no dependency was ever
+ * resolved and `dependency.changed` could not be emitted.
+ */
+const RUNTIME_TO_SOURCE_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
+  ".js": [".ts", ".tsx"],
+  ".mjs": [".mts"],
+  ".cjs": [".cts"],
+};
+
 function candidateSourceLocators(consumerLocator: string, specifier: string): readonly string[] {
   if (!specifier.startsWith(".")) return [];
   const resolved = posix.normalize(posix.join(posix.dirname(consumerLocator), specifier));
   const extension = posix.extname(resolved);
-  if (extension !== "") return [resolved];
+  if (extension !== "") {
+    const sources = RUNTIME_TO_SOURCE_EXTENSIONS[extension] ?? [];
+    const withoutExtension = resolved.slice(0, resolved.length - extension.length);
+    // The literal spelling stays first and stays a candidate: a project that really does import
+    // a checked-in `.js` file must keep resolving to it.
+    return [resolved, ...sources.map((candidate) => `${withoutExtension}${candidate}`)];
+  }
   return [
     ...supportedExtensions.map((candidate) => `${resolved}${candidate}`),
     ...supportedExtensions.map((candidate) => `${resolved}/index${candidate}`),

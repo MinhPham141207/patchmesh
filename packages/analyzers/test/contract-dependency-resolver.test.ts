@@ -89,3 +89,41 @@ test("does not resolve bare specifiers, missing symbols, or cross-target contrac
   assert.deepEqual(resolveLocalContractDependencies([api, crossTarget]), []);
   assert.equal(resolveLocalContractDependencies([otherTargetApi, crossTarget]).length, 1);
 });
+
+test("a TypeScript import naming its compiled output resolves to the source it comes from", () => {
+  // Under NodeNext resolution a TypeScript file imports its sibling as `./api.js`, because the
+  // specifier has to name the file that exists at runtime. The source on disk, and the file
+  // whose contracts are recorded, is `api.ts`. Matching the specifier literally resolved
+  // nothing in any project using the convention -- including this one -- so no dependency was
+  // ever resolved and `dependency.changed` could never be emitted from real traffic.
+  const api = facts("src/api.ts", "export interface Account { id: string }");
+  const consumer = facts("src/consumer.ts", 'import { Account } from "./api.js";\nexport function use(value: Account) {}');
+
+  const resolved = resolveLocalContractDependencies([consumer, api]);
+
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0]?.contract.resource.locator, "src/api.ts#Account");
+  assert.equal(resolved[0]?.consumer.specifier, "./api.js");
+});
+
+test("a literally present .js file still resolves to itself rather than to a same-named source", () => {
+  // The mapping adds candidates, it does not replace the literal one: a project that really
+  // does import a checked-in JavaScript file must keep resolving to that file.
+  const api = facts("src/api.js", "export interface Account { id: string }");
+  const consumer = facts("src/consumer.ts", 'import { Account } from "./api.js";\nexport function use(value: Account) {}');
+
+  const resolved = resolveLocalContractDependencies([consumer, api]);
+
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0]?.contract.resource.locator, "src/api.js#Account");
+});
+
+test("an import that could be either a source or its compiled output is left unresolved", () => {
+  // Both `api.ts` and `api.js` export the name. Two candidates is ambiguity, and the resolver's
+  // whole contract is that it refuses to guess rather than inventing a dependency.
+  const source = facts("src/api.ts", "export interface Account { id: string }");
+  const compiled = facts("src/api.js", "export interface Account { id: string }");
+  const consumer = facts("src/consumer.ts", 'import { Account } from "./api.js";\nexport function use(value: Account) {}');
+
+  assert.equal(resolveLocalContractDependencies([consumer, source, compiled]).length, 0);
+});

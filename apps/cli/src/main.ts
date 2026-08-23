@@ -146,6 +146,8 @@ async function renderCommand(
       const metrics = measureTimeToResume({
         ledgerPath: parsed.databasePath ?? "",
         ...(parsed.agentFilters.agentId === undefined ? {} : { agent: parsed.agentFilters.agentId }),
+        ...(parsed.eventQuery.since === undefined ? {} : { since: parsed.eventQuery.since }),
+        ...(parsed.eventQuery.until === undefined ? {} : { until: parsed.eventQuery.until }),
       });
       return parsed.json ? `${JSON.stringify(metrics)}\n` : `${renderResumeMetrics(metrics)}\n`;
     }
