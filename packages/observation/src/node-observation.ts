@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback, spawn } from "node:child_process";
-import { watch, type BigIntStats, type FSWatcher } from "node:fs";
+import { realpathSync, watch, type BigIntStats, type FSWatcher } from "node:fs";
 import { lstat, readFile, readlink, readdir } from "node:fs/promises";
 import { dirname, isAbsolute, resolve, relative, sep } from "node:path";
 import { promisify } from "node:util";
@@ -62,13 +62,41 @@ async function gitValue(root: string, ...args: string[]): Promise<string | null>
   }
 }
 
+/**
+ * One spelling for a directory that decides repository identity.
+ *
+ * `git rev-parse --git-common-dir` answers *relatively* from a primary worktree (`.git`) and
+ * *absolutely* from a linked one, and the absolute answer is the path the filesystem really
+ * holds. Joining the relative answer onto a caller-supplied root therefore preserves whatever
+ * spelling the caller used, so one repository reports two different common directories the
+ * moment that root is an 8.3 short path, a symlink, or differently cased - and
+ * `commonDirectory` is exactly the value used to decide that two worktrees are one repository.
+ *
+ * Observed on a GitHub Windows runner, whose TEMP is `C:\Users\RUNNER~1\...`: the primary
+ * worktree reported `RUNNER~1` and the linked worktree `runneradmin`, for one repository.
+ *
+ * `realpathSync.native` returns the casing and long name the filesystem actually holds. Same
+ * lesson and same fix as `canonicalPath` in the recorder, where two spellings of one checkout
+ * once produced two worktree identities in real recorded data: never compare a host-supplied
+ * path without canonicalizing it first.
+ */
+function canonicalDirectory(value: string): string {
+  try {
+    return realpathSync.native(value);
+  } catch {
+    // Not resolvable on disk. The resolved-but-unverified path is still the better answer than
+    // failing metadata capture outright; an absent directory is reported as a gap elsewhere.
+    return value;
+  }
+}
+
 async function captureGitMetadata(root: string): Promise<GitMetadata> {
   const commonDirectoryValue = await gitValue(root, "rev-parse", "--git-common-dir");
   const administrativeDirectoryValue = await gitValue(root, "rev-parse", "--git-dir");
   const revision = await gitValue(root, "rev-parse", "HEAD");
-  const commonDirectory = commonDirectoryValue ? resolve(root, commonDirectoryValue) : null;
+  const commonDirectory = commonDirectoryValue ? canonicalDirectory(resolve(root, commonDirectoryValue)) : null;
   const administrativeDirectory = administrativeDirectoryValue
-    ? resolve(root, administrativeDirectoryValue)
+    ? canonicalDirectory(resolve(root, administrativeDirectoryValue))
     : null;
   const gaps: ObservationGap[] = [];
   if (commonDirectory === null || administrativeDirectory === null || revision === null) {
