@@ -223,6 +223,21 @@ corepack pnpm check     # build, typecheck, tests, Phase 0 corpus, evidence trac
 `pnpm check` is the single definition of correctness; CI runs that same command rather than a
 parallel definition of its own.
 
+### Before pushing, run it on Linux too
+
+CI runs `ubuntu-latest` and `windows-latest`. Development here happens on Windows, so a green
+local run is evidence about one of the two legs — and this repository has twice shipped a
+commit that was green on Windows and red on Linux, once for weeks without anyone noticing.
+
+```bash
+bash tools/ci/check-linux.sh   # runs pnpm check inside WSL against this checkout's HEAD
+```
+
+It exits non-zero when the Linux leg fails, so it can gate a push. Setup instructions are at
+the top of the script. It does **not** reproduce the GitHub *Windows* runner, which differs
+from a developer's Windows box for anything timing-sensitive — a virtualised disk and a loaded
+host change `fs.watch` delivery, which is exactly where the last CI failure landed.
+
 ## License
 
 MIT
