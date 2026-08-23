@@ -128,6 +128,57 @@ test("shares Git common directory while keeping linked worktree administrative d
   }
 });
 
+/**
+ * A second, non-canonical spelling of one directory.
+ *
+ * Each platform gets a different one, because the platforms differ in precisely the way that
+ * causes the bug this guards: Windows is case-insensitive, so re-casing the path names the same
+ * directory, while POSIX is case-sensitive and needs a symlink instead. Neither needs elevated
+ * privileges, unlike the 8.3 short path that first exposed this on a CI runner - that depends
+ * on a volume feature which can be switched off, so it is not something a test may rely on.
+ */
+function alternateSpelling(directory: string, scratch: string): string {
+  if (process.platform === "win32") return directory.toUpperCase();
+  const link = join(scratch, "root");
+  symlinkSync(directory, link, "dir");
+  return link;
+}
+
+test("one repository keeps one common directory across spellings of its root", async () => {
+  const directory = await createRepository();
+  const scratch = mkdtempSync(join(tmpdir(), "patchmesh-m4-spelling-"));
+  try {
+    await git(directory, "worktree", "add", join(directory, "linked"), "-b", "spelling");
+    const alternate = alternateSpelling(directory, scratch);
+    assert.notEqual(alternate, directory, "this test needs a genuinely different spelling to mean anything");
+
+    const boundary = new NodeObservationBoundary({
+      source: {
+        kind: "watcher",
+        sourceId: "source_observation",
+        instanceId: "55555555-5555-4555-8555-555555555555",
+      },
+    });
+    const viaAlternate = await boundary.captureBefore(context(alternate, "55555555555555555555555555555555"));
+    const viaLinked = await boundary.captureBefore(
+      context(join(directory, "linked"), "66666666666666666666666666666666"),
+    );
+
+    // The regression, found by the first windows-latest CI run: `git rev-parse
+    // --git-common-dir` answers relatively from a primary worktree and absolutely - already
+    // resolved by git - from a linked one. Without canonicalization the two disagree whenever
+    // the root is spelled non-canonically, and `commonDirectory` is the value that decides two
+    // worktrees are one repository, so the identity signal contradicts itself.
+    assert.equal(
+      viaAlternate.snapshot.repository.commonDirectory,
+      viaLinked.snapshot.repository.commonDirectory,
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("reports degraded coverage when the workspace is not a Git worktree", async () => {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-m4-non-git-"));
   try {
