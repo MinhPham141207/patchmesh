@@ -1,7 +1,7 @@
 # PatchMesh Vision
 
 > **Status:** Product vision and planned behavior. The M1 workspace/protocol
-> foundation is implemented; see [ROADMAP.md](ROADMAP.md) for delivery status.
+> foundation is implemented; see [DELIVERY_PLAN.md](implementation/DELIVERY_PLAN.md) for delivery status.
 
 ## Overview
 

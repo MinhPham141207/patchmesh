@@ -571,3 +571,32 @@ test("a report command on a repository with no ledger answers instead of failing
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a global install missing its sibling binaries is reported, not written silently", async () => {
+  // `npm install -g patchmesh` links this package's bin and nothing else: the recorder and the
+  // gateway are separate packages, so their bins never reach the PATH. The config written for
+  // that install is syntactically fine and completely inert -- hooks fail open and exit 0, so
+  // nothing is recorded and nothing says why. Verified against a real global install before
+  // this test existed.
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-global-"));
+  const path = process.env["PATH"];
+  try {
+    mkdirSync(join(root, ".git"));
+    // An empty PATH and a packageRoot holding no build force the `global` branch with the
+    // sibling binaries genuinely absent, which is the situation being reported.
+    process.env["PATH"] = "";
+    const result = initializeRepository({ worktreeRoot: root, packageRoot: join(root, "absent") });
+
+    const warning = result.steps.find((step) => step.outcome === "warning");
+    assert.ok(warning, "a global install with no recorder on PATH must warn");
+    assert.match(warning.detail, /npm install -g patchmesh-recorder patchmesh-gateway/);
+
+    // The config is still written: bare names are correct once the siblings are installed, so
+    // refusing would make the fix harder rather than easier.
+    assert.match(readFileSync(join(root, ".mcp.json"), "utf8"), /patchmesh-mcp/);
+    assert.match(renderInit(result, false), /\[!!\]/);
+  } finally {
+    process.env["PATH"] = path;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

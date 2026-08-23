@@ -28,3 +28,6 @@ tools/*/dist/
 
 # Built into the package from the root schema corpus
 packages/protocol/schemas/
+
+# tools/phase1 build output
+.phase1-dist/

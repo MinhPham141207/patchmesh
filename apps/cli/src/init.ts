@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -30,7 +30,7 @@ export interface InitOptions {
 }
 
 export interface InitStep {
-  readonly outcome: "created" | "updated" | "unchanged" | "skipped";
+  readonly outcome: "created" | "updated" | "unchanged" | "skipped" | "warning";
   readonly detail: string;
 }
 
@@ -117,6 +117,29 @@ interface Binaries {
 /** Forward slashes even on Windows: these strings land in JSON other people read and commit. */
 function posix(path: string): string {
   return path.replaceAll("\\", "/");
+}
+
+/**
+ * Whether a bare command name actually resolves on this machine's PATH.
+ *
+ * The global branch below writes bare names on the reasoning that whatever put `patchmesh` on
+ * the PATH put its siblings there too. That is false for the most obvious install of all:
+ * `npm install -g patchmesh` links only this package's bin, and the recorder and gateway are
+ * separate packages whose bins npm never links. The config that produced was syntactically
+ * fine and completely inert -- the hooks fail open and exit 0, so nothing was ever recorded
+ * and nothing ever said why.
+ *
+ * PATH is scanned directly rather than shelling out to `where`/`which`: this runs during
+ * `init` on a machine whose shell is unknown, and a missing lookup tool must not read as a
+ * missing binary. PATHEXT is honoured so the `.cmd` shims npm writes on Windows are found.
+ */
+function onPath(command: string): boolean {
+  const entries = (process.env["PATH"] ?? "").split(delimiter).filter((entry) => entry !== "");
+  const extensions = process.platform === "win32"
+    ? (process.env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((value) => value !== "")
+    : [];
+  return entries.some((entry) =>
+    existsSync(join(entry, command)) || extensions.some((ext) => existsSync(join(entry, command + ext))));
 }
 
 function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
@@ -271,6 +294,17 @@ export function initializeRepository(options: InitOptions): InitResult {
       : ignoreLedger(options.worktreeRoot),
   );
 
+  // A global install that is missing its siblings produces a config that looks correct and
+  // records nothing. Say so here, where the user is standing, rather than leaving them to
+  // discover an empty ledger later.
+  if (binaries.kind === "global" && options.installHooks !== false && !onPath("patchmesh-record")) {
+    steps.push({
+      outcome: "warning",
+      detail: "patchmesh-record is not on PATH - hooks will record nothing."
+        + " Install the siblings: npm install -g patchmesh-recorder patchmesh-gateway",
+    });
+  }
+
   return { steps };
 }
 
@@ -284,15 +318,21 @@ export function initializeRepository(options: InitOptions): InitResult {
 export function renderInit(result: InitResult, json: boolean): string {
   if (json) return `${JSON.stringify(result)}\n`;
   const lines = result.steps.map((step) => {
-    const mark = step.outcome === "skipped" ? "[--]" : step.outcome === "unchanged" ? "[==]" : "[OK]";
+    const mark = step.outcome === "warning" ? "[!!]"
+      : step.outcome === "skipped" ? "[--]"
+      : step.outcome === "unchanged" ? "[==]"
+      : "[OK]";
     return `${mark} ${step.detail}`;
   });
   const wired = result.steps.some((step) => step.outcome === "created" || step.outcome === "updated");
+  const incomplete = result.steps.some((step) => step.outcome === "warning");
   lines.push(
     "",
-    wired
-      ? "Restart the agent session so it loads the new hooks, then work normally."
-      : "Already configured. Work normally; PatchMesh is recording.",
+    incomplete
+      ? "Install the missing binaries above, then restart the agent session."
+      : wired
+        ? "Restart the agent session so it loads the new hooks, then work normally."
+        : "Already configured. Work normally; PatchMesh is recording.",
     "",
     // Recap leads because it is the surface that pays off on one agent working alone, which
     // is the workflow almost every reader of this message actually has. Overlap needs two

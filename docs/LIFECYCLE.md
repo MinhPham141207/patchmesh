@@ -1,6 +1,6 @@
 # PatchMesh Lifecycle
 
-> **Status:** Planned lifecycle semantics. See [ROADMAP.md](ROADMAP.md) for the active
+> **Status:** Planned lifecycle semantics. See [DELIVERY_PLAN.md](implementation/DELIVERY_PLAN.md) for the active
 > delivery phase; listed states and transitions are not claims of implementation.
 
 ## 1. Purpose

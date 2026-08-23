@@ -4,7 +4,7 @@
 > boundary, in-memory collector, append-only SQLite event store, replay core, an
 > in-process MCP runtime boundary, effect observation, rebuildable in-memory graph
 > projections, read-only query/CLI composition, and golden-slice resilience and
-> performance evidence; see [ROADMAP.md](ROADMAP.md) for phase status.
+> performance evidence; see [DELIVERY_PLAN.md](implementation/DELIVERY_PLAN.md) for slice status.
 
 ## 1. Purpose
 
@@ -410,7 +410,7 @@ patchmesh/
 ├─ README.md
 ├─ VISION.md
 ├─ ARCHITECTURE.md
-├─ ROADMAP.md
+├─ implementation/DELIVERY_PLAN.md
 └─ AGENTS.md
 ```
 

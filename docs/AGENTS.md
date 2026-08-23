@@ -16,7 +16,7 @@ Before making changes:
 
 1. Read `docs/VISION.md`.
 2. Read `docs/ARCHITECTURE.md`.
-3. Read `docs/ROADMAP.md` when requested work may affect scope or phase order.
+3. Read `docs/implementation/DELIVERY_PLAN.md` when requested work may affect scope or slice order.
 4. Read `docs/TERMINOLOGY.md` before changing public protocol vocabulary.
 5. Inspect existing code and tests before proposing a new abstraction.
 
@@ -345,7 +345,7 @@ Do not replace behavioral assertions with snapshots when explicit assertions are
 
 Before enabling a new coordination authority level, add scenarios for false positives,
 bypassed operations, event duplication and reordering, crash recovery, and user
-override. Enforcement requires the exit evidence defined in `docs/ROADMAP.md`.
+override. Enforcement requires the exit evidence defined in `docs/implementation/DELIVERY_PLAN.md`.
 
 ## 8. Documentation Rules
 
@@ -362,7 +362,7 @@ Update documentation when changing:
 
 Documentation must describe current behavior, not planned behavior, unless clearly labeled.
 
-- Do not implement a later roadmap phase without updating `docs/ROADMAP.md` and
+- Do not implement a later delivery slice without updating `docs/implementation/DELIVERY_PLAN.md` and
   recording why its prerequisites are satisfied or intentionally changed.
 - When changing a canonical term, update terminology, architecture, lifecycle,
   protocol types, tests, and user-facing documentation together.
@@ -374,7 +374,7 @@ Keep `VISION.md` focused on why and what.
 
 Keep `ARCHITECTURE.md` focused on how.
 
-Keep `ROADMAP.md` focused on build order.
+Keep `DELIVERY_PLAN.md` focused on build order.
 
 Keep `AGENTS.md` focused on implementation rules.
 

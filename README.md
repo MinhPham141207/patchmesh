@@ -1,206 +1,219 @@
 # PatchMesh
 
-PatchMesh is a **shared work ledger for coding agents and their subagents.** Agents write
-to it implicitly, by working through a host hook. They read from it deliberately, to find
-out what has already been done and what is being done right now, so they do not repeat it
-or collide with it.
+**A shared work ledger for coding agents.** PatchMesh records what your agents actually did —
+every tool call, every file they changed, which agent and which task — and hands it back when
+the next session asks.
 
-> **Project status:** the recorder and the read side work and are dogfooded — this
-> repository's own ledger holds several days of real agent sessions. The surface that pays
-> off first is **session continuity** (`patchmesh_recap`), which needs no concurrency at all.
-> File-level overlap is validated on a staged two-session workload; detection beyond it is
-> not demonstrated: see [What is not proven](#what-is-not-proven). The build order is in the
-> [delivery plan](docs/implementation/DELIVERY_PLAN.md).
-
-## The problem
-
-A coding agent starts every session knowing nothing about the last one. It re-reads files
-another agent already read, re-derives conclusions already reached, and — when two agents
-work at once — edits files another agent is holding.
-
-Git detects textual merge conflicts, worktrees isolate changes, orchestrators assign tasks.
-None of them records *what the agents actually did*, which is the thing the next agent needs
-and the thing that is thrown away when a session ends.
-
-PatchMesh records it, and hands it back on request:
+Agents write to it implicitly, through host hooks. They read from it deliberately, to find out
+what has already been done, so they don't repeat it or collide with it.
 
 ```text
-A fresh agent asks: what happened in this repository recently?
-PatchMesh answers: these 15 files changed, by this worker, under this task,
-                   and these 2 calls are still running right now.
+A fresh agent asks:  what happened in this repository recently?
+PatchMesh answers:   these 15 files changed, by this worker, under this task,
+                     and these 2 calls are still running right now.
 ```
 
-**Continuity is the payoff, and it arrives before coordination does.** The first question a
-new session actually asks is "what did the last one do?", and `patchmesh_recap` answers it —
-tasks, spans, files changed, commits landed — on a single agent working alone. Collision
-detection matters, but it only pays when two agents genuinely run at once; continuity pays
-on every session, including the one you are about to start.
+**Report-only.** No command pauses, rejects, or redirects an agent. Both hook binaries always
+exit 0, so a broken PatchMesh can never break your session.
 
-That inverts the value order this project was planned around. Recording was assumed to be
-worth least and judgment most; measured against real use, the ranking runs the other way,
-and the roadmap follows the measurement rather than the plan.
+---
 
-### The net-token invariant
+## Requirements
 
-The read side exists to reduce cost, so it is bound by one rule:
+- **Node.js 24 or newer.** Not a preference — the event store is built on `node:sqlite`'s
+  `DatabaseSync`, which does not exist in earlier versions.
+- **Git.** The repository is the unit of identity.
+- A host that supports hooks. Claude Code is the supported host today.
 
-> Any context PatchMesh returns to an agent must be smaller than the context that agent
-> would otherwise have spent discovering the same thing.
+Check with `node --version`.
 
-Every answer is bounded and ranked, and every answer's size is recorded to
-`.patchmesh/answers.ndjson` so the claim is measurable rather than asserted. An answer that
-quotes shell command strings back at a caller fails this rule, which is why an unnarrowed
-recall summarizes calls instead of listing them.
+---
 
-## Quick start
+## Install
+
+### Globally (recommended for personal use)
+
+```bash
+npm install -g patchmesh patchmesh-recorder patchmesh-gateway
+```
+
+> **Install all three.** `patchmesh` is the CLI you type; `patchmesh-recorder` provides the
+> hook binaries that do the recording; `patchmesh-gateway` provides the MCP server agents read
+> through. `npm install -g patchmesh` alone links only the CLI — the hooks would be configured
+> and silently record nothing, because a hook that cannot find its binary fails open and exits
+> 0. Verify with the command below rather than assuming.
+
+Verify all four commands resolve — this should print four paths:
+
+```bash
+command -v patchmesh patchmesh-record patchmesh-ingest patchmesh-mcp
+```
+
+If fewer than four appear, the missing binaries belong to a package that did not get installed.
+
+### Per repository (recommended for teams)
 
 ```bash
 npm install -D patchmesh patchmesh-recorder patchmesh-gateway
 npx patchmesh init
 ```
 
-Or from a clone of this repository:
+A dependency install lets `init` write **repository-relative** paths, which is the only form
+safe to commit — a global install writes bare binary names, which are correct only on machines
+that also installed globally.
+
+### From a clone
 
 ```bash
 corepack pnpm install && corepack pnpm build
 node apps/cli/dist/main.js init
 ```
 
-`init` writes a command the rest of your team can use. Installed as a dependency it writes a
-path relative to the repository root, so `.mcp.json` and the hook config are safe to commit;
-installed globally it writes the bin names; run from a clone it writes that clone's absolute
-path, which is correct for a developer and correct to keep out of a shared file.
+---
 
-`init` merges the recorder's host hooks into `.claude/settings.local.json`, registers the
-`patchmesh` MCP server in `.mcp.json`, and adds `.patchmesh/` to `.gitignore`. It is additive
-and idempotent: hooks belonging to other tools are never modified, and re-running reports what
-is already configured rather than appending a second copy. Restart the agent session so it
-loads the hooks.
+## Set up
 
-Then work normally. The question to ask first, at the start of your next session, is what
-the last one did — that is `patchmesh_recap`, and an agent can call it over MCP without you
-typing anything. From the CLI:
+Run this once inside the repository you want recorded:
 
 ```bash
-npx patchmesh events   --database .patchmesh/ledger.db
-npx patchmesh overlaps --database .patchmesh/ledger.db
-npx patchmesh prune --older-than 30 --database .patchmesh/ledger.db
+patchmesh init
 ```
 
-Agents get the same ledger back over MCP as `patchmesh_recap` (what previous sessions did),
-`patchmesh_recent_activity` (what changed, optionally scoped to one path), and
-`patchmesh_overlapping_work` (which files more than one task touched).
+It is additive and idempotent — hooks belonging to other tools are never touched, and re-running
+reports what is already configured instead of appending a second copy.
 
-## What works today
+| It writes | What for |
+|---|---|
+| `.claude/settings.local.json` | Five hooks: `UserPromptSubmit` (turn boundary → gives work a task), `PreToolUse` (in-flight visibility), `PostToolUse` (the record of work done), `Stop` and `SessionEnd` (drain the journal into the ledger) |
+| `.mcp.json` | Registers the `patchmesh` MCP server so agents can read the ledger |
+| `.gitignore` | Adds `.patchmesh/` — the ledger is local, per-checkout, and not shared |
 
-Verified against this repository's own ledger, not against fixtures:
+**Then restart your agent session** so the host loads the new hooks. Nothing is recorded until
+you do.
 
-- **Session continuity.** `patchmesh_recap` summarizes previous sessions — tasks, spans,
-  call counts, files changed, and the commits each task landed, matched by committer time.
-  It needs no concurrency, so it returns real value on the ordinary one-agent-at-a-time
-  workflow, and it is the surface to reach for first.
-- **Recording.** A Claude Code `PostToolUse` hook journals every tool call — including
-  built-in `Read`, `Edit`, `Write`, and `Bash`, which no MCP server can see — and
-  `patchmesh-ingest` converts the journal into validated events on `Stop`. Measured
-  overhead **p50 108ms, p95 166ms** per call against a 65ms bare-Node floor. Fail-open
-  throughout: both binaries always exit 0.
-- **Effect observation, bound to the call that caused it.** The worktree is captured per
-  turn and diffed, so a file written by a shell command is recorded even though the command
-  named no path. Each change is then matched to the call whose `[PreToolUse, PostToolUse]`
-  window contains the file's mtime, and binds only when exactly one call's window does —
-  ambiguity stays attributed to the turn rather than guessed at. This routes around shell
-  opacity without ever interpreting a command, and it is what lets two sessions sharing one
-  drain each keep their own attribution instead of both recording as unattributed.
-- **Attribution.** Subagents get their own `agentId` and task, so an answer names the
-  subagent that made an edit rather than the session that contained it.
-- **Recall, over MCP.** `patchmesh_recent_activity`, `patchmesh_overlapping_work`, and
-  `patchmesh_recap` — bounded, ranked, and caveated as observations rather than
-  instructions.
-- **Reports, over the CLI.** `status`, `agents`, `events`, `graph`, `overlaps`, `explain`,
-  plus `feedback` and `delivery` as append-only responses.
-- **Retention.** `patchmesh prune --older-than <days>` keeps replay intact.
+Useful flags: `--force` (overwrite existing entries), `--no-hooks`, `--no-gitignore`, `--json`.
+
+### What gets recorded
+
+Tool calls and observed file changes, written to `.patchmesh/ledger.db` inside your repository.
+Nothing leaves your machine.
+
+Payloads pass through a **key whitelist** before the first disk write — only fields the recorder
+actually reads are kept, with credential-pattern redaction as a backstop and text capped at 512
+characters. File *contents* and full tool responses are never journalled.
+
+To remove old history while keeping the ledger replayable:
+
+```bash
+patchmesh prune --older-than 30
+```
+
+---
+
+## Use
+
+Every report command defaults to `.patchmesh/ledger.db` in the current repository and works from
+any subdirectory, so no flags are needed.
+
+### Start here — what did the last session do?
+
+```bash
+patchmesh agents      # workers and their tasks, subagents nested under parents
+```
+
+Or let the agent ask for itself: the **`patchmesh_recap`** MCP tool summarizes previous sessions
+— tasks, spans, call counts, files changed, and the commits each task landed. This is the
+surface that pays off first, and it needs no concurrency at all.
+
+### The rest
+
+```bash
+patchmesh status                  # store health, counts, observation coverage
+patchmesh events --limit 50       # durable event page (--type, --since, --follow, --raw)
+patchmesh graph                   # work-graph projection, by path
+patchmesh overlaps                # files more than one worker changed (--within <minutes>)
+patchmesh explain <decision-id>   # full explanation for one decision
+```
+
+Add `--json` to any of them for machine-readable output.
+
+### For agents, over MCP
+
+| Tool | Answers |
+|---|---|
+| `patchmesh_recap` | What did previous sessions do? |
+| `patchmesh_recent_activity` | What changed recently, optionally scoped to one path? |
+| `patchmesh_overlapping_work` | Which files did more than one task touch? |
+
+Every answer is bounded and ranked, and its size is logged to `.patchmesh/answers.ndjson`, so
+this rule is measurable rather than asserted:
+
+> Any context PatchMesh returns to an agent must be smaller than the context that agent would
+> otherwise have spent discovering the same thing.
+
+---
+
+## How it works
+
+```text
+Coding agent (host hooks)
+  -> append-only journal           .patchmesh/journal.ndjson   (per call, redacted)
+  -> ingest on Stop                validate, attribute, drain
+  -> SQLite event store            .patchmesh/ledger.db
+  -> work-graph projection + read services
+  -> MCP tools (to agents) and CLI reports (to people)
+```
+
+**Shell commands name no files, so PatchMesh watches the disk instead.** Roughly four in five
+recorded calls are `Bash`, which carries no path argument. The worktree is captured per turn and
+diffed, so a file written by a shell command is still recorded. Each change is then matched to
+the call whose `[PreToolUse, PostToolUse]` window contains the file's mtime — and binds **only
+when exactly one** call's window does. Ambiguity stays attributed to the turn rather than
+guessed at. No shell command is ever parsed.
+
+---
 
 ## What is not proven
 
 Stated plainly, because a green test suite is not evidence that a product works:
 
-- **Concurrency is validated on a staged workload, not an organic one.** `overlaps` fires
-  correctly when two sessions contend on one file, exercised end to end through the real
-  recorder and real drains. But it still returns zero on this repository's own history,
-  because development has been one agent at a time in one worktree. The detector is
-  demonstrated; a real concurrent team has not used it.
-- **One file's contention is only visible across drains.** Snapshot diffing sees final
-  state, so a file written by two agents inside one drain window yields one change and one
-  surviving mtime. This is a property of diff-based observation, not a bug.
-- **Cross-worktree overlap has no shared store.** The ledger lives at the worktree root, so
-  two worktrees keep two ledgers. Ledger scope — per-worktree, per-repository, or
-  per-machine — is still an open decision.
-- **`stale` and `contracts` cannot fire on hook-recorded data.** They are typed against
-  `file.read` / `write.dependent` and `symbol.changed` / `dependency.changed`, which a host
-  hook does not produce. Both decline and name the missing evidence rather than reporting
+- **Concurrency is validated, but not by a real team.** `overlaps` fires correctly when two
+  sessions contend on one file, and has since fired on genuine two-agent contention in this
+  repository. It has not been used by a team working concurrently by design.
+- **One file's contention is only visible across drains.** Snapshot diffing sees final state, so
+  a file written by two agents inside one drain window yields one change and one surviving
+  mtime. A property of the approach, not a bug.
+- **Two worktrees keep two ledgers.** The ledger lives at the worktree root, so cross-worktree
+  overlap has no shared store to query. Ledger scope is an open decision.
+- **Reads are invisible, and observing harder will not fix it.** A write leaves a difference on
+  disk; a read leaves no trace at all. Recovering it would mean parsing intent out of shell
+  commands, which this project does not do.
+- **`stale` and `contracts` cannot fire on hook-recorded data.** They are typed against evidence
+  a host hook does not produce, so they decline and name what is missing rather than reporting
   "no findings" — an inability, not a silence.
-- **Reads are invisible, and no amount of observing fixes it.** Roughly four in five
-  recorded calls are shell commands. A write leaves a difference on disk that observation
-  can find — which is how effect binding recovers it — but a read leaves no trace at all,
-  and recovering one would mean parsing intent out of a command. Coverage reports this as a
-  gap instead of guessing.
-- **Displacement is unmeasured.** Answer *cost* is recorded; what an answer *saved* is not,
-  so the net-token invariant is instrumented on one side only.
+- **Displacement is unmeasured.** Answer *cost* is recorded; what an answer *saved* is not.
 
-## Architecture
-
-```text
-Coding agent (host hooks)
-    -> append-only journal          .patchmesh/journal.ndjson
-    -> ingest (validate, attribute) .patchmesh/ledger.db
-    -> SQLite event store
-    -> work-graph projection + read services
-    -> MCP tools (to agents) and CLI reports (to people)
-```
-
-PatchMesh is not a coding agent, task planner, general orchestrator, Git replacement,
-test replacement, or project-management platform.
-
-## Principles
-
-- Observe intended operations and verify actual effects.
-- Prefer deterministic evidence before semantic reasoning.
-- Distinguish events, findings, decisions, and enforcement.
-- Never claim stronger consistency than observation coverage supports.
-- Choose the least disruptive safe response.
-- Explain every decision with reproducible evidence.
-- Treat completed work as potentially invalidatable until revalidated.
+---
 
 ## Documentation
 
-- [Delivery plan](docs/implementation/DELIVERY_PLAN.md) — the build order actually in use,
-  and why evidence requirements scale with authority
-- [CLI](docs/CLI.md) — every command, its output, and its exit behavior
-- [Vision](docs/VISION.md) — problem, promise, boundaries, and long-term direction
-- [Roadmap](docs/ROADMAP.md) — the original phase structure the delivery plan resequenced
-- [Architecture](docs/ARCHITECTURE.md) — components and technical contracts
-- [Lifecycle](docs/LIFECYCLE.md) — agent, task, event, decision, and revalidation flows
-- [Terminology](docs/TERMINOLOGY.md) — canonical vocabulary
-- [Agent rules](docs/AGENTS.md) — implementation constraints for repository changes
-- [Phase 0 contracts](docs/protocol/identities.md) — versioned identities, events,
-  coordination, validity, evidence, replay fixtures, security, and benchmark inputs
+- [Delivery plan](docs/implementation/DELIVERY_PLAN.md) — what is built, in what order, and why
+- [CLI reference](docs/CLI.md) — every command and flag
+- [Architecture](docs/ARCHITECTURE.md) · [Terminology](docs/TERMINOLOGY.md) ·
+  [Threat model](docs/THREAT_MODEL.md)
+- [Protocol](docs/protocol/) — events, identities, evidence and coverage, replay equivalence
+- [Host adapter boundary](docs/HOST_ADAPTER_BOUNDARY.md) — the non-hook recording path
 
 ## Development
 
-Node 24 or newer is required: the event store is built on `node:sqlite`'s `DatabaseSync`,
-which makes the version a correctness constraint rather than a preference.
-
 ```bash
-corepack pnpm check
+corepack pnpm install
+corepack pnpm check     # build, typecheck, tests, Phase 0 corpus, evidence traces
 ```
 
-One command — build, typecheck, the full test suite, the Phase 0 contract corpus, and
-evidence trace validation. CI runs exactly this, so a green pipeline and a green laptop
-mean the same thing.
+`pnpm check` is the single definition of correctness; CI runs that same command rather than a
+parallel definition of its own.
 
-## Contributing
+## License
 
-Read `docs/implementation/DELIVERY_PLAN.md` and `docs/AGENTS.md` before proposing
-implementation work. Do not describe planned behavior as implemented behavior — the
-[What is not proven](#what-is-not-proven) section above is part of the contract, not a
-disclaimer to be quietly trimmed.
+MIT
