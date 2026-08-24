@@ -371,7 +371,27 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
     this.quiescenceMs = options.quiescenceMs ?? 25;
     this.maxQuiescenceMs = options.maxQuiescenceMs ?? 2_000;
     this.reconciliationEveryWindows = options.reconciliationEveryWindows ?? 100;
-    this.watcherFactory = options.watcherFactory ?? ((root, listener) => watch(root, { recursive: true }, listener));
+    // Canonicalise inside the DEFAULT factory only, not in `session.root`.
+    //
+    // libuv's Windows watcher asserts, in C, that filenames `ReadDirectoryChangesW` reports
+    // begin with the directory string it was handed:
+    //
+    //   Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\\win\\fs-event.c, line 72
+    //
+    // and calls `abort()` when they do not -- a native death no `try`/`catch`, `error`
+    // listener or `uncaughtException` handler can intercept. A GitHub Windows runner reaches
+    // that state because its TEMP is the 8.3 short name `C:\\Users\\RUNNER~1\\...` while the OS
+    // reports changes under the long `C:\\Users\\runneradmin\\...`.
+    //
+    // Canonicalising `session.root` itself fixed that and broke something else: the root a
+    // boundary hands to `watcherFactory` is part of its contract, and callers key on it.
+    // `tools/phase2`'s M0 benchmark registers its stub watcher in a map under that root and
+    // then notifies with the raw one it created, so rewriting it silently lost every event.
+    //
+    // Both constraints hold at once here, because only the real watcher is libuv. An injected
+    // factory is a test double and must receive the root the caller passed in.
+    this.watcherFactory =
+      options.watcherFactory ?? ((root, listener) => watch(canonicalDirectory(root), { recursive: true }, listener));
     this.reconciliationScheduler = options.reconciliationScheduler ?? ((work) => { setImmediate(() => { void work(); }); });
     this.candidateReader = options.candidateReader ?? (async (path) => readFile(path));
   }
