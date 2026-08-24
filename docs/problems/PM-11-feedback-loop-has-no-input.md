@@ -1,6 +1,6 @@
 # PM-11 — The feedback loop has no input
 
-- **Status:** `blocked` (on PM-05)
+- **Status:** `blocked` (on PM-05 **and PM-13**)
 - **Severity:** low
 
 ## The problem
@@ -12,6 +12,20 @@ The ledger contains **zero** `finding.created` events. It always has. There is n
 give feedback about, so the command is a loop with nothing entering it. The same is true of
 `explain <decision-id>` and `delivery`: zero `decision.created`, zero
 `decision.delivery.changed`.
+
+## Re-labelled 2026-08-24 — also blocked on PM-13
+
+This file names PM-05 as the blocker: no `finding.created` events, so nothing to give feedback
+about. That is true and it is not the whole reason.
+
+Even with findings, feedback needs somebody to receive one and respond. Agents called the MCP
+surface **14 times in the ledger's entire life** ([PM-13](PM-13-pull-is-zero-and-the-recap-suppresses-it.md)),
+against 152 calls to the memory server in the same sessions. A feedback loop attached to a
+surface that is asked once per ~395 events does not have a sample problem; it has a traffic
+problem.
+
+Producing findings is necessary. It is not sufficient, and building PM-05 first on the theory
+that feedback follows would produce findings nobody is in a position to respond to.
 
 ## Why it matters
 

@@ -5,7 +5,9 @@ import {
   resolveRepositoryIdentity,
   resourceIdForPath,
 } from "patchmesh-recorder";
-import { SqliteEventStore } from "patchmesh-storage";
+import { readWindowCached } from "patchmesh-storage";
+import { describeWindow } from "./label.js";
+import { idShortener } from "./short-id.js";
 
 /**
  * Where two units of work touched the same file.
@@ -50,10 +52,45 @@ export interface ContentionEvidence {
   readonly earlierWriteAt: string;
   /** When that worker was last observed doing anything at all. */
   readonly earlierWorkerLastActiveAt: string;
+  /**
+   * The earlier worker's nearest observed activity at or before the later write.
+   *
+   * This is the number the claim actually rests on, and reporting it is what lets a reader
+   * tell "was mid-keystroke when the other write landed" from "had a session open". See
+   * `IDLE_GAP_MINUTES`.
+   */
+  readonly earlierWorkerActiveAt: string;
+  /** Milliseconds from that activity to the later write. Small means genuinely simultaneous. */
+  readonly earlierWorkerIdleGapMs: number;
   /** The worker who wrote while the first was still going. */
   readonly laterWorkerAgentId: string | null;
   readonly laterWriteAt: string;
 }
+
+/**
+ * One worker's observed activity: every timestamp it was seen at, ascending.
+ *
+ * A session id is not a unit of time. Agent sessions on this repository span 4 to 68 hours,
+ * and a worker's *last* event says only when its session ended -- so treating "last activity
+ * postdates your write" as "was still working when you wrote" makes every write inside a long
+ * session look contested. Keeping the instants rather than the span is what lets the rule ask
+ * about the moment that matters instead of about the session.
+ */
+export type WorkerActivity = readonly string[];
+
+/**
+ * How long a worker must have been silent before a write for it to count as not present at it.
+ *
+ * Chosen against this repository's ledger rather than picked round. The silences immediately
+ * before the writes the rule calls contention measure 0.3 to 15.6 minutes; the silences that
+ * separate one working session from the next run to hours. Thirty minutes sits above every
+ * real decision point observed here and well below the session boundaries, and it preserves
+ * all seven of the contentions the labelled corpus asserts.
+ *
+ * It is a threshold on a continuum, so the finding also carries the measured gap: a reader who
+ * disagrees with this number can see the evidence that produced the claim.
+ */
+export const IDLE_GAP_MINUTES = 30;
 
 export interface ResourceOverlap {
   readonly logicalPath: string;
@@ -86,6 +123,10 @@ export interface OverlapResult {
    * rather than lost.
    */
   readonly sequential: number;
+  /** The window this answer covers, in minutes, so the answer can say what it looked at. */
+  readonly withinMinutes: number;
+  /** Events seen in the window at all, so a thin ledger can be told from a quiet one. */
+  readonly eventsObserved: number;
 }
 
 const DEFAULT_LIMIT = 20;
@@ -113,37 +154,39 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
   const pathRequested = options.path !== undefined && options.path.trim() !== "";
   const requestedPath = pathRequested ? logicalPathFor(identity.worktreeRoot, options.path!) : null;
   if (pathRequested && requestedPath === null) {
-    return { overlaps: [], truncated: 0, logicalPath: null, filesObserved: 0, sequential: 0 };
+    return {
+      overlaps: [],
+      truncated: 0,
+      logicalPath: null,
+      filesObserved: 0,
+      sequential: 0,
+      withinMinutes,
+      eventsObserved: 0,
+    };
   }
   const targetResourceId =
     requestedPath === null ? null : resourceIdForPath(identity.repositoryId, requestedPath);
 
-  const store = SqliteEventStore.open(options.ledgerPath);
-  let events: readonly ProtocolEvent[];
-  try {
-    // The window and the event type reach SQLite rather than JavaScript: this used to load
-    // every event ever recorded and discard almost all of it, so the cost of one answer grew
-    // with total history instead of with the window asked for.
-    //
-    // `tool.requested` is read alongside the changes because a change is an instant and
-    // contention is about intervals. It is what says whether a worker was still going after
-    // somebody else wrote; without it the only available question is "did these land near each
-    // other", which is a question about the window rather than about the work.
-    events = store.read({ eventTypes: ["tool.requested", "file.changed"], since: since.toISOString() });
-  } finally {
-    store.close();
-  }
+  // The window and the event type reach SQLite rather than JavaScript: this used to load
+  // every event ever recorded and discard almost all of it, so the cost of one answer grew
+  // with total history instead of with the window asked for.
+  //
+  // `tool.requested` is read alongside the changes because a change is an instant and
+  // contention is about intervals. It is what says whether a worker was still going after
+  // somebody else wrote; without it the only available question is "did these land near each
+  // other", which is a question about the window rather than about the work.
+  //
+  // Unchecked and cached, as an advisory read: see `reconstructStoredEvent`.
+  const events = readWindowCached(
+    options.ledgerPath,
+    { eventTypes: ["tool.requested", "file.changed"], since: since.toISOString() },
+    { validate: false },
+  );
 
-  // When each worker was last observed doing anything, which is what turns an instant into an
-  // interval. Computed over every event in the window, calls included: a worker that stopped
-  // changing files but kept reading them has not finished.
-  const lastActiveByWorker = new Map<string, string>();
-  for (const event of events) {
-    if (event.agentId === null && event.worktreeId === null) continue;
-    const worker = workerKey(event.agentId, event.worktreeId ?? null);
-    const seen = lastActiveByWorker.get(worker);
-    if (seen === undefined || event.timestamp > seen) lastActiveByWorker.set(worker, event.timestamp);
-  }
+  // When each worker was actually working, which is what turns an instant into an interval.
+  // Computed over every event in the window, calls included: a worker that stopped changing
+  // files but kept reading them has not finished.
+  const activityByWorker = workerActivityFrom(events);
 
   // Group observed changes by the file they touched, keeping the first time each task touched
   // it: what matters is that a task changed this file, not how many times it did.
@@ -191,7 +234,7 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
     // Asking "am I overlapping with anyone" is the common case, and an overlap the caller is
     // not part of is someone else's business.
     if (options.taskId !== undefined && !tasks.some((task) => task.taskId === options.taskId)) continue;
-    const contention = contentionAmong(tasks, lastActiveByWorker);
+    const contention = contentionAmong(tasks, activityByWorker);
     if (contention === null) {
       sequential += 1;
       continue;
@@ -207,6 +250,8 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
     logicalPath: requestedPath,
     filesObserved: byResource.size,
     sequential,
+    withinMinutes,
+    eventsObserved: events.length,
   };
 }
 
@@ -250,7 +295,7 @@ export function workerKey(agentId: string | null, worktreeId: string | null): st
  */
 export function contentionAmong(
   tasks: readonly OverlappingTask[],
-  lastActiveByWorker: ReadonlyMap<string, string>,
+  activityByWorker: ReadonlyMap<string, WorkerActivity>,
 ): ContentionEvidence | null {
   // An unknown worker is not a distinct one, on either side of the pair. `hasDistinctWorkers`
   // already refuses to count a null/null change as a participant; leaving it countable here let
@@ -262,22 +307,83 @@ export function contentionAmong(
   for (let index = 0; index < ordered.length; index += 1) {
     const earlier = ordered[index]!;
     const earlierWorker = workerKey(earlier.agentId, earlier.worktreeId);
-    const earlierLastActive = lastActiveByWorker.get(earlierWorker);
-    if (earlierLastActive === undefined) continue;
+    const activity = activityByWorker.get(earlierWorker);
+    if (activity === undefined || activity.length === 0) continue;
+    const lastActive = activity[activity.length - 1]!;
+
     for (let other = index + 1; other < ordered.length; other += 1) {
       const later = ordered[other]!;
       if (workerKey(later.agentId, later.worktreeId) === earlierWorker) continue;
-      if (earlierLastActive <= later.at) continue;
+
+      // Two conditions, and the first one is the whole fix.
+      //
+      // **Still there.** The earlier worker has to have been observed doing something shortly
+      // *before* the other write. Asking only whether its session ended later is what made a
+      // 68-hour session contend with everything inside it -- the session had not ended, but
+      // the worker was not at the keyboard either.
+      const activeAt = nearestAtOrBefore(activity, later.at);
+      if (activeAt === null) continue;
+      const idleGapMs = new Date(later.at).getTime() - new Date(activeAt).getTime();
+      if (idleGapMs > IDLE_GAP_MINUTES * 60_000) continue;
+
+      // **Not finished.** It also has to still be going afterwards. A worker whose very last
+      // observed act was at or before the other write had stopped, and a write landing after
+      // somebody downed tools is a hand-off rather than a collision -- which is why the
+      // boundary is exclusive: one session ending exactly as another begins is the commonest
+      // shape of ordinary sequential work.
+      if (lastActive <= later.at) continue;
+
       return {
         earlierWorkerAgentId: earlier.agentId,
         earlierWriteAt: earlier.at,
-        earlierWorkerLastActiveAt: earlierLastActive,
+        earlierWorkerLastActiveAt: lastActive,
+        earlierWorkerActiveAt: activeAt,
+        earlierWorkerIdleGapMs: Math.max(idleGapMs, 0),
         laterWorkerAgentId: later.agentId,
         laterWriteAt: later.at,
       };
     }
   }
   return null;
+}
+
+/** The last timestamp at or before `at`, by binary search over an ascending list. */
+function nearestAtOrBefore(timestamps: readonly string[], at: string): string | null {
+  let low = 0;
+  let high = timestamps.length - 1;
+  let found: string | null = null;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (timestamps[middle]! <= at) {
+      found = timestamps[middle]!;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return found;
+}
+
+/**
+ * Collect every worker's observed timestamps, ascending.
+ *
+ * The events arrive in insertion order, which is close to but not exactly timestamp order --
+ * ingest preserves hook-time timestamps and drains a journal per session -- so this sorts
+ * rather than assuming.
+ */
+export function workerActivityFrom(
+  events: readonly ProtocolEvent[],
+): ReadonlyMap<string, WorkerActivity> {
+  const timestampsByWorker = new Map<string, string[]>();
+  for (const event of events) {
+    if (event.agentId === null && event.worktreeId === null) continue;
+    const worker = workerKey(event.agentId, event.worktreeId ?? null);
+    const seen = timestampsByWorker.get(worker);
+    if (seen === undefined) timestampsByWorker.set(worker, [event.timestamp]);
+    else seen.push(event.timestamp);
+  }
+  for (const timestamps of timestampsByWorker.values()) timestamps.sort();
+  return timestampsByWorker;
 }
 
 /**
@@ -303,14 +409,24 @@ function hasDistinctWorkers(tasks: readonly OverlappingTask[]): boolean {
 /** Render an overlap result as the compact text an agent reads inline. */
 export function renderOverlap(result: OverlapResult, requestedPath: string | undefined): string {
   const scope = result.logicalPath !== null ? `\`${result.logicalPath}\`` : "this repository";
+  // Which "recently" this is. The three read tools default to different windows, and an answer
+  // that does not say which one it used cannot be told from one that found nothing.
+  const window = describeWindow(result.withinMinutes);
 
   if (result.overlaps.length === 0) {
     // "Nothing observed" and "observed, nothing shared" are different answers, and an agent
     // deciding whether to proceed needs to know which one it got.
     if (result.filesObserved === 0) {
+      // A third case sits underneath those two: a ledger with nothing in it yet. Saying how
+      // much was seen at all is what keeps a fresh install from reading as a clean bill of
+      // health.
+      const seen =
+        result.eventsObserved === 0
+          ? " Nothing at all is recorded in this window, so this may be a ledger that has not been written to yet."
+          : ` ${result.eventsObserved} event(s) were recorded in it.`;
       return (
-        `No file changes have been observed for ${scope} in this window, so overlap cannot be ` +
-        `assessed. This is an absence of evidence, not evidence of independence.`
+        `No file changes have been observed for ${scope} in the last ${window}, so overlap ` +
+        `cannot be assessed. This is an absence of evidence, not evidence of independence.${seen}`
       );
     }
     // Sequence is a real answer and a different one from "nobody else was here". A reader who
@@ -320,34 +436,69 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
       result.sequential > 0
         ? ` ${result.sequential} file(s) were changed by two workers in sequence, each finishing before the next began.`
         : "";
-    return `No two workers changed the same file at once in ${scope} (${result.filesObserved} file(s) observed changing).${inSequence}`;
+    return `No two workers changed the same file at once in ${scope} in the last ${window} (${result.filesObserved} file(s) observed changing).${inSequence}`;
   }
 
+  // One shortening table for the whole answer: ids are only ever compared with the other ids
+  // printed beside them. See `shortIds`.
+  const short = idShortener(
+    result.overlaps.flatMap((overlap) => [
+      ...overlap.tasks.flatMap((task) => (task.agentId === null ? [] : [task.agentId])),
+      ...overlap.tasks.map((task) => task.taskId),
+    ]),
+  );
+  const name = (agentId: string | null) => (agentId === null ? "unattributed" : short(agentId));
+
   const blocks = result.overlaps.map((overlap) => {
-    const lines = overlap.tasks.map(
-      (task) => `    - ${task.at} ${task.agentId ?? "unattributed"} (${task.taskId}) ${task.changeKind}`,
+    // Only the pair the claim is about. The rest of the task list is the file's edit history:
+    // on a live answer `README.md` printed eleven rows of which the evidence named two, and
+    // the other nine were charged to the reader to say nothing. They are counted instead.
+    const contending = overlap.tasks.filter(
+      (task) =>
+        (task.at === overlap.contention.earlierWriteAt &&
+          task.agentId === overlap.contention.earlierWorkerAgentId) ||
+        (task.at === overlap.contention.laterWriteAt &&
+          task.agentId === overlap.contention.laterWorkerAgentId),
     );
-    // The reason, stated so the reader can check it rather than take it on trust.
+    const lines = contending.map(
+      (task) => `    - ${task.at} ${name(task.agentId)} (${short(task.taskId)}) ${task.changeKind}`,
+    );
+    const others = overlap.tasks.length - contending.length;
+    const rest =
+      others > 0
+        ? `\n    (${others} other task(s) also changed this file in the window.)`
+        : "";
+
+    // The reason, stated so the reader can check it rather than take it on trust -- including
+    // how recently the earlier worker had been seen, which is what separates a genuinely
+    // simultaneous edit from a session that merely had not ended yet.
+    const gap = describeGap(overlap.contention.earlierWorkerIdleGapMs);
     const why =
-      `    why: ${overlap.contention.earlierWorkerAgentId ?? "an unattributed worker"} wrote at ` +
-      `${overlap.contention.earlierWriteAt} and was still working at ` +
-      `${overlap.contention.earlierWorkerLastActiveAt}, after ` +
-      `${overlap.contention.laterWorkerAgentId ?? "another worker"} wrote at ${overlap.contention.laterWriteAt}.`;
-    // "Two workers were in flight" is the claim; the task list is the file's history and is
-    // mostly not the contending pair. Saying "changed by 8 tasks while more than one worker
-    // was active" read as though all eight were concurrent, which is not what was measured.
-    return `- \`${overlap.logicalPath}\` — two workers in flight, across ${overlap.tasks.length} task(s) that changed it:\n${lines.join("\n")}\n${why}`;
+      `    why: ${name(overlap.contention.earlierWorkerAgentId)} wrote at ` +
+      `${overlap.contention.earlierWriteAt} and was still working when ` +
+      `${name(overlap.contention.laterWorkerAgentId)} wrote at ${overlap.contention.laterWriteAt} ` +
+      `(last seen ${gap} before that write).`;
+    return `- \`${overlap.logicalPath}\` — two workers in flight, of ${overlap.tasks.length} task(s) that changed it:\n${lines.join("\n")}${rest}\n${why}`;
   });
 
-  const header = `${result.overlaps.length} file(s) in ${scope} were changed by two workers at once:`;
+  const header = `${result.overlaps.length} file(s) in ${scope} were changed by two workers at once, in the last ${window}:`;
   const footer = result.truncated > 0 ? `\n(${result.truncated} more not shown.)` : "";
   const sequence =
     result.sequential > 0
       ? `\n${result.sequential} further file(s) were changed by two workers in sequence and are not reported as contention.`
       : "";
-  const caveat =
-    "\nThis is a record of what happened, not a judgement. Both workers were in flight over the " +
-    "same file, which is not the same as saying either is wrong - the ledger holds paths and " +
-    "hashes, not intent.";
+  // Kept, where recap's and recall's were dropped: this is the answer a reader is most likely
+  // to over-read, because "contested" sounds like a verdict and the ledger has no way to reach
+  // one. Shortened to the part that changes what they do with it.
+  const caveat = "\nBoth were in flight over this file; the ledger holds paths and hashes, not intent.";
   return `${header}\n${blocks.join("\n")}${footer}${sequence}${caveat}`;
+}
+
+/** A duration a reader can weigh, rather than a millisecond count they have to convert. */
+function describeGap(milliseconds: number): string {
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 90) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `${minutes}m`;
+  return `${(minutes / 60).toFixed(1)}h`;
 }

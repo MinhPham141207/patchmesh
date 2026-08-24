@@ -20,15 +20,47 @@ import { dirname, join } from "node:path";
  */
 
 const MEASUREMENT_FILENAME = "answers.ndjson";
-const MEASUREMENT_VERSION = 1;
+/**
+ * Bumped from 1 when `source`, `ok`, `agentId` and `trigger` were added. A reader that counts
+ * adoption must be able to tell a v1 row -- which cannot say whether an agent or a hook asked
+ * -- from a v2 row that can.
+ */
+const MEASUREMENT_VERSION = 2;
 
 /** Stop recording rather than grow without bound; the file is telemetry, not a ledger. */
 const MAX_MEASUREMENT_BYTES = 4 * 1024 * 1024;
 
+/**
+ * Where an answer was asked for, so a count of them means something.
+ *
+ * Every row used to look identical, which made three different things indistinguishable: an
+ * agent choosing to call a tool, a hook injecting context nobody asked for, and a benchmark
+ * script measuring latency. A local probe of the server wrote 25 rows that read exactly like
+ * adoption. Adoption is the number this file exists to support, so the file has to say which
+ * of those it is watching. See docs/problems/PM-15.
+ */
+export type AnswerSource = "mcp" | "session_start" | "cli" | "probe";
+
 export interface AnswerMeasurement {
   readonly tool: string;
+  /** Which surface asked. `mcp` is the only one that is evidence of an agent choosing to ask. */
+  readonly source: AnswerSource;
   /** The path the caller asked about, which is what a later join needs to test displacement. */
   readonly path?: string | undefined;
+  /**
+   * Who asked, when the surface knows. Present for the session-start hook, which derives the
+   * agent from the host's session id, and absent over MCP, where the protocol carries no
+   * caller identity -- an absence worth seeing rather than papering over.
+   */
+  readonly agentId?: string | null | undefined;
+  /** For the session-start hook: which of startup, resume, clear or compact fired it. */
+  readonly trigger?: string | undefined;
+  /**
+   * Whether the caller got an answer. Failures used to be invisible: the tools fail soft and
+   * return prose, and only the success path recorded anything, so a call that errored left no
+   * trace at all and the ledger and this file disagreed about how many calls happened.
+   */
+  readonly ok?: boolean | undefined;
   readonly answerBytes: number;
   /** How much the answer actually carried, so an empty answer is not read as a cheap one. */
   readonly items: number;
@@ -39,11 +71,23 @@ export function measurementPathFor(worktreeRoot: string, directory: string): str
   return join(worktreeRoot, directory, MEASUREMENT_FILENAME);
 }
 
+/**
+ * Set `PATCHMESH_MEASURE=0` to run the server without writing to the file that measures it.
+ *
+ * Benchmarking the read path used to inflate the adoption count it was benchmarking. Measuring
+ * a system should not be a way of changing its numbers.
+ */
+function measurementDisabled(): boolean {
+  const setting = process.env["PATCHMESH_MEASURE"];
+  return setting === "0" || setting === "false";
+}
+
 export function recordAnswer(
   measurementPath: string,
   measurement: AnswerMeasurement,
   at = new Date().toISOString(),
 ): void {
+  if (measurementDisabled()) return;
   try {
     try {
       if (statSync(measurementPath).size > MAX_MEASUREMENT_BYTES) return;

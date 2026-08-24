@@ -1,13 +1,17 @@
 #!/usr/bin/env node
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDaemon, type PatchMeshDaemon } from "patchmesh-daemon";
 import {
   findOverlappingWork,
+  measureAdoption,
   measureTimeToResume,
   ReadServiceError,
   recapRecentWork,
+  renderAdoption,
   renderResumeMetrics,
+  treatmentBoundaryFrom,
   type OverlapOptions,
   type OverlapResult,
   type ReadServices,
@@ -16,7 +20,7 @@ import {
   type StatusView,
 } from "patchmesh-query";
 import type { EventType } from "patchmesh-protocol";
-import { findWorktreeRoot, ledgerPathFor } from "patchmesh-recorder";
+import { findWorktreeRoot, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
 import { parseArgs, usageText, type ParsedArgs } from "./args.js";
 import { renderGraphServerBanner, startGraphServer, type GraphServer, type GraphServerOptions } from "./graph-server.js";
 import { diagnose, renderDoctor } from "./doctor.js";
@@ -143,13 +147,34 @@ async function renderCommand(
     if (parsed.recapMetrics) {
       // Measured here rather than through `ReadServices` for the same reason as recap itself:
       // it opens the store directly, and the work-graph projection cannot answer it.
+      // The treatment boundary is the hook's first injection, which only the measurement file
+      // records -- the session-start binary reads and never writes an event. Derived here and
+      // passed in, so the query package stays a reader of the ledger and nothing else.
+      let treatmentSince: string | null = null;
+      try {
+        treatmentSince = treatmentBoundaryFrom(
+          readFileSync(join(worktreeRoot, LEDGER_DIRECTORY, "answers.ndjson"), "utf8"),
+        );
+      } catch {
+        // Nothing injected yet, or no measurement file: there is no treatment arm to split off.
+      }
+      // Suppressed when the caller asked for one explicit cohort: they are already looking at a
+      // single arm, and splitting that arm again would compare it against its own remainder.
+      const cohortRequested = parsed.eventQuery.since !== undefined || parsed.eventQuery.until !== undefined;
       const metrics = measureTimeToResume({
         ledgerPath: parsed.databasePath ?? "",
         ...(parsed.agentFilters.agentId === undefined ? {} : { agent: parsed.agentFilters.agentId }),
         ...(parsed.eventQuery.since === undefined ? {} : { since: parsed.eventQuery.since }),
         ...(parsed.eventQuery.until === undefined ? {} : { until: parsed.eventQuery.until }),
+        ...(treatmentSince === null || cohortRequested ? {} : { treatmentSince }),
       });
-      return parsed.json ? `${JSON.stringify(metrics)}\n` : `${renderResumeMetrics(metrics)}\n`;
+      // Adoption rides along with the resume metric because they answer one question between
+      // them: whether the push surface is carrying sessions, and whether any session ever
+      // chose to ask. Either number alone can be read as success.
+      const adoption = measureAdoption({ ledgerPath: parsed.databasePath ?? "" });
+      return parsed.json
+        ? `${JSON.stringify({ ...metrics, adoption })}\n`
+        : `${renderResumeMetrics(metrics)}\n\n${renderAdoption(adoption)}\n`;
     }
     // The same answer `patchmesh_recap` gives an agent, given to the person. It was reachable
     // only over MCP, which meant the surface the product leads with could not be run by the

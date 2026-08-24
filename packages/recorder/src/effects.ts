@@ -111,6 +111,58 @@ export function writeSnapshot(snapshotPath: string, snapshot: ObservationSnapsho
  */
 export function ignoredByRepository(worktreeRoot: string, paths: readonly string[]): ReadonlySet<string> {
   if (paths.length === 0) return new Set();
+  const remembered = rememberedIgnoreDecisions(worktreeRoot);
+  const unknown = paths.filter((path) => !remembered.has(path));
+  if (unknown.length === 0) {
+    return new Set(paths.filter((path) => remembered.get(path) === true));
+  }
+  const asked = askGitWhichAreIgnored(worktreeRoot, unknown);
+  for (const path of unknown) remembered.set(path, asked.has(path));
+  return new Set(paths.filter((path) => remembered.get(path) === true));
+}
+
+/**
+ * What this worktree has already been asked about, keyed by the rules in force when it answered.
+ *
+ * `git check-ignore` is a subprocess: measured at **285ms** on Windows, paid once per answer.
+ * That was tolerable at ingest, which is where this was written to run, but the read side calls
+ * it too -- and once the read path stopped re-validating events and started caching windows, a
+ * warm `overlaps` answer was mostly this one subprocess.
+ *
+ * The key is the mtime of the ignore files a repository-root query actually consults, so
+ * editing `.gitignore` invalidates the memo rather than being papered over by it. It is not
+ * exhaustive: a nested `.gitignore` deeper in the tree can change an answer without moving
+ * either mtime. That is acceptable for an advisory read and for a process that lives no longer
+ * than a session, and it is why this memoizes per process rather than persisting anything.
+ */
+const ignoreDecisions = new Map<string, Map<string, boolean>>();
+
+function ignoreRulesFingerprint(worktreeRoot: string): string {
+  const parts: string[] = [];
+  for (const candidate of [join(worktreeRoot, ".gitignore"), join(worktreeRoot, ".git", "info", "exclude")]) {
+    try {
+      parts.push(String(statSync(candidate).mtimeMs));
+    } catch {
+      parts.push("absent");
+    }
+  }
+  return parts.join(":");
+}
+
+function rememberedIgnoreDecisions(worktreeRoot: string): Map<string, boolean> {
+  const key = `${worktreeRoot}\0${ignoreRulesFingerprint(worktreeRoot)}`;
+  let decisions = ignoreDecisions.get(key);
+  if (decisions === undefined) {
+    // The rules moved, so every previous answer for this worktree is suspect. Dropping the
+    // whole map is right: these are cheap to re-derive and wrong answers are not.
+    ignoreDecisions.clear();
+    decisions = new Map();
+    ignoreDecisions.set(key, decisions);
+  }
+  return decisions;
+}
+
+function askGitWhichAreIgnored(worktreeRoot: string, paths: readonly string[]): ReadonlySet<string> {
   try {
     const output = execFileSync("git", ["check-ignore", "--stdin", "-z"], {
       cwd: worktreeRoot,

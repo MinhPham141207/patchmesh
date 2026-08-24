@@ -11,12 +11,22 @@ import { asAdditionalContext, withinBudget } from "../src/session-start-bin.js";
 const SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
 const BINARY = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "session-start-bin.js");
 
-/** Run the hook exactly as the host would: JSON on stdin, JSON on stdout, exit code observed. */
-function runHook(payload: unknown): { readonly stdout: string; readonly status: number } {
+/**
+ * Run the hook exactly as the host would: JSON on stdin, JSON on stdout, exit code observed.
+ *
+ * `measure` is off for the malformed-payload cases, which deliberately give the hook no usable
+ * `cwd` and therefore point it at the test run's own working directory -- which is a recorded
+ * repository. Five runs of this suite wrote ten rows into the live `.patchmesh/answers.ndjson`
+ * before anything could tell them apart from an agent asking a question. That is PM-15's
+ * contamination arriving from our own test suite, and `PATCHMESH_MEASURE=0` is the fix PM-15
+ * shipped for exactly this.
+ */
+function runHook(payload: unknown, measure = true): { readonly stdout: string; readonly status: number } {
   try {
     const stdout = execFileSync(process.execPath, [BINARY], {
       input: typeof payload === "string" ? payload : JSON.stringify(payload),
       encoding: "utf8",
+      env: measure ? process.env : { ...process.env, PATCHMESH_MEASURE: "0" },
     });
     return { stdout, status: 0 };
   } catch (error) {
@@ -98,10 +108,10 @@ test("contention leads the injected context, because it is the part that changes
     assert.match(context, /Another worker was recently in flight over these files/u);
     assert.match(context, /shared\.ts/u);
     // The claim carries its evidence, so a reader can check it rather than trust it.
-    assert.match(context, /why: .* was still working at/u);
+    assert.match(context, /why: .* was still working when .* \(last seen .* before that write\)/u);
     // Ordering is the point: a warning buried under five paragraphs of history gets skimmed.
     assert.equal(
-      context.indexOf("in flight over these files") < context.indexOf("recent task(s)"),
+      context.indexOf("in flight over these files") < context.indexOf("task(s) in this repository"),
       true,
       "contention must come before the recap",
     );
@@ -121,7 +131,7 @@ test("no contention says nothing about contention at all", async () => {
     // "No collisions" in every session is the permanent-`degraded` mistake in a new costume:
     // a line that is always there carries no information by the time it matters.
     assert.equal(context.includes("in flight over these files"), false);
-    assert.match(context, /recent task\(s\)/u);
+    assert.match(context, /task\(s\) in this repository/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -138,7 +148,7 @@ test("a session start hands back recorded work as additional context", async () 
     };
     assert.equal(parsed.hookSpecificOutput.hookEventName, "SessionStart");
     assert.match(parsed.hookSpecificOutput.additionalContext, /what previous sessions did here/u);
-    assert.match(parsed.hookSpecificOutput.additionalContext, /recent task\(s\)/u);
+    assert.match(parsed.hookSpecificOutput.additionalContext, /task\(s\) in this repository/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -184,9 +194,11 @@ test("a read-side hook can never fail a session start", () => {
   // Only the exit code is asserted. A payload carrying no usable `cwd` falls back to the
   // process working directory, which is deliberate -- a hook invoked without one should still
   // answer for wherever it is standing -- so whether anything is written depends on whether
-  // that directory happens to be a recorded repository, and the test run's own cwd is.
+  // that directory happens to be a recorded repository, and the test run's own cwd is. Run
+  // with measurement off so that running the tests does not add rows to the real ledger's
+  // answer log; see `runHook`.
   for (const payload of ["", "not json at all", "{\"cwd\":", JSON.stringify({ cwd: 42 })]) {
-    assert.equal(runHook(payload).status, 0, `payload ${JSON.stringify(payload)} must fail open`);
+    assert.equal(runHook(payload, false).status, 0, `payload ${JSON.stringify(payload)} must fail open`);
   }
 });
 

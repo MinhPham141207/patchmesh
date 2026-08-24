@@ -131,8 +131,10 @@ test("two workers in flight over one file are reported as an overlap", async () 
 
     const rendered = renderOverlap(result, undefined);
     assert.match(rendered, /changed by two workers at once/u);
-    assert.match(rendered, /why: .* was still working at/u);
-    assert.match(rendered, /not a judgement/u);
+    // The evidence now names how recently the earlier worker was seen, which is the number
+    // the claim rests on rather than merely when its session ended.
+    assert.match(rendered, /why: .* was still working when .* \(last seen .* before that write\)/u);
+    assert.match(rendered, /the ledger holds paths and hashes, not intent/u);
   } finally {
     rmSync(repo.root, { recursive: true, force: true });
   }

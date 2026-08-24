@@ -5,7 +5,14 @@ export {
 } from "./canonical-json.js";
 export { SQLITE_BUSY_TIMEOUT_MS } from "./database.js";
 export { StorageError } from "./errors.js";
-export type { AppendResult, AtomicAppendOptions, EventQuery, PruneResult } from "./event-store.js";
+export type {
+  AppendResult,
+  AtomicAppendOptions,
+  EventQuery,
+  PruneResult,
+  ReadOptions,
+} from "./event-store.js";
+export { clearEventCache, eventCacheStats, readEventsCached, readWindowCached } from "./event-cache.js";
 export { replayEvents } from "./replay.js";
 export type { ReplayReducer, ReplayResult, SourceSequenceGap } from "./replay.js";
 export { SqliteEventStore } from "./event-store.js";

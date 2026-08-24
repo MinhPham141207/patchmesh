@@ -4,8 +4,10 @@ Sequencing for the twelve problems in this directory. Ordered by dependency and
 information gain, **not** by severity — severity ranks pain, order ranks what unblocks
 learning.
 
-> **Status: Wave 0 shipped 2026-08-23.** PM-10 B, PM-12, PM-08 B, PM-03 and PM-01 A are done,
-> along with the free documentation items. Wave 1 is next.
+> **Status: Wave 0 shipped 2026-08-23. Wave 1a shipped 2026-08-24.** PM-10 B, PM-12, PM-08 B,
+> PM-03 and PM-01 A are done, along with the free documentation items. Wave 1a - PM-16, PM-14 B,
+> PM-15, PM-13 B+C and PM-10's default output - closed the measurement gap that Wave 0 opened.
+> Wave 1 proper (content hashing, PM-09) is next.
 
 ## The constraint that decided the first step
 
@@ -43,6 +45,36 @@ Free items [PM-05](PM-05-thirteen-event-types-never-produced.md) C and
 **Installed and verified.** `patchmesh doctor` reports all 6 hooks installed and `PatchMesh is
 recording.` The hook injects the recap and leads with contention when there is any — see
 PM-01's resolution note.
+
+## Wave 1a — measure the thing Wave 0 shipped — **DONE 2026-08-24**
+
+Wave 0 opened the consumption gate and then could not say whether anything came through it.
+An audit of agent reliance found the pull surface unused (14 lifetime calls against the memory
+server's 152), the push surface firing in bursts, the file that counted both untrustworthy,
+and the read cache structurally unable to hit. Four problems, one root cause between them:
+**nothing that measured PatchMesh was itself trustworthy.**
+
+The ordering constraint is the same one that put PM-10 B before PM-01 A. **PM-15 had to land
+before PM-13**, because PM-13 is a change whose only evidence of working is a number PM-15
+produces. Shipping the treatment before fixing the instrument would have made the result
+unreadable in exactly the way PM-10's pooled median already was.
+
+| Step | Item | Outcome |
+| --- | --- | --- |
+| 1 | [PM-16](PM-16-the-cache-could-never-hit.md) — bucket the window boundary | Shipped. 7d recap 606ms -> 186ms, 7d recall 498ms -> 33ms. First, because nothing depends on it. |
+| 2 | [PM-14](PM-14-sessionstart-fires-in-bursts.md) B — per-session injection digest | Shipped. Stops the burst polluting the counter about to be trusted. |
+| 3 | [PM-15](PM-15-answers-log-is-not-a-call-counter.md) — the instrument | Shipped. Adoption from the ledger; `source`/`ok`/`agentId`/`trigger`; `PATCHMESH_MEASURE=0`. |
+| 4 | [PM-13](PM-13-pull-is-zero-and-the-recap-suppresses-it.md) B+C — trigger-led descriptions | Shipped. The cheap experiment, now measurable. |
+| 5 | [PM-10](PM-10-invariant-rests-on-a-counterfactual.md) — split by default | Shipped. Says "not yet comparable" instead of printing a misleading median. |
+
+**What Wave 1a deliberately did not do:** narrow the `SessionStart` matcher (PM-14 A), because
+nothing had recorded which source fires it — that data now exists. And PM-13 D, the
+`PreToolUse` advisory, which is the real fix for pull being zero and stays in Wave 2.
+
+**The open question Wave 1a hands forward.** PM-13 B+C is an experiment, not a solution. If
+adoption does not move materially within a week of ordinary use, the honest conclusion is that
+PatchMesh is a push product and the pull tools should be reconsidered rather than re-marketed.
+The baseline to measure against is in PM-13.
 
 ## Wave 1 — make the data support a claim
 

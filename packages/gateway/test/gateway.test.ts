@@ -102,11 +102,12 @@ test("a recall answer is bounded and says how much it withheld", () => {
     const result = recallRecentActivity({ worktreeRoot: root, ledgerPath, limit: 1, now: NOW });
     assert.equal(result.calls.length, 1);
     assert.equal(result.truncated, 2, "a page must not read as the whole truth");
-    // An unnarrowed answer summarizes calls rather than listing them, so it states the whole
-    // and the part it drew from instead of a leftover count. The invariant is the same one:
-    // a caller must be able to tell a page from everything there was.
+    // An unnarrowed answer states the whole rather than listing a page of it, so the count is
+    // complete and there is no page to mistake for everything. The tool histogram that used to
+    // follow it was dropped: 79% of calls are opaque shell strings, so it reported the shape of
+    // the recorder rather than anything about this window.
     assert.ok(renderRecall(result, undefined).includes("3 call(s) recorded"));
-    assert.ok(renderRecall(result, undefined).includes("Of the 1 most recent"));
+    assert.ok(!renderRecall(result, undefined).includes("Of the 1 most recent"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -133,7 +134,8 @@ test("the rendered answer states that same file does not mean same work", () => 
     );
     // The ledger records paths, not diffs. An answer that let a reader forget that would
     // invite exactly the false duplicate-work conclusion the detector design already rejected.
-    assert.ok(rendered.includes("not a judgement"));
+    // The standing half of this caveat now lives in the MCP tool description, paid once per
+    // session rather than once per answer; the row-specific half stays here.
     assert.ok(rendered.includes("Same file does not mean same work"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -213,7 +215,7 @@ test("a file written by a shell command is answerable from observed changes", as
 
     const rendered = renderRecall(result, "notes.md");
     assert.match(rendered, /the filesystem shows it changed/u);
-    assert.match(rendered, /not a judgement/u);
+    assert.match(rendered, /Same file does not mean same work/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
