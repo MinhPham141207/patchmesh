@@ -159,6 +159,7 @@ test("the server answers over stdio as a real MCP client sees it", async () => {
       // decision this assertion forces someone to make rather than a drift nobody notices.
       assert.deepEqual(tools.tools.map((tool) => tool.name), [
         "patchmesh_recent_activity",
+        "patchmesh_active_work",
         "patchmesh_overlapping_work",
         "patchmesh_recap",
       ]);
