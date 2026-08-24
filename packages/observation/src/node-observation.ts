@@ -99,35 +99,6 @@ function canonicalDirectory(value: string): string {
   }
 }
 
-/**
- * The spelling of a workspace root that `fs.watch` can safely be handed.
- *
- * libuv's Windows watcher asserts, in C, that every filename `ReadDirectoryChangesW` reports
- * begins with the directory string it was given:
- *
- * ```
- * Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\\win\\fs-event.c, line 72
- * ```
- *
- * When it does not, libuv calls `abort()`. That is a native death, not a JavaScript exception:
- * no `try`/`catch`, no `error` listener and no `uncaughtException` handler can see it, and the
- * test runner can only report the whole file as an anonymous `'test failed'`.
- *
- * The two spellings diverge on exactly the machine this CI runs on. A GitHub Windows runner
- * has TEMP at `C:\\Users\\RUNNER~1\\...` -- an 8.3 short name -- while the OS reports change
- * notifications under the long name `C:\\Users\\runneradmin\\...`. Watch the short spelling and
- * the assertion is guaranteed the first time a change is reported. A developer box whose user
- * directory is already short enough to need no 8.3 alias never reproduces it, which is why
- * three attempts to force it locally by CPU starvation, slow I/O and reduced core count all
- * came back green.
- *
- * `canonicalDirectory` is the fix that already exists here, for the identical reason one level
- * over: `captureGitMetadata` canonicalizes before *comparing* directories. Watching is the
- * other place a host-supplied path must be canonicalized before use, and it was missed.
- */
-function watchableRoot(workspaceRoot: string): string {
-  return canonicalDirectory(resolve(workspaceRoot));
-}
 
 async function captureGitMetadata(root: string): Promise<GitMetadata> {
   const commonDirectoryValue = await gitValue(root, "rev-parse", "--git-common-dir");
@@ -525,7 +496,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
 
   private async sessionFor(context: ObservationContext): Promise<WatchSession> {
     const existing = this.sessions.get(context.workspaceId);
-    const root = watchableRoot(context.workspaceRoot);
+    const root = resolve(context.workspaceRoot);
     const identityMatches = existing !== undefined
       && existing.root === root
       && existing.context.repositoryId === context.repositoryId
@@ -887,10 +858,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
     readonly capture: ObservationCapture;
     readonly metadata: ReadonlyMap<string, FileMetadata>;
   }> {
-    // Canonical here too, so a snapshot's logical paths are computed against the same
-    // spelling the watcher reports under. Two spellings of one root produced two
-    // identities in real recorded data once already.
-    const root = watchableRoot(context.workspaceRoot);
+    const root = resolve(context.workspaceRoot);
     const git = await captureGitMetadata(root);
     const files = await captureFiles(root, includeGitBlobs && git.commonDirectory !== null && git.administrativeDirectory !== null);
     const snapshot: ObservationSnapshot = {
