@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback, spawn } from "node:child_process";
-import { realpathSync, watch, type BigIntStats, type FSWatcher } from "node:fs";
+import { realpathSync, statSync, watch, type BigIntStats, type FSWatcher } from "node:fs";
 import { lstat, readFile, readlink, readdir } from "node:fs/promises";
 import { dirname, isAbsolute, resolve, relative, sep } from "node:path";
 import { promisify } from "node:util";
@@ -97,6 +97,36 @@ function canonicalDirectory(value: string): string {
     // failing metadata capture outright; an absent directory is reported as a gap elsewhere.
     return value;
   }
+}
+
+/**
+ * The spelling of a workspace root that `fs.watch` can safely be handed.
+ *
+ * libuv's Windows watcher asserts, in C, that every filename `ReadDirectoryChangesW` reports
+ * begins with the directory string it was given:
+ *
+ * ```
+ * Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\\win\\fs-event.c, line 72
+ * ```
+ *
+ * When it does not, libuv calls `abort()`. That is a native death, not a JavaScript exception:
+ * no `try`/`catch`, no `error` listener and no `uncaughtException` handler can see it, and the
+ * test runner can only report the whole file as an anonymous `'test failed'`.
+ *
+ * The two spellings diverge on exactly the machine this CI runs on. A GitHub Windows runner
+ * has TEMP at `C:\\Users\\RUNNER~1\\...` -- an 8.3 short name -- while the OS reports change
+ * notifications under the long name `C:\\Users\\runneradmin\\...`. Watch the short spelling and
+ * the assertion is guaranteed the first time a change is reported. A developer box whose user
+ * directory is already short enough to need no 8.3 alias never reproduces it, which is why
+ * three attempts to force it locally by CPU starvation, slow I/O and reduced core count all
+ * came back green.
+ *
+ * `canonicalDirectory` is the fix that already exists here, for the identical reason one level
+ * over: `captureGitMetadata` canonicalizes before *comparing* directories. Watching is the
+ * other place a host-supplied path must be canonicalized before use, and it was missed.
+ */
+function watchableRoot(workspaceRoot: string): string {
+  return canonicalDirectory(resolve(workspaceRoot));
 }
 
 async function captureGitMetadata(root: string): Promise<GitMetadata> {
@@ -495,7 +525,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
 
   private async sessionFor(context: ObservationContext): Promise<WatchSession> {
     const existing = this.sessions.get(context.workspaceId);
-    const root = resolve(context.workspaceRoot);
+    const root = watchableRoot(context.workspaceRoot);
     const identityMatches = existing !== undefined
       && existing.root === root
       && existing.context.repositoryId === context.repositoryId
@@ -527,6 +557,28 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
       identity: { root: null, gitControl: null },
     };
     try {
+      // Refuse to hand `fs.watch` anything that is not, right now, a directory.
+      //
+      // libuv's Windows watcher branches on `uv__is_dir(path)`. The directory branch is safe;
+      // the other branch watches the parent and calls `uv__relative_path`, whose first act is
+      // a C assertion that the path begins with that parent:
+      //
+      //   Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\wins-event.c, line 72
+      //
+      // A failed assertion there is `abort()` -- a native death that no `try`/`catch`, `error`
+      // listener or `uncaughtException` handler can intercept, and which takes the host process
+      // with it. This project's founding rule for the recorder is that an observer which can
+      // break the agent gets uninstalled, and a process abort is the most complete way to break
+      // one. So the cheap check that keeps execution out of that branch is worth its cost.
+      //
+      // It is also honest about what it cannot promise: this closes the reachable path into the
+      // assertion, it does not make `fs.watch` unable to abort. A gap is recorded rather than
+      // throwing, because a workspace that is not a directory is a degraded observation, not a
+      // failed one.
+      const stats = statSync(session.root, { throwIfNoEntry: false });
+      if (stats === undefined || !stats.isDirectory()) {
+        throw new Error("workspace root is not a directory");
+      }
       session.watcher = this.watcherFactory(session.root, (_event, filename) => {
         session.cursor += 1;
         session.journal.push({ cursor: session.cursor, path: filename === null ? null : filename.toString() });
@@ -835,7 +887,10 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
     readonly capture: ObservationCapture;
     readonly metadata: ReadonlyMap<string, FileMetadata>;
   }> {
-    const root = resolve(context.workspaceRoot);
+    // Canonical here too, so a snapshot's logical paths are computed against the same
+    // spelling the watcher reports under. Two spellings of one root produced two
+    // identities in real recorded data once already.
+    const root = watchableRoot(context.workspaceRoot);
     const git = await captureGitMetadata(root);
     const files = await captureFiles(root, includeGitBlobs && git.commonDirectory !== null && git.administrativeDirectory !== null);
     const snapshot: ObservationSnapshot = {
