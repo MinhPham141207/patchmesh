@@ -85,7 +85,18 @@ function createProxy(store: SqliteEventStore, ids: number[]): McpProxy {
         sourceId: "source_phase2_watcher",
         instanceId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       },
-      quiescenceMs: 100,
+      // How long the watcher must be quiet before a window closes. `endWindow` now extends
+      // this while events are still arriving, which covers a slow *stream* -- but nothing can
+      // cover a slow *first* event: if the write's first watcher event has not landed when the
+      // interval elapses, the workspace looks quiet and the window closes without it. That
+      // reports as an `unattributed` gap and degrades coverage, which is what made this test
+      // fail roughly one full-suite run in two while passing 3/3 in isolation.
+      //
+      // So this stays a bet on delivery time, and the only honest question is how long. 100ms
+      // is an idle-developer-machine number; `fs.watch` on a loaded runner with a virtualised
+      // disk takes an order of magnitude longer. 750ms is the bound `fd6f92a` settled on for
+      // the same class of failure in the observation suite.
+      quiescenceMs: 750,
     }),
     phase2SourceAnalysis: {
       source: {

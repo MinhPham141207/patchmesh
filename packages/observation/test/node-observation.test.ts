@@ -894,3 +894,64 @@ test("periodic reconciliation degrades when the watcher loses an event", async (
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("a window stays open while watcher events are still arriving, instead of finalizing on a fixed span", async () => {
+  const directory = await createRepository();
+  let listener: ((eventType: string, filename: string | Buffer | null) => void) | undefined;
+  const watcher = Object.assign(new EventEmitter(), { close() { return this; } }) as unknown as FSWatcher;
+  const boundary = new NodeObservationBoundary({
+    source: { kind: "watcher", sourceId: "source_observation", instanceId: "16161616-1616-4616-8616-161616161616" },
+    quiescenceMs: 40,
+    watcherFactory: (_root, value) => { listener = value; return watcher; },
+  });
+  const observationContext = context(directory, "60606060606060606060606060606060");
+  try {
+    const window = await boundary.beginWindow(observationContext);
+
+    writeFileSync(join(directory, "early.ts"), "export const early = 1;\n");
+    writeFileSync(join(directory, "late.ts"), "export const late = 2;\n");
+
+    // Delivery is staggered across more than one quiescence interval, which is what a loaded
+    // runner does. The old fixed sleep finalized after the first interval and reported the
+    // second event as `unattributed`, degrading a window that was observed correctly.
+    setTimeout(() => listener?.("change", "early.ts"), 10);
+    setTimeout(() => listener?.("change", "late.ts"), 60);
+
+    const result = await boundary.endWindow(window);
+
+    assert.equal(result.completeness, "complete");
+    assert.ok(!result.capture.gaps.some((item) => item.kind === "unattributed"));
+    const changed = [...result.capture.snapshot.files.keys()];
+    assert.ok(changed.includes("early.ts"), "the event delivered inside the first interval is observed");
+    assert.ok(changed.includes("late.ts"), "the event delivered after it is observed too");
+  } finally {
+    await boundary.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a workspace that never goes quiet is bounded by maxQuiescenceMs rather than held open", async () => {
+  const directory = await createRepository();
+  let listener: ((eventType: string, filename: string | Buffer | null) => void) | undefined;
+  const watcher = Object.assign(new EventEmitter(), { close() { return this; } }) as unknown as FSWatcher;
+  const boundary = new NodeObservationBoundary({
+    source: { kind: "watcher", sourceId: "source_observation", instanceId: "17171717-1717-4717-8717-171717171717" },
+    quiescenceMs: 10,
+    maxQuiescenceMs: 120,
+    watcherFactory: (_root, value) => { listener = value; return watcher; },
+  });
+  const observationContext = context(directory, "70707070707070707070707070707070");
+  const chatter = setInterval(() => listener?.("change", "busy.ts"), 5);
+  try {
+    writeFileSync(join(directory, "busy.ts"), "export const busy = 1;\n");
+    const window = await boundary.beginWindow(observationContext);
+    const startedAt = Date.now();
+    await boundary.endWindow(window);
+    const elapsed = Date.now() - startedAt;
+    assert.ok(elapsed < 1_000, `endWindow returned in ${elapsed}ms rather than waiting for a quiet that never comes`);
+  } finally {
+    clearInterval(chatter);
+    await boundary.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
