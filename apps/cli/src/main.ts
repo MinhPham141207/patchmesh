@@ -212,7 +212,7 @@ async function renderCommand(
     const missing = missingDetectorEvidence(parsed.command, services.getStatus());
     if (missing.length > 0) return renderDetectorUnavailable(parsed.command, missing, parsed.json);
     const findingType = parsed.command === "stale" ? "stale_read_before_write" : "exported_contract_invalidation";
-    return renderFindings(services.listFindings({ findingType }), parsed.json);
+    return renderFindings(services.listFindings({ findingType }), parsed.json, parsed.command);
   }
   if (parsed.command === "explain") return renderDecisionExplanation(services.explainDecision(parsed.decisionId!), parsed.json);
   if (parsed.command === "feedback") {
