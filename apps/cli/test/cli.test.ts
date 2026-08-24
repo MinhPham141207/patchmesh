@@ -81,13 +81,32 @@ test("rejects unscheduled commands with usage exit code", async () => {
   assert.match(result.stderr, /unsupported command/i);
 });
 
-test("an unsupported command names the available commands instead of dead-ending", async () => {
+test("an unsupported command names the available commands and points at help", async () => {
   const result = await runCli(["watch"], dependencies);
 
   assert.equal(result.exitCode, 2);
   for (const command of ["status", "overlaps", "stale", "contracts", "explain", "feedback", "delivery"]) {
-    assert.match(result.stderr, new RegExp(`\\b${command}\\b`), `usage should mention ${command}`);
+    assert.match(result.stderr, new RegExp(`\\b${command}\\b`), `the hint should mention ${command}`);
   }
+  assert.match(result.stderr, /Run 'patchmesh help'/);
+  // The hint replaces the usage dump rather than prefixing it: the point is that the wrong
+  // word stays readable, which it is not under forty lines of options.
+  assert.ok(!result.stderr.includes("Usage: patchmesh"), "the hint should not reprint the whole usage");
+});
+
+test("an unsupported option points at help too", async () => {
+  const result = await runCli(["status", "--nope"], dependencies);
+
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /unsupported option: --nope/);
+  assert.match(result.stderr, /Run 'patchmesh help'/);
+});
+
+test("no command at all prints the full usage", async () => {
+  const result = await runCli([], dependencies);
+
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /Usage: patchmesh/);
 });
 
 test("help is a successful command and states the report-only boundary", async () => {

@@ -21,7 +21,7 @@ import {
 } from "patchmesh-query";
 import type { EventType } from "patchmesh-protocol";
 import { findWorktreeRoot, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
-import { parseArgs, usageText, type ParsedArgs } from "./args.js";
+import { commands, parseArgs, usageText, type CommandName, type ParsedArgs } from "./args.js";
 import { renderGraphServerBanner, startGraphServer, type GraphServer, type GraphServerOptions } from "./graph-server.js";
 import { diagnose, renderDoctor } from "./doctor.js";
 import { initializeRepository, renderInit } from "./init.js";
@@ -296,7 +296,12 @@ function needsNoStore(argv: readonly string[]): boolean {
   // `doctor` belongs here for the same reason `init` does, and more strongly: it is the
   // command you run *because* the ledger is missing, so gating it behind one would refuse to
   // answer exactly the question it exists for.
-  return command === "init" || command === "doctor" || command === "help" || command === "--help" || command === "-h";
+  // A word that is not a command at all belongs here too, and so does no word: neither can
+  // need a ledger. `--help` and `-h` fall through the same door, since they are not commands
+  // either. Resolving a database first meant `patchmesh frobnicate` outside a repository
+  // complained about the missing repository instead of about the typo the user made.
+  if (command === undefined || !commands.has(command as CommandName)) return true;
+  return command === "init" || command === "doctor" || command === "help";
 }
 
 /**

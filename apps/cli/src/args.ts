@@ -47,7 +47,7 @@ export interface ParsedArgs {
   } | null;
 }
 
-const commands = new Set<CommandName>(["init", "doctor", "prune", "status", "recap", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "help"]);
+export const commands = new Set<CommandName>(["init", "doctor", "prune", "status", "recap", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "help"]);
 const eventTypes = new Set<EventType>([
   "tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read",
   "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected",
@@ -104,6 +104,22 @@ export function usageText(): string {
   ].join("\n");
 }
 
+/**
+ * What an unrecognised command or option gets instead of the full usage dump: the mistake,
+ * and where the detail lives. A wall of help text buries the one line the reader actually
+ * needs, which is which word was wrong.
+ *
+ * The command names come along only when a *command* was wrong. On a bad option they would
+ * answer a question nobody asked, and push the misspelled flag up out of sight.
+ */
+function usageHint(problem: string, listCommands = false): string {
+  return [
+    `patchmesh: ${problem}`,
+    ...(listCommands ? [`Commands: ${[...commands].join(", ")}`] : []),
+    "Run 'patchmesh help' for usage and options.",
+  ].join("\n");
+}
+
 function value(argv: readonly string[], index: number, option: string): string {
   const result = argv[index + 1];
   if (result === undefined || result.startsWith("--")) throw new ReadServiceError("usage", `${option} requires a value`);
@@ -112,13 +128,11 @@ function value(argv: readonly string[], index: number, option: string): string {
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   const commandValue = argv[0] === "--help" || argv[0] === "-h" ? "help" : argv[0];
-  if (commandValue === undefined || !commands.has(commandValue as CommandName)) {
-    // Naming the available commands is the difference between a dead end and a
-    // recoverable mistake; the exit code stays `usage` either way.
-    throw new ReadServiceError(
-      "usage",
-      `unsupported command: ${commandValue ?? ""}\n${usageText()}`,
-    );
+  // No command at all is not a mistake to correct, it is a reader who has not started yet,
+  // so it gets the whole map rather than a pointer to it.
+  if (commandValue === undefined) throw new ReadServiceError("usage", usageText());
+  if (!commands.has(commandValue as CommandName)) {
+    throw new ReadServiceError("usage", usageHint(`unsupported command: ${commandValue}`, true));
   }
   const command = commandValue as CommandName;
   if (command === "help") {
@@ -287,7 +301,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       index += 1;
       continue;
     }
-    throw new ReadServiceError("usage", `unsupported option: ${option}`);
+    throw new ReadServiceError("usage", usageHint(`unsupported option: ${option}`));
   }
 
   if (command === "agents" && (raw || follow)) throw new ReadServiceError("usage", "unsupported agents option");
