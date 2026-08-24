@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test test/**/*.test.ts"
+    "test": "tsx --import ../../tools/test/process-diagnostics.mjs --test \"test/**/*.test.ts\""
   },
   "dependencies": {
     "patchmesh-protocol": "workspace:*"
