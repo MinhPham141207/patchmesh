@@ -7,8 +7,12 @@ import { createGatewayServer } from "./server.js";
 /**
  * Stdio entry point, run by a host as an MCP server.
  *
- * Unlike the recorder binaries this is not on the agent's tool-call path - it answers only
- * when an agent asks - so it can afford to import the protocol and storage packages.
+ * `createGatewayServer` defers `patchmesh-recorder` and `patchmesh-query` to first `tools/call`
+ * -- this file and `server.ts` must not import them eagerly. The MCP SDK itself is still paid
+ * here, since the handshake needs a real `McpServer` to answer `initialize`, but a client that
+ * only ever lists tools and never calls one must not also pay for the ledger-reading packages.
+ * Measured against the ledger, that is the median session: agents make zero voluntary MCP calls
+ * more often than they make any.
  */
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const worktreeRoot = argv[0] ?? findWorktreeRoot(process.cwd());

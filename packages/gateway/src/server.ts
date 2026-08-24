@@ -2,10 +2,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { LEDGER_DIRECTORY, ledgerPathFor } from "patchmesh-recorder";
-import { measurementPathFor, recordAnswer } from "./measure.js";
-import { findOverlappingWork, recapRecentWork, renderOverlap, renderRecap } from "patchmesh-query";
-import { recallRecentActivity, renderRecall } from "./recall.js";
+import type { OverlapOptions, OverlapResult, RecapOptions, RecapResult } from "patchmesh-query";
+import type { RecallOptions, RecallResult } from "./recall.js";
 
 export interface GatewayOptions {
   readonly worktreeRoot: string;
@@ -36,29 +34,48 @@ function serverVersion(): string {
 }
 
 /**
- * Record a call that could not be answered.
+ * The packages that actually read the ledger, loaded once on first `tools/call` rather than at
+ * construction.
  *
- * The three tools fail soft -- they return prose explaining that nothing was available rather
- * than an MCP error -- and only the success path used to record anything. So a failed call
- * left no trace, and the number of calls in `answers.ndjson` disagreed with the number in the
- * ledger, in both directions and for different reasons. A call that happened is a call that
- * happened; whether it produced an answer is what `ok` is for. See docs/problems/PM-15.
+ * `patchmesh-recorder`, `patchmesh-query`, and this module's own `./recall.js` (which pulls in
+ * both, plus `patchmesh-storage`) cost roughly 500-800ms combined to import. A client that only
+ * ever sends `initialize` and `tools/list` -- the median session, measured against the ledger --
+ * was paying that in full for work it never asked for, on top of the MCP SDK's own ~1s. This is
+ * the same shape `patchmesh-protocol`'s eager validator compilation was fixed for once already:
+ * a low-level package's import cost is multiplied by every consumer, so work only some callers
+ * need belongs behind first use, not at module scope. Memoized so three tools sharing one
+ * process pay the cost once, on whichever call comes first, not once each.
  */
-function recordFailure(measurementPath: string, tool: string, text: string, path?: string | undefined): void {
-  recordAnswer(measurementPath, {
-    tool,
-    source: "mcp",
-    ok: false,
-    path,
-    answerBytes: Buffer.byteLength(text, "utf8"),
-    items: 0,
-    withheld: 0,
-  });
+let heavy:
+  | Promise<{
+      readonly ledgerPathFor: (worktreeRoot: string) => string;
+      readonly recallRecentActivity: (options: RecallOptions) => RecallResult;
+      readonly renderRecall: (result: RecallResult, requestedPath: string | undefined) => string;
+      readonly findOverlappingWork: (options: OverlapOptions) => OverlapResult;
+      readonly renderOverlap: (result: OverlapResult, requestedPath: string | undefined) => string;
+      readonly recapRecentWork: (options: RecapOptions) => RecapResult;
+      readonly renderRecap: (result: RecapResult, agent: string | undefined) => string;
+    }>
+  | undefined;
+
+function loadHeavy(): NonNullable<typeof heavy> {
+  heavy ??= Promise.all([
+    import("patchmesh-recorder"),
+    import("patchmesh-query"),
+    import("./recall.js"),
+  ]).then(([recorder, query, recall]) => ({
+    ledgerPathFor: recorder.ledgerPathFor,
+    recallRecentActivity: recall.recallRecentActivity,
+    renderRecall: recall.renderRecall,
+    findOverlappingWork: query.findOverlappingWork,
+    renderOverlap: query.renderOverlap,
+    recapRecentWork: query.recapRecentWork,
+    renderRecap: query.renderRecap,
+  }));
+  return heavy;
 }
 
 export function createGatewayServer(options: GatewayOptions): McpServer {
-  const ledgerPath = options.ledgerPath ?? ledgerPathFor(options.worktreeRoot);
-  const measurementPath = measurementPathFor(options.worktreeRoot, LEDGER_DIRECTORY);
   const server = new McpServer({ name: "patchmesh", version: serverVersion() });
 
   server.registerTool(
@@ -94,9 +111,11 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
           .describe("Omit this agent's own calls, so a caller does not rediscover its own work."),
       },
     },
-    ({ path, withinMinutes, limit, excludeAgentId }) => {
+    async ({ path, withinMinutes, limit, excludeAgentId }) => {
       try {
-        const result = recallRecentActivity({
+        const modules = await loadHeavy();
+        const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        const result = modules.recallRecentActivity({
           worktreeRoot: options.worktreeRoot,
           ledgerPath,
           path,
@@ -104,23 +123,13 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
           limit,
           excludeAgentId,
         });
-        const text = renderRecall(result, path);
-        recordAnswer(measurementPath, {
-          tool: "patchmesh_recent_activity",
-          source: "mcp",
-          ok: true,
-          path,
-          answerBytes: Buffer.byteLength(text, "utf8"),
-          items: result.calls.length + result.changes.length + result.inFlight.length,
-          withheld: result.truncated + result.truncatedChanges,
-        });
+        const text = modules.renderRecall(result, path);
         return { content: [{ type: "text" as const, text }] };
       } catch (error) {
         // Advisory tools fail soft. A recall that cannot answer must not become an error the
         // calling agent has to reason about - it just means it learned nothing this time.
         const reason = error instanceof Error ? error.message : "unknown failure";
         const text = `No PatchMesh ledger available (${reason}).`;
-        recordFailure(measurementPath, "patchmesh_recent_activity", text, path);
         return { content: [{ type: "text" as const, text }] };
       }
     },
@@ -159,9 +168,11 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
           .describe("Only report overlaps this task is part of, to ask about your own work."),
       },
     },
-    ({ path, withinMinutes, limit, taskId }) => {
+    async ({ path, withinMinutes, limit, taskId }) => {
       try {
-        const result = findOverlappingWork({
+        const modules = await loadHeavy();
+        const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        const result = modules.findOverlappingWork({
           worktreeRoot: options.worktreeRoot,
           ledgerPath,
           path,
@@ -169,21 +180,11 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
           limit,
           taskId,
         });
-        const text = renderOverlap(result, path);
-        recordAnswer(measurementPath, {
-          tool: "patchmesh_overlapping_work",
-          source: "mcp",
-          ok: true,
-          path,
-          answerBytes: Buffer.byteLength(text, "utf8"),
-          items: result.overlaps.length,
-          withheld: result.truncated,
-        });
+        const text = modules.renderOverlap(result, path);
         return { content: [{ type: "text" as const, text }] };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "unknown failure";
         const text = `No PatchMesh ledger available (${reason}).`;
-        recordFailure(measurementPath, "patchmesh_overlapping_work", text, path);
         return { content: [{ type: "text" as const, text }] };
       }
     },
@@ -214,29 +215,22 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
         limit: z.number().int().positive().optional().describe("Maximum tasks to describe, capped at 25."),
       },
     },
-    ({ agent, withinMinutes, limit }) => {
+    async ({ agent, withinMinutes, limit }) => {
       try {
-        const result = recapRecentWork({
+        const modules = await loadHeavy();
+        const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        const result = modules.recapRecentWork({
           worktreeRoot: options.worktreeRoot,
           ledgerPath,
           agent,
           withinMinutes,
           limit,
         });
-        const text = renderRecap(result, agent);
-        recordAnswer(measurementPath, {
-          tool: "patchmesh_recap",
-          source: "mcp",
-          ok: true,
-          answerBytes: Buffer.byteLength(text, "utf8"),
-          items: result.tasks.length,
-          withheld: result.truncated,
-        });
+        const text = modules.renderRecap(result, agent);
         return { content: [{ type: "text" as const, text }] };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "unknown failure";
         const text = `No PatchMesh ledger available (${reason}).`;
-        recordFailure(measurementPath, "patchmesh_recap", text);
         return { content: [{ type: "text" as const, text }] };
       }
     },
@@ -244,5 +238,3 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
 
   return server;
 }
-
-export { LEDGER_DIRECTORY };

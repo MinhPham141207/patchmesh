@@ -1,0 +1,17 @@
+{
+  "name": "@patchmesh/concurrency-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Manufactures real, labelled concurrent-write data through the real recorder pipeline in a scratch checkout, so the overlap detector can be measured against more than the 7 organic contention cases the live ledger has ever produced.",
+  "scripts": {
+    "run": "tsx harness.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "patchmesh-protocol": "workspace:*",
+    "patchmesh-query": "workspace:*",
+    "patchmesh-recorder": "workspace:*",
+    "patchmesh-storage": "workspace:*"
+  }
+}

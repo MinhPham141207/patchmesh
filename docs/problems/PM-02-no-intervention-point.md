@@ -1,8 +1,120 @@
 # PM-02 — Detection is post-hoc; nothing intervenes
 
-- **Status:** `open`
+- **Status:** `open` — option A now delivers to the agent, but one hook later than intended:
+  via `PostToolUse` `additionalContext`, not `PreToolUse` before the write. The `PreToolUse`
+  channel stays built and wired for when the host gains a non-blocking way to reach the model
+  there; today it reaches only the user's transcript.
 - **Severity:** high
 - **Depends on:** PM-01
+
+## Before the write, at last (2026-08-24) — `UserPromptSubmit` turn-start advisory
+
+`computeTurnStartAdvisory` (`packages/recorder/src/advisory.ts`) names the files other agents
+already have in flight, delivered through `UserPromptSubmit` `additionalContext` — which reaches
+the model, and fires before the turn's first tool call. **This is the first thing PatchMesh says
+before a write rather than after one**, which is what this problem file asked for.
+
+It needed no host configuration change. `UserPromptSubmit` was already wired to the recorder
+binary by `patchmesh init` as the turn boundary that gives ordinary work a task, so — like the
+`Pre`/`PostToolUse` stages — this is a decision inside an invocation that already happened.
+
+What it gives up for being early: `UserPromptSubmit` carries no `tool_input`, so there is no path
+to match and the notice is repository-wide rather than about the file being edited. It reports
+only in-flight calls whose host tool names a path (`Edit`/`Write`); an opaque `Bash` call is left
+out rather than reported as a path it may not touch. It is silent when nothing is in flight —
+a notice on every turn saying there are no collisions is PM-12's permanently-degraded mistake in
+a new costume — and it reports what it withheld once the list runs past five paths.
+
+Measured: the `UserPromptSubmit` path costs about 15ms more than the existing `PostToolUse` path
+end to end, consistent with the in-flight reader's measured import cost.
+
+**The three stages now sit in a ladder**, all on hooks that were already installed: turn start
+(before any write, repository-wide), `PreToolUse` (before one write, path-scoped, but its output
+is not confirmed to reach the model), and `PostToolUse` (after one write, path-scoped, confirmed
+to reach the model).
+
+## Delivery landed (2026-08-24) — PostToolUse additionalContext is confirmed to reach the model
+
+`PreToolUse`'s `allow` reason turned out to speak only to the user, so it satisfied "advisory,
+never blocking" without satisfying "warns the agent" — a detector that was correct but talked
+to nobody. `packages/recorder/src/advisory.ts` now also computes the identical contention
+check on `PostToolUse` (`computePostWriteAdvisory`), one call after the write instead of
+before it, and `packages/recorder/src/bin.ts` emits it as `hookSpecificOutput.additionalContext`
+(`emitPostWriteAdvisory`) — verified directly against the live host docs (code.claude.com/docs/en/hooks,
+fetched 2026-08-24, not assumed from training memory): `additionalContext` is documented as
+valid for `PostToolUse` and is delivered into the current turn, reaching Claude's own context,
+unlike `PreToolUse`'s `allow` reason.
+
+The message is honest about the stage: `"<agent> has a call in flight (<tool>) that started
+touching \`<path>\` <N>s ago and has not finished. You just wrote \`<path>\` too. Same file
+does not mean same work."` It says the write already happened rather than pretending this is
+still a warning before the fact — weaker than PM-02's original intent (the agent has already
+compounded onto a possibly-contended file by the time it hears about it), but it is the first
+time this information reaches the agent *while it is still true*, rather than only at
+Stop-time ingest or through a voluntary MCP call that happens roughly once per 163 tool calls.
+
+**No double warning of the agent.** Both `emitAdvisory` (`PreToolUse`) and
+`emitPostWriteAdvisory` (`PostToolUse`) run unconditionally on every invocation of the shared
+binary; each gates on its own `hook_event_name`, so at most one of them ever has something to
+say for a given invocation (one hook firing is either a `PreToolUse` call or a `PostToolUse`
+call, never both). Even on the calls where `PreToolUse`'s check also finds contention, its
+output is not confirmed to reach the model at all, so `PostToolUse`'s `additionalContext`
+remains the only advisory an agent actually reads. `PreToolUse`'s path is otherwise untouched —
+this was additive, so when the host gains a non-blocking `PreToolUse` channel, that path is
+already correct and ready.
+
+Tests in `packages/recorder/test/advisory.test.ts` (18 total for this file) cover both stages:
+firing on genuine contention, self-exclusion, Bash opacity, failure isolation from the journal
+write for each stage independently, and end-to-end checks through the compiled binary that
+exactly one hook-output line is ever produced per invocation (never both shapes at once).
+`pnpm --filter patchmesh-recorder test`: 89/89 pass, import-graph guard included.
+
+**Evaluated and deliberately not built this pass: `UserPromptSubmit`.** Its `additionalContext`
+is also documented as valid, and is delivered *before* any tool call in the turn — closer to
+PM-02's real intent (before the write) than `PostToolUse` is. It is worth building as a
+turn-start contention notice, but two things stop it here: `UserPromptSubmit` is not currently
+wired to the recorder binary at all (a genuinely new hook, not a decision inside one that
+already fires, unlike `PreToolUse`/`PostToolUse`), and wiring it means editing
+`.claude/settings.local.json`, which is out of this package's scope. It would also answer a
+different question than the per-edit check here — contention as of turn start, not as of this
+specific file — so it is a complement to this work, not a replacement.
+
+## Option A built (2026-08-24) — detection lands, emission stops at a documented dead end
+
+`packages/recorder/src/advisory.ts` adds `computeContentionAdvisory`, wired into
+`packages/recorder/src/bin.ts`'s existing `PreToolUse` invocation (`emitAdvisory`, its own
+try/catch, called after the journal append so a failure there can never cost the recording).
+It fires only for `Edit`/`Write` on `tool_input.file_path`, calls `readInFlightCalls` with
+`excludeAgentId` set to the caller's own derived agent id, and reports what it observed rather
+than what it implies: `"<agent> has a call in flight (<tool>) that started touching
+\`<path>\` <N>s ago and has not finished. Same file does not mean same work."` Bash and every
+other opaque host tool are skipped outright, before any in-flight read happens — never
+inferred safe or unsafe. Tests in `packages/recorder/test/advisory.test.ts` cover firing,
+self-exclusion, Bash opacity (including a command that names the contested path verbatim),
+failure isolation from the journal write, and end-to-end behavior through the compiled binary.
+The import-graph guard (`test/journal.test.ts:165`) still passes — `advisory.ts` and
+`inflight.ts` import only `node:` builtins and recorder-local siblings.
+
+**Measured added cost**, this machine, current load: the marginal import (`inflight.js`, the
+one new dependency) added roughly 5ms in a delta measurement against the pre-existing
+`identity.js`+`journal.js`+`redact.js` baseline taken back-to-back on the same loaded system,
+and separately about 11ms in an earlier quieter measurement
+([[pm-02-s-advisory-is-hot-path-viable-today]]) — both comfortably inside the "well under
+20ms" budget. `computeContentionAdvisory` itself costs a 0.2–0.4ms median per call on an empty
+journal, the common case.
+
+**What is unresolved.** The binary currently emits `hookSpecificOutput.permissionDecision:
+"allow"` with the advisory as `permissionDecisionReason` — confirmed non-blocking, since
+`"allow"` bypasses the permission system outright, so this never trips the "never block on a
+false positive" rule. What is *not* confirmed is whether that reason reaches Claude's own
+context on `PreToolUse` at all: the host's documentation states the `"allow"` reason is shown
+to the user only, and that the only two `PreToolUse` channels documented to reach the model —
+`deny` and `ask` — both block, which this problem file itself rules out until the advisory has
+a measured false-positive rate. No `additionalContext` field is documented for `PreToolUse`
+(unlike `SessionStart`/`PostToolUse`/`UserPromptSubmit`). So today this advisory is verifiably
+non-blocking and cheap, and its detection is verifiably correct against the journal, but
+whether it actually reaches the agent it is meant to warn is not established — that is the
+next thing to verify, not something this change should have guessed at.
 
 ## Precondition met (2026-08-23) — the signal the advisory would carry is now calibrated
 

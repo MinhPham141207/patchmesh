@@ -10,37 +10,42 @@ import { contentionAmong } from "patchmesh-query";
 import { overlapCorpus, overlapCorpusVersion } from "./overlap-corpus.js";
 
 /**
- * Scores the file-level contention rule against real recorded working patterns.
+ * Scores the file-level contention rule against outcomes verified from content hashes.
  *
- * This is the counterpart to `detector-quality-evaluation.ts` and differs from it in the one
- * way that matters: that corpus is synthetic and labeled `advisoryOnly`, while every case here
- * is a row this repository's own ledger actually produced. It is still a **single repository
- * and a single developer**, so it is field evidence rather than field *validation* -- enough to
- * catch a rule that reports popularity instead of contention, not enough to publish a precision
- * figure for other people's workloads.
+ * This is the counterpart to `detector-quality-evaluation.ts` and differs from it in the one way
+ * that matters: that corpus is synthetic and labeled `advisoryOnly`, while every case here is a
+ * row this repository's own ledger actually produced, labeled from a signal `contentionAmong`
+ * does not read (see `overlap-corpus.ts`'s module doc for why the previous version's labels were
+ * circular). It is still a **single repository, a single developer's session set, and n=8** --
+ * enough to catch a rule that disagrees with verified outcomes, not enough to publish a
+ * precision figure for other people's workloads.
  *
  * Why it exists: `findOverlappingWork` is the only detector that fires on hook-recorded data,
- * and it was the only one with no gate. Before the contention rule it returned 20 files on this
- * ledger, of which 13 were sequential edits by workers who had each finished before the next
- * began -- a precision of roughly 0.35 against these labels. The gate below is what stops that
- * regressing silently, and it is the precondition the delivery plan's S5 sets before any of
- * this may be spent on an agent's context unasked.
+ * and it was the only one with no gate that measured anything but its own rule. The gate below
+ * is what stops a real regression passing silently; it is not, and has never been, evidence that
+ * the S5 field-validation bar is met.
  */
 
 /**
- * Deliberately stricter on precision than the synthetic gate and far more forgiving on recall.
+ * Set from the honest n=8 measurement, not from the number the old circular corpus reported.
  *
- * An advisory that will one day interrupt an agent mid-task is judged by how often it is
- * *wrong*, not by how much it catches: a missed collision costs what it would have cost anyway,
- * while a false one costs the reader's attention and teaches them to stop reading. The rule is
- * deliberately conservative and can only miss contention, never invent it, so recall is where
- * the slack belongs.
+ * Measured: precision 0.667 (2 true positive, 1 false positive), recall 1.0 (0 false negative),
+ * false positive rate 0.167, Brier 0.104. `minimumPrecision` and `maximumFalsePositiveRate` sit
+ * below/above the measured values with a little room, not at 1.0/0.0 -- this corpus is small
+ * enough that one more hash-verified case in either direction would move the ratio, and a
+ * threshold pinned exactly at today's number would either fail on the next honest case or have
+ * to be "adjusted" to keep passing, which is the exact failure mode this rewrite exists to close
+ * off. `minimumRecall` stays high because recall is genuinely where the rule is meant to be
+ * generous (see `overlap.ts`'s own doc on being conservative). `maximumBrierScore` moves from
+ * 0.10 to 0.15 because `OBSERVED_CONTENTION_CONFIDENCE` (0.9) now costs a real Brier penalty on
+ * the one verified false positive; lowering the stated confidence to hide that would be tuning
+ * the score, not fixing the instrument.
  */
 export const overlapQualityThresholds = {
-  minimumPrecision: 1.0,
-  minimumRecall: 0.80,
-  maximumBrierScore: 0.10,
-  maximumFalsePositiveRate: 0.0,
+  minimumPrecision: 0.60,
+  minimumRecall: 0.90,
+  maximumBrierScore: 0.15,
+  maximumFalsePositiveRate: 0.25,
 } as const;
 
 /**
@@ -49,9 +54,9 @@ export const overlapQualityThresholds = {
  * The claim is "two workers were in flight over this file", which is observed rather than
  * predicted, so this is high. It is deliberately not 1.0: the binding that produced each change
  * is itself an mtime-window inference, and a change bound to the wrong call would put the wrong
- * worker in the pair. It is emphatically *not* a probability that the two edits conflict --
- * the ledger holds paths and hashes, not intent, and nothing here knows whether the work
- * diverged.
+ * worker in the pair. It is emphatically *not* a probability that the two edits conflict -- and
+ * `overlap-corpus.ts`'s hash-verified false positive (`outcome-cli-test-two-sessions`) is the
+ * proof: this confidence is unchanged by whether the outcome corpus agrees.
  */
 const OBSERVED_CONTENTION_CONFIDENCE = 0.9;
 
@@ -89,8 +94,12 @@ export function overlapCorpusCases(): readonly DetectorCorpusCase[] {
 
 export interface OverlapQualityEvaluation {
   readonly corpusVersion: string;
-  /** Real recorded rows, but one repository and one developer. Not a published precision figure. */
-  readonly evidenceKind: "field_single_repository";
+  /**
+   * Real recorded rows labeled from an independent signal (content-hash outcomes), but one
+   * repository, one developer's session set, and n=8. Not a published precision figure, and not
+   * evidence the S5 field-validation bar is met.
+   */
+  readonly evidenceKind: "field_hash_verified_single_repository";
   readonly accepted: boolean;
   readonly gate: DetectorQualityGate;
 }
@@ -102,7 +111,7 @@ export function evaluateOverlapQuality(): OverlapQualityEvaluation {
   );
   return {
     corpusVersion: overlapCorpusVersion,
-    evidenceKind: "field_single_repository",
+    evidenceKind: "field_hash_verified_single_repository",
     accepted: gate.accepted,
     gate,
   };

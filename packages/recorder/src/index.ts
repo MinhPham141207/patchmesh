@@ -65,3 +65,5 @@ export type { OpenTurn, TurnFields } from "./turn.js";
 export type { NormalizedTool } from "./tool-mapping.js";
 export { readInFlightCalls } from "./inflight.js";
 export type { InFlightCall, ReadInFlightOptions } from "./inflight.js";
+export { computeContentionAdvisory, computePostWriteAdvisory, computeTurnStartAdvisory } from "./advisory.js";
+export type { ComputeAdvisoryOptions, ContentionAdvisory, TurnStartAdvisory } from "./advisory.js";

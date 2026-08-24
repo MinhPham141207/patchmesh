@@ -2,18 +2,25 @@ import { appendFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /**
- * What each answer cost, recorded so the net-token invariant can be measured rather than
- * assumed.
+ * When the `SessionStart` hook first pushed context into a session, recorded so the time-to-
+ * resume measurement has a treatment boundary at all.
  *
- * The delivery plan requires that the context PatchMesh returns is smaller than the discovery
- * it displaces, "published, not assumed". Neither side of that comparison is recoverable
- * afterwards: the size of an answer depends on the ledger as it stood at the time, and whether
- * the caller went and read the file anyway is only visible by joining these lines against the
- * calls that follow them. Without this, any later measurement is a reconstruction.
+ * This used to also record every MCP tool call -- an agent choosing to ask `patchmesh_recap`
+ * and a shell script benchmarking the same stdio surface wrote identically-shaped rows, because
+ * the protocol carries no caller identity to tell them apart. A local latency probe wrote 25 of
+ * them; a later benchmark wrote 30 more; the count they inflated was never recoverable once
+ * mixed in. Adoption is now read from the ledger's `tool.requested` rows instead
+ * (`patchmesh-query`'s `adoption.ts`), which the MCP protocol *does* attribute to a session and
+ * which nothing outside a real call can produce. See docs/problems/PM-15.
+ *
+ * What is left here is the one thing the ledger cannot answer: the session-start binary only
+ * reads the ledger and never writes an event, so its pushes leave no trace anywhere except this
+ * file. `packages/query/src/resume.ts`'s `treatmentBoundaryFrom` reads it for exactly that
+ * timestamp; `patchmesh-query`'s adoption count cannot serve that question because it is not an
+ * adoption question at all -- it is "when did the hook first fire", not "did an agent ask".
  *
  * Size is recorded in bytes, not tokens. A tokenizer is a dependency and a version, and this
- * runs inside the tool call; bytes are exact, cheap, and a stable proxy at roughly four to one.
- * The conversion belongs to whoever publishes the number, not to the thing being measured.
+ * runs inside the hook call; bytes are exact, cheap, and a stable proxy at roughly four to one.
  *
  * Writing is best effort and never observable by the caller. A measurement that can break an
  * answer is worse than no measurement.
@@ -31,35 +38,25 @@ const MEASUREMENT_VERSION = 2;
 const MAX_MEASUREMENT_BYTES = 4 * 1024 * 1024;
 
 /**
- * Where an answer was asked for, so a count of them means something.
+ * Narrowed to the one source `recordAnswer` can still tell the truth about.
  *
- * Every row used to look identical, which made three different things indistinguishable: an
- * agent choosing to call a tool, a hook injecting context nobody asked for, and a benchmark
- * script measuring latency. A local probe of the server wrote 25 rows that read exactly like
- * adoption. Adoption is the number this file exists to support, so the file has to say which
- * of those it is watching. See docs/problems/PM-15.
+ * This used to be `"mcp" | "session_start" | "cli" | "probe"`. `"cli"` was never produced by
+ * anything; `"mcp"` and `"probe"` could never be told apart because the MCP protocol carries no
+ * caller identity, so any stdio client -- a real agent or a benchmark script -- produced the
+ * same shape of row. The only caller left is the `SessionStart` hook, which derives a real
+ * agent id from the host's session id, so a type of one value documents that this file no
+ * longer claims to count calls it cannot attribute.
  */
-export type AnswerSource = "mcp" | "session_start" | "cli" | "probe";
+export type AnswerSource = "session_start";
 
 export interface AnswerMeasurement {
   readonly tool: string;
-  /** Which surface asked. `mcp` is the only one that is evidence of an agent choosing to ask. */
   readonly source: AnswerSource;
-  /** The path the caller asked about, which is what a later join needs to test displacement. */
-  readonly path?: string | undefined;
-  /**
-   * Who asked, when the surface knows. Present for the session-start hook, which derives the
-   * agent from the host's session id, and absent over MCP, where the protocol carries no
-   * caller identity -- an absence worth seeing rather than papering over.
-   */
+  /** Who asked. The session-start hook derives this from the host's session id. */
   readonly agentId?: string | null | undefined;
-  /** For the session-start hook: which of startup, resume, clear or compact fired it. */
+  /** Which of startup, resume, clear or compact fired the hook. */
   readonly trigger?: string | undefined;
-  /**
-   * Whether the caller got an answer. Failures used to be invisible: the tools fail soft and
-   * return prose, and only the success path recorded anything, so a call that errored left no
-   * trace at all and the ledger and this file disagreed about how many calls happened.
-   */
+  /** Whether the injection produced content, so an empty push is not read as a real one. */
   readonly ok?: boolean | undefined;
   readonly answerBytes: number;
   /** How much the answer actually carried, so an empty answer is not read as a cheap one. */

@@ -112,3 +112,30 @@ Adoption is now read from the ledger via `patchmesh recap --metrics`.
 - The one overcounted `patchmesh_recap` row (defect 1, the "more" direction) is not explained.
   A `tool.requested` event that never reached the ledger is a recorder question, not a
   measurement one; it is not pursued here.
+- **Defect 3 recurred after this resolution: `source: "probe"` was added but nothing ever set
+  it.** A 2026-08-24 re-judgment found 43 lifetime rows in `answers.ndjson` against 15 real
+  calls in the ledger, including 30 rows from a benchmark of the gateway's stdio surface — the
+  three `mcp`-source `recordAnswer` calls in `server.ts` still fired on every
+  `patchmesh_recent_activity` / `patchmesh_overlapping_work` / `patchmesh_recap` call (and every
+  failure), and MCP carries no caller identity, so a benchmark client and a real agent produced
+  identically-shaped rows. Tagging the source was never going to fix this: there was no signal
+  available at that call site to tag it with.
+
+## Follow-up (2026-08-24, second pass)
+
+Retired `recordAnswer` from the MCP surface entirely rather than trying to distinguish it
+further. `server.ts` no longer imports `./measure.js` or calls `recordAnswer`/`recordFailure` at
+any of its four former call sites — those rows duplicated what `patchmesh-query`'s `adoption.ts`
+already counts correctly from the ledger, and could never be made trustworthy because the
+protocol they ride on has no caller identity to attach. `AnswerSource` is narrowed from
+`"mcp" | "session_start" | "cli" | "probe"` to the single value `"session_start"` (`"cli"` was
+already dead; nothing ever produced it), so the type system now guarantees no future call site
+can write an unattributable row.
+
+What remains: the `SessionStart` hook's own `recordAnswer` call in `session-start-bin.ts`, which
+is not a duplicate of adoption — it is the only record of when the hook first pushed context,
+which `packages/query/src/resume.ts`'s `treatmentBoundaryFrom` needs for the PM-10 treatment
+boundary and which the ledger cannot answer (the hook only reads). That call carries a real,
+derived agent id and cannot be reproduced by probing the MCP surface. End state: one honest
+adoption source (the ledger), and `answers.ndjson` narrowed to the one thing it alone can still
+say truthfully.
