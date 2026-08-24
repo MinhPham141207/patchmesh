@@ -118,8 +118,72 @@ export function renderDeliveryResponse(
   ], json);
 }
 
+/**
+ * How many individual gaps a machine-readable answer carries before it summarizes the rest.
+ *
+ * The text renderer learned this already -- see `coverageGapLines` -- but only the text
+ * renderer. `--json` kept dumping every gap, and because a hook-recorded ledger produces one
+ * opaque gap per shell command, that grows with the ledger forever: measured on a 6,700-event
+ * store, `agents --json` was 1.3MB and `status --json` 522KB, of which 522,203 bytes were
+ * 2,611 per-event gap objects. A programmatic consumer is exactly the caller least able to
+ * cope with an unbounded payload, and `--json` is the flag it uses.
+ *
+ * Twenty is enough to see what the gaps look like; the counts say how many there really are.
+ */
+const JSON_GAP_SAMPLE = 20;
+
+/**
+ * How many coverage records each agent carries in `agents --json`.
+ *
+ * Smaller than `JSON_GAP_SAMPLE` because this one multiplies: a coverage record is ~450 bytes,
+ * and the list is per agent, so twenty of them across twenty-six agents is 200KB of diagnostic
+ * detail attached to what a caller asked to be a list of agents. The repository-wide sample
+ * lives in `status --json`, which is where someone actually debugging coverage looks; here the
+ * counts are the part that answers "is this agent's work well observed".
+ */
+const JSON_AGENT_COVERAGE_SAMPLE = 3;
+
+interface BoundedGaps {
+  /** A sample, not the whole set. `gapsWithheld` says how much is missing. */
+  readonly gaps: readonly CoverageGap[];
+  readonly gapsTotal: number;
+  /** Every gap counted by kind, so the total is auditable without carrying the objects. */
+  readonly gapsByKind: Readonly<Record<string, number>>;
+  readonly gapsWithheld: number;
+}
+
+/**
+ * Bound a gap list for machine-readable output, and say what was left out.
+ *
+ * The field keeps its name and element type, so a consumer reading `gaps[0]` still works. What
+ * changes is that it is now a page rather than the whole truth, and three sibling fields say
+ * so -- the same discipline every MCP answer in this project already holds.
+ */
+function boundGaps(gaps: readonly CoverageGap[]): BoundedGaps {
+  const byKind: Record<string, number> = {};
+  for (const gap of gaps) byKind[gap.kind] = (byKind[gap.kind] ?? 0) + 1;
+  return {
+    gaps: gaps.slice(0, JSON_GAP_SAMPLE),
+    gapsTotal: gaps.length,
+    gapsByKind: byKind,
+    gapsWithheld: Math.max(gaps.length - JSON_GAP_SAMPLE, 0),
+  };
+}
+
 export function renderStatus(status: StatusView, json: boolean): string {
-  if (json) return `${JSON.stringify(status)}\n`;
+  if (json) {
+    const bounded = boundGaps(status.coverage.gaps as readonly CoverageGap[]);
+    return `${JSON.stringify({
+      ...status,
+      coverage: {
+        ...status.coverage,
+        gaps: bounded.gaps,
+        gapsTotal: bounded.gapsTotal,
+        gapsByKind: bounded.gapsByKind,
+        gapsWithheld: bounded.gapsWithheld,
+      },
+    })}\n`;
+  }
   const lines = [
     "PatchMesh status",
     `Health:            ${status.health}`,
@@ -163,8 +227,57 @@ function agentSortKeys(agents: readonly AgentView[]): ReadonlyMap<string, string
   return keys;
 }
 
+/**
+ * Bound a per-agent projection-coverage list, which is a different shape from a gap list.
+ *
+ * Each `ProjectionCoverage` carries its own nested `gaps`, so this array is the larger of the
+ * two offenders: 26 agents x ~196 coverage records made `agents --json` 1.3MB. Counted by
+ * `presentation`, because that is the field a caller actually branches on.
+ */
+function boundCoverage(coverage: readonly { presentation: string }[]): {
+  readonly sample: readonly unknown[];
+  readonly total: number;
+  readonly byPresentation: Readonly<Record<string, number>>;
+  readonly withheld: number;
+} {
+  const byPresentation: Record<string, number> = {};
+  for (const entry of coverage) byPresentation[entry.presentation] = (byPresentation[entry.presentation] ?? 0) + 1;
+  // The sampled records carry their own nested gap lists, and those are unbounded too: capping
+  // the outer array alone left `agents --json` at 181KB. Bounding both is what makes the answer
+  // a function of the sample size rather than of how much happened.
+  const sample = coverage.slice(0, JSON_AGENT_COVERAGE_SAMPLE).map((entry) => {
+    const nested = (entry as { gaps?: readonly CoverageGap[] }).gaps ?? [];
+    const boundedNested = boundGaps(nested);
+    return {
+      ...entry,
+      gaps: boundedNested.gaps,
+      gapsTotal: boundedNested.gapsTotal,
+      gapsByKind: boundedNested.gapsByKind,
+      gapsWithheld: boundedNested.gapsWithheld,
+    };
+  });
+  return {
+    sample,
+    total: coverage.length,
+    byPresentation,
+    withheld: Math.max(coverage.length - JSON_AGENT_COVERAGE_SAMPLE, 0),
+  };
+}
+
 export function renderAgents(view: AgentsView, json: boolean): string {
-  if (json) return `${JSON.stringify(view)}\n`;
+  if (json) {
+    const agents = view.agents.map((agent) => {
+      const bounded = boundCoverage(agent.coverage ?? []);
+      return {
+        ...agent,
+        coverage: bounded.sample,
+        coverageTotal: bounded.total,
+        coverageByPresentation: bounded.byPresentation,
+        coverageWithheld: bounded.withheld,
+      };
+    });
+    return `${JSON.stringify({ ...view, agents })}\n`;
+  }
   if (view.agents.length === 0) return "No agents observed.\n";
 
   const keys = agentSortKeys(view.agents);
@@ -257,7 +370,16 @@ export function renderGraph(view: GraphView, json: boolean): string {
 }
 
 export function renderFindings(view: FindingsView, json: boolean): string {
-  if (json) return `${JSON.stringify(view)}\n`;
+  if (json) {
+    const bounded = boundGaps(view.coverageWarnings as readonly CoverageGap[]);
+    return `${JSON.stringify({
+      ...view,
+      coverageWarnings: bounded.gaps,
+      coverageWarningsTotal: bounded.gapsTotal,
+      coverageWarningsByKind: bounded.gapsByKind,
+      coverageWarningsWithheld: bounded.gapsWithheld,
+    })}\n`;
+  }
   const lines = ["FINDING\tTYPE\tSTATUS\tCONFIDENCE"];
   for (const entry of view.findings) {
     lines.push(`${entry.finding.findingId}\t${entry.finding.findingType}\t${entry.status}\t${entry.finding.confidence}`);

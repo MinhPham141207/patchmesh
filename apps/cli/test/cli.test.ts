@@ -619,3 +619,63 @@ test("a global install writes a command that resolves even with nothing on PATH"
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * A gap list large enough that dumping it whole is the defect being tested.
+ *
+ * A hook-recorded ledger produces one opaque gap per shell command, so this is not a synthetic
+ * extreme: the live store this was found on held 2,611 of them.
+ */
+function manyGaps(count: number): StatusView["coverage"]["gaps"] {
+  return Array.from({ length: count }, (_unused, index) => ({
+    kind: index % 2 === 0 ? "opaque" : "unattributed",
+    scope: `tool:evt_${String(index).padStart(32, "0")}`,
+    reason: "opaque operation effects are not prospectively enumerable",
+    evidenceEventIds: [`evt_${String(index).padStart(32, "0")}`],
+  })) as unknown as StatusView["coverage"]["gaps"];
+}
+
+test("status --json is bounded and says how much it withheld", async () => {
+  const loaded: StatusView = {
+    ...status,
+    coverage: { presentation: "degraded", modes: ["unknown"], gaps: manyGaps(2611) },
+  };
+  const result = await runCli(["status", "--json"], {
+    services: { ...services, getStatus: () => loaded } as unknown as ReadServices,
+    ...overlapDeps,
+  });
+
+  assert.equal(result.exitCode, 0);
+  // The bound is the point: an unbounded answer grows with the ledger forever, and `--json` is
+  // the flag a programmatic consumer uses - the caller least able to cope with that.
+  assert.ok(result.stdout.length < 20_000, `status --json was ${result.stdout.length} bytes`);
+
+  const parsed = JSON.parse(result.stdout) as {
+    coverage: { gaps: unknown[]; gapsTotal: number; gapsWithheld: number; gapsByKind: Record<string, number> };
+  };
+  assert.equal(parsed.coverage.gaps.length, 20);
+  assert.equal(parsed.coverage.gapsTotal, 2611);
+  assert.equal(parsed.coverage.gapsWithheld, 2591);
+  // Counted by kind, so the total stays auditable without carrying the objects.
+  assert.equal(parsed.coverage.gapsByKind.opaque! + parsed.coverage.gapsByKind.unattributed!, 2611);
+});
+
+test("a bounded json answer does not grow when the ledger does", async () => {
+  const sizeFor = async (count: number): Promise<number> => {
+    const loaded: StatusView = {
+      ...status,
+      coverage: { presentation: "degraded", modes: ["unknown"], gaps: manyGaps(count) },
+    };
+    const result = await runCli(["status", "--json"], {
+      services: { ...services, getStatus: () => loaded } as unknown as ReadServices,
+      ...overlapDeps,
+    });
+    return result.stdout.length;
+  };
+
+  const small = await sizeFor(50);
+  const large = await sizeFor(50_000);
+  // Only the counts differ, so the answer grows by the width of a number rather than by the
+  // size of the store. This is what "bounded by construction" has to mean to be worth saying.
+  assert.ok(large - small < 200, `grew ${large - small} bytes between 50 and 50,000 gaps`);
+});
