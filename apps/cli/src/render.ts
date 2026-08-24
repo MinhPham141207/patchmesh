@@ -369,7 +369,17 @@ export function renderGraph(view: GraphView, json: boolean): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function renderFindings(view: FindingsView, json: boolean): string {
+/** What a detector is called in prose, so the answer names the thing rather than the flag. */
+const DETECTOR_SUBJECT = {
+  stale: "stale-read-before-write",
+  contracts: "exported-contract invalidation",
+} as const;
+
+export function renderFindings(
+  view: FindingsView,
+  json: boolean,
+  detector?: keyof typeof DETECTOR_SUBJECT,
+): string {
   if (json) {
     const bounded = boundGaps(view.coverageWarnings as readonly CoverageGap[]);
     return `${JSON.stringify({
@@ -380,13 +390,42 @@ export function renderFindings(view: FindingsView, json: boolean): string {
       coverageWarningsWithheld: bounded.gapsWithheld,
     })}\n`;
   }
-  const lines = ["FINDING\tTYPE\tSTATUS\tCONFIDENCE"];
-  for (const entry of view.findings) {
-    lines.push(`${entry.finding.findingId}\t${entry.finding.findingType}\t${entry.status}\t${entry.finding.confidence}`);
+
+  const subject = detector === undefined ? "" : `${DETECTOR_SUBJECT[detector]} `;
+  const gapLines = coverageGapLines(view.coverageWarnings);
+
+  // The verdict leads. This used to print a bare table header, then every coverage gap, and
+  // only then "No findings" at the bottom - so the one line answering the question a reader
+  // asked was the last thing they reached, under a wall of diagnostics. `stale` already reads
+  // the right way round when it declines to run; this is the same courtesy for a detector that
+  // did run.
+  if (view.findings.length === 0) {
+    const lines = [`No ${subject}findings.`];
+    if (gapLines.length === 0) {
+      lines.push("The detector ran over complete coverage, so this is a clean result.");
+    } else {
+      // A zero from a detector whose inputs were partly unobserved is not proof of absence,
+      // and saying so is the difference between a report and a reassurance.
+      lines.push(
+        "The detector ran, but coverage was incomplete, so this is an absence of evidence",
+        "rather than evidence of absence:",
+      );
+      for (const line of gapLines) lines.push(`  ${line}`);
+    }
+    return `${lines.join(String.fromCharCode(10))}${String.fromCharCode(10)}`;
   }
-  for (const line of coverageGapLines(view.coverageWarnings)) lines.push(`Coverage gap: ${line}`);
-  if (view.findings.length === 0) lines.push("No findings");
-  return `${lines.join("\n")}\n`;
+
+  const lines = ["FINDING	TYPE	STATUS	CONFIDENCE"];
+  for (const entry of view.findings) {
+    lines.push(`${entry.finding.findingId}	${entry.finding.findingType}	${entry.status}	${entry.finding.confidence}`);
+  }
+  // Kept after the findings rather than before them: a caveat on an answer belongs under the
+  // answer, and these say how much of the store the detector could not see.
+  if (gapLines.length > 0) {
+    lines.push("", "Coverage was incomplete while this ran, so the list may be short:");
+    for (const line of gapLines) lines.push(`  ${line}`);
+  }
+  return `${lines.join(String.fromCharCode(10))}${String.fromCharCode(10)}`;
 }
 
 export function renderDecisionExplanation(view: DecisionExplanation, json: boolean): string {

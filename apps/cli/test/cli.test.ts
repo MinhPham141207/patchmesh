@@ -179,8 +179,12 @@ test("findings commands surface coverage warnings alongside an empty result", as
   const result = await runCli(["contracts"], { services: degradedServices });
 
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /No findings/);
-  assert.match(result.stdout, /Coverage gap: unverified write\.dependent/);
+  // Intent unchanged - an empty result must still surface what the detector could not see.
+  // The presentation changed deliberately: the verdict leads, and the gaps sit under it as a
+  // caveat on that verdict rather than above it as a wall to read past.
+  assert.match(result.stdout, /No exported-contract invalidation findings\./);
+  assert.match(result.stdout, /absence of evidence/);
+  assert.match(result.stdout, /unverified write\.dependent/);
 });
 
 test("graph JSON output is stable and contains no Phase 2 fields", async () => {
@@ -678,4 +682,41 @@ test("a bounded json answer does not grow when the ledger does", async () => {
   // Only the counts differ, so the answer grows by the width of a number rather than by the
   // size of the store. This is what "bounded by construction" has to mean to be worth saying.
   assert.ok(large - small < 200, `grew ${large - small} bytes between 50 and 50,000 gaps`);
+});
+
+test("a detector that ran and found nothing leads with that, not with its coverage gaps", async () => {
+  const withGaps = {
+    findings: [],
+    coverageWarnings: manyGaps(2411),
+  } as unknown as ReturnType<ReadServices["listFindings"]>;
+
+  const result = await runCli(["contracts"], {
+    services: {
+      ...services,
+      getStatus: () => evidenceRecorded,
+      listFindings: () => withGaps,
+    } as unknown as ReadServices,
+    ...overlapDeps,
+  });
+
+  assert.equal(result.exitCode, 0);
+  const lines = result.stdout.trim().split("\n");
+  // The question the reader asked is answered on line one. It used to be answered last, under
+  // a bare table header and every coverage gap in the store.
+  assert.match(lines[0]!, /^No exported-contract invalidation findings\./u);
+  assert.ok(!result.stdout.includes("FINDING\tTYPE"), "no table header when there are no rows");
+  // And the zero is qualified rather than presented as a clean bill of health.
+  assert.match(result.stdout, /absence of evidence/u);
+});
+
+test("a detector that ran over complete coverage says so plainly", async () => {
+  const clean = { findings: [], coverageWarnings: [] } as unknown as ReturnType<ReadServices["listFindings"]>;
+  const result = await runCli(["contracts"], {
+    services: { ...services, getStatus: () => evidenceRecorded, listFindings: () => clean } as unknown as ReadServices,
+    ...overlapDeps,
+  });
+
+  assert.match(result.stdout, /^No exported-contract invalidation findings\./u);
+  assert.match(result.stdout, /clean result/u);
+  assert.ok(!result.stdout.includes("absence of evidence"), "a complete-coverage zero is not hedged");
 });
