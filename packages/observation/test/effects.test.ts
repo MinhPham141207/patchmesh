@@ -1,3 +1,6 @@
+// Side-effect import: makes a process-level death name itself instead of surfacing as an
+// anonymous `'test failed'` against the whole file. See the module for why that matters here.
+import "./_process-diagnostics.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {

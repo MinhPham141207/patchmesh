@@ -1,3 +1,6 @@
+// Side-effect import: makes a process-level death name itself instead of surfacing as an
+// anonymous `'test failed'` against the whole file. See the module for why that matters here.
+import "./_process-diagnostics.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
@@ -64,6 +67,34 @@ function context(workspaceRoot: string, suffix: string): ObservationContext {
   };
 }
 
+/**
+ * Remove a watched directory, retrying briefly on Windows.
+ *
+ * `fs.watch` with `recursive: true` keeps a handle on the directory, and `watcher.close()`
+ * returns before libuv has finished releasing it. Deleting immediately afterwards can therefore
+ * fail with EBUSY or EPERM on Windows -- a race whose odds rise with how loaded the machine is,
+ * which is exactly the difference between this developer box and a 2-core CI runner.
+ *
+ * `force: true` does not help: it suppresses "does not exist", not "is in use". Retrying does,
+ * because the handle is released within milliseconds. Failing quietly after the last attempt is
+ * deliberate: a leaked temp directory is not worth failing a green test over, and the OS clears
+ * it. What must not happen is a teardown throwing and being reported as a fault in the code
+ * under test.
+ */
+function removeRepository(directory: string): void {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      removeRepository(directory);
+      return;
+    } catch {
+      // Busy-wait rather than await: callers are in `finally` blocks, some synchronous, and a
+      // few milliseconds here is cheaper than making every teardown async.
+      const until = Date.now() + 20;
+      while (Date.now() < until) { /* spin */ }
+    }
+  }
+}
+
 async function createRepository(): Promise<string> {
   const directory = mkdtempSync(join(tmpdir(), "patchmesh-m4-observation-"));
   await git(directory, "init", "-b", "main");
@@ -117,7 +148,7 @@ test("captures Git identity and changing file content", async () => {
       true,
     );
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -142,7 +173,7 @@ test("shares Git common directory while keeping linked worktree administrative d
       linkedCapture.snapshot.worktree.administrativeDirectory,
     );
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -193,7 +224,7 @@ test("one repository keeps one common directory across spellings of its root", a
     );
   } finally {
     rmSync(scratch, { recursive: true, force: true });
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -213,7 +244,7 @@ test("reports degraded coverage when the workspace is not a Git worktree", async
     assert.equal(capture.snapshot.repository.revision, null);
     assert.ok(capture.gaps.some((gap) => gap.kind === "unverified"));
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -243,7 +274,7 @@ test("window observation preserves create, modify, and delete effects equivalent
     );
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -269,7 +300,7 @@ test("coarse directory events hash metadata candidates but remain explicitly deg
     assert.notEqual(result.capture.snapshot.files.get("src/example.txt")?.contentHash, window.before.snapshot.files.get("src/example.txt")?.contentHash);
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -298,7 +329,7 @@ test("mixed directory and child candidates scan the complete directory and remai
     assert.notEqual(result.capture.snapshot.files.get("src/second.txt")?.contentHash, window.before.snapshot.files.get("src/second.txt")?.contentHash);
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -327,7 +358,7 @@ test("watcher events raised during initialization are reconciled without loss or
     await boundary.endWindow(second);
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -351,7 +382,7 @@ test("incremental Git blob hashing is limited to exact changed candidates", asyn
     assert.equal(result.capture.snapshot.files.get("src/second.txt")?.gitBlob, null);
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -368,7 +399,7 @@ test("overlapping windows degrade instead of claiming deterministic attribution"
     await boundary.endWindow(first);
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -388,7 +419,7 @@ test("bounded watcher journals fail closed after queue loss", async () => {
     assert.ok(result.capture.gaps.some((gap) => gap.kind === "watcher_overflow"));
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -405,7 +436,7 @@ test("injectable watcher failures degrade the active window", async () => {
     assert.ok(result.capture.gaps.some((gap) => gap.kind === "watcher_unavailable"));
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -424,7 +455,7 @@ test("changes between windows are emitted as out-of-band instead of attributed e
     await boundary.endWindow(next);
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -476,7 +507,7 @@ test("on-disk linked-worktree Git identity replacement fails closed without mixi
     await boundary.dispose();
     rmSync(linkedA, { recursive: true, force: true });
     rmSync(linkedB, { recursive: true, force: true });
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -528,7 +559,7 @@ test("Git identity replacement during candidate hashing is post-checked and fail
     await boundary.dispose();
     rmSync(linkedA, { recursive: true, force: true });
     rmSync(linkedB, { recursive: true, force: true });
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -551,7 +582,7 @@ test("unreadable watcher candidates degrade coverage deterministically", async (
     assert.ok(result.capture.gaps.some((gap) => gap.kind === "unverified" && gap.reason.includes("could not be read")));
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -582,7 +613,7 @@ test("shared versioned ignore policy is equivalent for full and incremental obse
     assert.deepEqual(logicalFiles(result.capture.snapshot.files), logicalFiles(full.snapshot.files));
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -608,7 +639,7 @@ test("processed watcher entries are pruned instead of causing lifetime overflow"
     }
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -649,7 +680,7 @@ test("overflow remains degraded for reconciliation and recovers only on a later 
     assert.equal(recovered.completeness, "complete");
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -669,7 +700,7 @@ test("disposed and ABA-stale windows fail closed without rescanning another root
     assert.equal(replacementResult.completeness, "complete");
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -694,7 +725,7 @@ test("window finalization retains exclusivity and rejects a concurrent begin", a
     assert.ok(firstResult.capture.gaps.some((item) => item.kind === "overlapping_window"));
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -715,7 +746,7 @@ test("disposal during finalization makes the active window stale", async () => {
     assert.ok(result.capture.gaps.some((item) => item.kind === "overlapping_window"));
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -761,7 +792,7 @@ test("events arriving during candidate hashing remain queued and become out-of-b
   } finally {
     releaseRead();
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -789,7 +820,7 @@ test("initial scan gaps remain attached to the incremental window", async (testC
     assert.equal((await boundary.endWindow(stillIncomplete)).completeness, "degraded");
     await boundary.dispose();
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
     rmSync(outside, { recursive: true, force: true });
   }
 });
@@ -820,7 +851,7 @@ test("incremental candidates cannot follow an ancestor symlink outside the works
     assert.ok(result.capture.gaps.some((item) => item.scope === "unsafe-ancestor/secret.txt" && item.reason.includes("symbolic-link ancestor")));
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
     rmSync(outside, { recursive: true, force: true });
   }
 });
@@ -846,7 +877,7 @@ test("unexpected watcher closure and logical identity replacement fail closed", 
     await boundary.endWindow(replacement);
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -868,7 +899,7 @@ test("symlink escape is excluded with explicit degraded coverage", async (testCo
     assert.equal(capture.snapshot.files.has("unsafe-link"), false);
     assert.ok(capture.gaps.some((item) => item.scope === "unsafe-link" && item.reason.includes("escapes")));
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
     rmSync(outside, { recursive: true, force: true });
   }
 });
@@ -891,7 +922,7 @@ test("periodic reconciliation degrades when the watcher loses an event", async (
     assert.ok(result.capture.gaps.some((gap) => gap.kind === "reconciliation_mismatch"));
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -926,7 +957,7 @@ test("a window stays open while watcher events are still arriving, instead of fi
     assert.ok(changed.includes("late.ts"), "the event delivered after it is observed too");
   } finally {
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
 
@@ -952,6 +983,6 @@ test("a workspace that never goes quiet is bounded by maxQuiescenceMs rather tha
   } finally {
     clearInterval(chatter);
     await boundary.dispose();
-    rmSync(directory, { recursive: true, force: true });
+    removeRepository(directory);
   }
 });
