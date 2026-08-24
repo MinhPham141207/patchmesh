@@ -27,6 +27,15 @@ export interface NodeObservationOptions {
   readonly source: Source;
   readonly maxJournalEntries?: number;
   readonly quiescenceMs?: number;
+  /**
+   * The longest `endWindow` will keep waiting while watcher events are still arriving.
+   *
+   * `quiescenceMs` is how long the watcher must be *quiet* before a window is finalized, not
+   * how long to wait in total -- so a busy filesystem can extend the wait indefinitely without
+   * this cap. Reaching it means the window is finalized while events are still landing, which
+   * reports as an `unattributed` gap rather than as a clean result.
+   */
+  readonly maxQuiescenceMs?: number;
   readonly reconciliationEveryWindows?: number;
   readonly watcherFactory?: (root: string, listener: (eventType: string, filename: string | Buffer | null) => void) => FSWatcher;
   readonly reconciliationScheduler?: (work: () => Promise<void>) => void;
@@ -349,6 +358,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
   private readonly windowSessions = new WeakMap<ObservationWindow, WatchSession>();
   private readonly maxJournalEntries: number;
   private readonly quiescenceMs: number;
+  private readonly maxQuiescenceMs: number;
   private readonly reconciliationEveryWindows: number;
   private readonly watcherFactory: NonNullable<NodeObservationOptions["watcherFactory"]>;
   private readonly reconciliationScheduler: NonNullable<NodeObservationOptions["reconciliationScheduler"]>;
@@ -358,6 +368,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
     this.source = options.source;
     this.maxJournalEntries = options.maxJournalEntries ?? 10_000;
     this.quiescenceMs = options.quiescenceMs ?? 25;
+    this.maxQuiescenceMs = options.maxQuiescenceMs ?? 2_000;
     this.reconciliationEveryWindows = options.reconciliationEveryWindows ?? 100;
     this.watcherFactory = options.watcherFactory ?? ((root, listener) => watch(root, { recursive: true }, listener));
     this.reconciliationScheduler = options.reconciliationScheduler ?? ((work) => { setImmediate(() => { void work(); }); });
@@ -399,6 +410,41 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
     return window;
   }
 
+  /**
+   * Wait for the watcher to go *quiet*, rather than for a fixed span of wall clock.
+   *
+   * `endWindow` used to sleep `quiescenceMs` once and then finalize. That is a bet that every
+   * watcher event for the work just done arrives inside a fixed window, and `fs.watch` delivery
+   * is bounded by nothing: a loaded runner with a virtualised disk and a scanner in the path
+   * takes an order of magnitude longer than an idle developer machine. When the bet lost, the
+   * late events landed after `drainCursor` was taken, which reports as an `unattributed` gap
+   * and degrades a window that was actually observed correctly. That made every assertion of
+   * `sufficient` coverage an assertion about how fast the machine was -- the same shape as the
+   * 50ms delivery bound removed in `fd6f92a`.
+   *
+   * The cursor is the signal that was there all along: it advances as watcher events land. So
+   * wait one `quiescenceMs` interval, and if nothing arrived in it, the watcher is quiet and
+   * the window can close. If something did arrive, wait again. On an idle machine this costs
+   * exactly what the old fixed sleep cost -- one interval -- and it extends only while events
+   * are genuinely still coming.
+   *
+   * `maxQuiescenceMs` bounds the total, because a genuinely busy workspace could otherwise hold
+   * a window open indefinitely. Hitting the cap is not silent: the events that arrive after it
+   * still push the `unattributed` gap, which is the honest report that this window was closed
+   * while the filesystem was still moving.
+   */
+  private async awaitQuiescence(session: WatchSession): Promise<void> {
+    if (this.quiescenceMs <= 0) return;
+    const deadline = Date.now() + this.maxQuiescenceMs;
+    let seen = session.cursor;
+    for (;;) {
+      await new Promise<void>((resolve) => setTimeout(resolve, this.quiescenceMs));
+      if (session.cursor === seen) return;
+      seen = session.cursor;
+      if (Date.now() >= deadline) return;
+    }
+  }
+
   async endWindow(window: ObservationWindow): Promise<ObservationWindowResult> {
     const session = this.sessions.get(window.workspaceId);
     const owningSession = this.windowSessions.get(window);
@@ -407,7 +453,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
       return this.staleWindowResult(window);
     }
     try {
-      await new Promise<void>((resolve) => setTimeout(resolve, this.quiescenceMs));
+      await this.awaitQuiescence(session);
       if (this.sessions.get(window.workspaceId) !== session) return this.staleWindowResult(window);
       const drainCursor = session.cursor;
       const incremental = await this.captureIncremental(session, window.cursor, drainCursor);

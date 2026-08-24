@@ -1,107 +1,127 @@
 # Overlap precision — separating contention from sequence
 
-**Measured 2026-08-23 against this repository's own ledger (3,781 events, 18 agents, 63 tasks).**
+**Measured 2026-08-23 against this repository's own ledger** (rule construction, timing corpus).
+**Relabeled 2026-08-24 against the live ledger at commit `6240502`** (independent outcome
+evidence, this revision). Read the second measurement first — the first one's headline number is
+not what it looks like.
 
-`findOverlappingWork` is the only detector in PatchMesh that fires on hook-recorded data, and
-until this change it was the only one with no precision measure. This file records what it was
-doing, what it does now, and what the number is allowed to be used for.
+`findOverlappingWork` is the only detector in PatchMesh that fires on hook-recorded data. This
+file records what the rule does, what its previous precision number actually measured, and what
+an honest measurement now says.
 
-## The problem: the answer was the knob
+## The problem the rule fixes: the answer was the knob
 
-An overlap was any file two distinct workers changed inside whatever window the caller passed.
-Nothing tested that the two were working at the same time, so the result was a function of
-`--within` rather than of the work:
+An overlap used to be any file two distinct workers changed inside whatever window the caller
+passed. Nothing tested that the two were working at the same time, so the result was a function
+of `--within` rather than of the work — saturating at 20 files by eight hours, of which 13 were
+sequential edits by workers who had each finished before the next began.
 
-| `--within` | overlaps reported (old rule) | (new rule) |
-| --- | --- | --- |
-| 30 min | 0 | 0 |
-| 120 min | 9 | 0 |
-| 480 min | 20 | 2 |
-| 1440 min | 20 | 7 |
-| 10080 min | 20 | 7 |
+The rule now orders a file's changes and asks, for a pair by different workers, whether the
+**earlier** writer was still doing something after the **later** one wrote (`IDLE_GAP_MINUTES =
+30`). That fix is unrelated to what this document corrects and is not revisited here — see
+`packages/query/src/overlap.ts` for the rule itself.
 
-The old column saturates at 20 by eight hours and never moves again. Of those 20, **13 were
-workers who had each stopped before the next began** — sequential edits to a popular file. A
-sampled row read `apps/cli/src/args.ts` "changed by 8 tasks" across four agents over five days.
-That is a frequently-edited file, not a collision.
+## What the old "precision 1.0 / recall 1.0" actually measured
 
-Against the labels in `tools/phase2/overlap-corpus.ts` the old rule scores a precision of
-roughly **0.35**.
+The corpus that produced that number (`field-v2`, retired) assigned every label by asking: *was
+the earlier writer still making calls after the later writer changed the file?* That is
+`contentionAmong`'s own rule, worded identically. The corpus's `OBSERVED_ACTIVITY` map — the
+input the labels were checked against — was the same session-activity data the rule itself reads.
 
-## The rule now
+**Precision 1.0 / recall 1.0 on that corpus proves the code implements the rule it was written to
+implement. It says nothing about whether the rule tracks real contention.** `docs/problems/PM-02`
+cited that number as "the signal is now calibrated," which the corpus never supported — a
+tautology cannot calibrate anything, because it cannot fail. A gate that cannot fail is not a
+gate.
 
-Order the changes to a file. For a pair by different workers, ask whether the **earlier** writer
-was still doing something after the **later** one wrote.
+This was not a case of the reported overlaps being wrong (a follow-up check confirmed the seven
+files flagged live are genuine dense, simultaneous work — see the ledger note on session density).
+The rule was fine; the *measurement* of the rule was circular.
 
-- **Yes** — both were in flight over the file and neither was working from a settled version.
-- **No** — the first had finished and the second built on its work. That is collaboration, and
-  reporting it is what made the command cry wolf.
+## The fix: labels from content hashes, an independent signal
 
-The finding carries its own evidence, so the claim can be checked rather than trusted:
+Every `file.changed` event carries `beforeVersion` and `afterVersion`, each a `content_hash` over
+the file's real bytes, recorded by the filesystem observer — a signal `contentionAmong` never
+reads. That gives an outcome question a timing heuristic cannot answer: **did the later writer's
+`beforeVersion` equal the earlier writer's `afterVersion`?** If yes, the later write built on
+exactly what the earlier one left, regardless of how the timing looked. If no, something else
+reached the file first between the two compared writes.
 
-```
-- `README.md` — two workers in flight, across 10 task(s) that changed it:
-    ...
-    why: agent_2478f630 wrote at 2026-08-22T16:21:30Z and was still working at
-         2026-08-22T19:26:37Z, after agent_6e6c8445 wrote at 2026-08-22T19:19:56Z.
-```
+`tools/phase2/overlap-corpus.ts` (`field-v3-hash-verified`) now holds only cases with a verified
+hash comparison on both sides — real digests, pulled from the live ledger, checked against each
+other and against the file's full recorded history so a mismatch can be explained rather than
+just asserted. Cases with no independent signal to check against (one worker's own consecutive
+turns, an unattributed second writer, and the constructed shapes that pin `IDLE_GAP_MINUTES` at
+its boundary) moved to `detectorBehaviorRegressionCases` — still run as regression tests, but no
+longer counted as field evidence. Folding them into the same array as the hash-verified cases is
+part of what made `field-v2` look more validated than it was.
 
-Files reclassified as sequential are counted and declared rather than silently dropped, so a
-reader who remembers seeing twenty of them knows they were reclassified rather than lost.
-
-### Two units that do not work, and why
-
-Both were tried against the live ledger before settling on the rule above.
-
-- **Intersecting task spans.** A task is one turn — median 228 seconds here. Two agents
-  interleaving turns for an hour never intersect, so the rule reported **nothing at all**: 89
-  candidate files collapsed to 0, including the pair independently recorded as genuine
-  contention when it happened.
-- **Intersecting agent-session spans.** Too wide in the other direction. One session in this
-  ledger ran for 2.8 days, and everything intersects a span that long.
-
-Last-activity against the other worker's write is the honest middle: it uses the interval where
-the interval is real and the instant where the instant is real.
-
-## The gate
-
-`tools/phase2/overlap-quality-evaluation.ts` scores the rule against a labelled corpus and is
-run by `pnpm check`.
+## The honest numbers
 
 ```
-truePositive  3      precision  1.0
-falsePositive 0      recall     1.0
-trueNegative  6      brier      0.003
-falseNegative 0      FPR        0.0
+truePositive  2      precision  0.667
+falsePositive 1      recall     1.0
+trueNegative  5      falsePositiveRate  0.167
+falseNegative 0      Brier      0.104
 ```
 
-Thresholds are `precision >= 1.0`, `recall >= 0.80`, `FPR <= 0.0` — deliberately stricter on
-precision than the synthetic engineering gate and far more forgiving on recall. An advisory that
-will one day interrupt an agent is judged by how often it is *wrong*: a missed collision costs
-what it would have cost anyway, while a false one costs the reader's attention and teaches them
-to stop reading. The rule is conservative and can only miss contention, never invent it, so
-recall is where the slack belongs.
+**n = 8.** Two hash-verified positives and one hash-verified false positive come from two agent
+pairs; five hash-verified negatives come from three agent pairs on two files. This is smaller
+than the nine cases `field-v2` reported, because four of those nine had no independent evidence to
+check against and are no longer counted as field cases.
 
-**The corpus caught a real bug on its first run.** `contentionAmong` counted an unattributed
-change as a valid second party, so an unknown writer could manufacture a collision with whoever
-happened to still be working. `hasDistinctWorkers` had always refused to do this; the new rule
-had not inherited the refusal.
+Thresholds moved from `precision >= 1.0, recall >= 0.80, FPR <= 0.0` to `precision >= 0.60, recall
+>= 0.90, FPR <= 0.25, Brier <= 0.15` — set with a little room below/above the measured values, not
+at them, because n=8 is small enough that one more verified case would move the ratio, and a
+threshold pinned exactly at today's number invites being "adjusted" the next time it moves rather
+than treated as a real regression. **These thresholds were not chosen to make 1.0 keep appearing.
+The number really dropped, and the gate reflects that drop.**
+
+## The one measured disagreement: content hashes say the widest-gap positive was clean
+
+`field-v1`/`field-v2` already flagged `apps/cli/test/cli.test.ts` (agent_6e6c8445 →
+agent_c460874d, 15.6-minute idle gap) as "the widest gap any positive rests on." Content hashes
+now show why that phrasing was a warning: **agent_c460874d's write's `beforeVersion` is byte-for-
+byte identical to agent_6e6c8445's write's `afterVersion`.** Zero writes intervened. This was a
+clean, directly-adjacent handoff — not two sessions in flight over unsettled work — and
+`contentionAmong` called it contention only because the 15.6-minute gap sits under
+`IDLE_GAP_MINUTES = 30`.
+
+**This is reported as a finding, not fixed here.** `packages/query/src/overlap.ts` is the detector
+under test for this work; changing it while relabeling its corpus would reintroduce exactly the
+circularity this rewrite closes. What this one case shows, precisely:
+
+- A 15.6-minute silence, on this one measured instance, was not evidence of unsettled work.
+- `IDLE_GAP_MINUTES = 30` was chosen (per its own doc comment) to sit "above every real decision
+  point observed" in the *original* three-positive sample — a sample that, per this measurement,
+  was itself two-thirds correct and one-third wrong. The threshold was tuned against a corpus that
+  was not independently checked.
+- With n=1 on the disagreeing side, this does not prove 30 minutes is the wrong number — it proves
+  the number has never been checked against anything but its own logic until now, and the one
+  check available says it produced a false positive here.
+
+The other two originally-flagged positives (README.md, `packages/recorder/src/effects.ts`, both
+agent_2478f630 → agent_6e6c8445) do **not** chain-match, but not because of a clobber between
+those two agents: in both cases, several more writes by the *earlier* agent (continuing its own
+session) and one unattributed write landed between the compared pair. The hash evidence is
+correctly reported as "diverged" — the later writer did not build on that specific task's exact
+output — but a reader should not read that as proof of a destructive collision. See each case's
+`intervening` field in `overlap-corpus.ts` for exactly what happened.
 
 ## What this number may and may not be used for
 
-This is **field evidence, not field validation**. Every case is a real recorded row, which is
-what makes it able to catch a rule that reports popularity instead of contention — but it is one
-repository, one developer, nine labelled cases, and the labels are the author's.
+This is **hash-verified field evidence from a single repository, single developer's session set,
+and n=8**. It is a stronger claim than `field-v2`'s field evidence, because the labels no longer
+come from the thing being scored — but it is still not field *validation*.
 
-- **Fair use:** as a regression gate, and as grounds for building the `PreToolUse` advisory
-  (PM-02) on this signal at all.
-- **Not fair use:** publishing a precision figure for other people's workloads, or treating the
-  S5 exit bar as met. That bar wants a corpus accumulated from real dogfood use across
-  detectors, which needs findings to be persisted first (PM-11).
+- **Fair use:** as a regression gate against further drift, and as documented grounds for
+  treating `IDLE_GAP_MINUTES = 30` as unverified rather than calibrated.
+- **Not fair use:** publishing a precision figure for other people's workloads, treating the S5
+  exit bar as met, or citing 0.667 as *the* precision of the rule — n=8 with one disagreeing case
+  is not enough to say the true rate is anywhere near that number with confidence. It is enough to
+  say the true rate is **not proven to be 1.0**, which is the entire point of this document.
 
 ## Cost
 
-Contention needs `tool.requested` as well as `file.changed`, because a change is an instant and
-contention is about intervals. `patchmesh overlaps --within 1440` runs in ~2.2–3.0s against this
-ledger. The window still reaches SQLite, so the cost grows with the window asked for rather than
-with total history.
+Unchanged from the previous measurement: `patchmesh overlaps --within 1440` runs in ~2.2–3.0s
+against this ledger, reaching SQLite for the window rather than scanning total history.

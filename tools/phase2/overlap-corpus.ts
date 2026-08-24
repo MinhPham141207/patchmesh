@@ -4,43 +4,56 @@ import type { OverlappingTask, WorkerActivity } from "patchmesh-query";
 /**
  * A labeled corpus for the file-level contention rule, drawn from this repository's own ledger.
  *
- * Unlike `detector-quality-corpus.ts`, which is synthetic and says so, every positive and every
- * sequential negative below is a real row observed on 2026-08-23 across 3,781 recorded events.
- * The agent ids, timestamps and paths are verbatim. That matters because the thing being scored
- * is a judgement about *real working patterns* -- whether two coding sessions were in flight
- * over one file -- and a synthetic case cannot be wrong about that in an interesting way.
+ * ## Why `field-v2` was retired
  *
- * Why this corpus exists at all: `findOverlappingWork` is the only detector in PatchMesh that
- * fires on hook-recorded data, and until now it was the only one with no precision measure. The
- * existing quality gate scores `same_symbol_overlap`, which needs the proxied `McpProxy` path
- * and has never fired on real traffic. The machinery was pointed at a detector that never runs.
+ * `field-v2` assigned labels by the rule "a case is a positive when the earlier writer was
+ * still working when the later writer changed the file" -- which is `contentionAmong`'s own
+ * rule, verbatim. Precision 1.0 / recall 1.0 against that corpus was a tautology: it confirmed
+ * the code implements the rule it was written to implement, and said nothing about whether the
+ * rule tracks real contention. `docs/problems/PM-02` cited that number as "the signal is now
+ * calibrated", which the corpus never supported. A gate whose labels are the thing under test
+ * cannot fail, and a gate that cannot fail is not a gate.
  *
- * The labels are the author's, and the rule for assigning them is stated so they can be argued
- * with: a case is a **positive** when the earlier writer was still working when the later
- * writer changed the file, because neither was then working from a settled version. It is a
- * **negative** when every writer had stopped before the next one wrote, because that is
- * ordinary sequential collaboration and reporting it is what made the command cry wolf.
+ * ## `field-v3`: labels from an independent signal
  *
- * ## What this corpus can and cannot tell you
+ * Every `file.changed` event carries `beforeVersion` and `afterVersion`, each a `content_hash`
+ * over the file's real bytes at that instant, recorded by the observer independently of anything
+ * `contentionAmong` reads. That gives an outcome a timing heuristic cannot: for two writes to one
+ * file by different agents, did the later write's `beforeVersion` equal the earlier write's
+ * `afterVersion`? If it did, the later writer built on exactly what the earlier one left --
+ * whatever the timing looked like, nothing was lost. If it did not, something else reached the
+ * file first: a real divergence, verified from content rather than inferred from silence.
  *
- * Read the labels above carefully against what the detector does, because for `field-v1` they
- * were the *same sentence*. The rule assigned a positive when the earlier writer's last event
- * postdated the later write; the labels were assigned by asking that question. Precision 1.0
- * was therefore a tautology -- it confirmed the code implements the rule, and said nothing
- * about whether the rule tracks contention. A gate that cannot fail is not a gate.
+ * `overlapCorpus` below now holds only cases where that independent check applies: two distinct
+ * agents, a shared file, and a verified hash comparison on both sides. Every entry carries the
+ * two full digests and the caseId of whatever in the file's real history sits between them, so
+ * the label can be checked against the ledger rather than taken on trust. This is `evaluateOverlapQuality`'s
+ * corpus, and it is deliberately small -- see the module doc there for what n=8 does and does not support.
  *
- * `field-v2` fixes the specific thing that made it unfalsifiable. The old input was a single
- * "last active" instant per worker, which is a property of the *session*: sessions here run 4
- * to 68 hours, so any write inside one looked contested. The corpus could not show that,
- * because it contained no case of a worker whose session spanned a write it was not present
- * for. The `idle-*` cases below are exactly that shape, and **the `field-v1` rule gets them
- * wrong**: they are the cases that make the number mean something.
+ * The cases that cannot be checked this way -- one worker's own consecutive turns, an
+ * unattributed second writer, and the constructed shapes that pin `IDLE_GAP_MINUTES` at its
+ * boundary -- are real regression value, but they are not field evidence, because there is no
+ * independent signal for them to agree or disagree with. They live in
+ * `detectorBehaviorRegressionCases` below, kept for exactly what they are: a description of what
+ * `contentionAmong` is specified to do, not a measurement of whether that specification is right.
+ * Folding them into the same array as the hash-verified cases is what made `field-v2` look bigger
+ * and more field-validated than it was.
  *
- * What it still cannot tell you: these are one repository, one developer, one worktree, and
- * the labels remain the author's rather than an independent signal. Labelling from outcome
- * evidence -- content hashes that revert, changes re-applied -- would be independent of the
- * liveness heuristic in a way this is not. Until then, treat the number as "the rule behaves as
- * described on real rows, including rows designed to break it", not as field precision.
+ * ## What the hash check found
+ *
+ * Of the three pairs `field-v1`/`field-v2` called positive, two check out under content hashes
+ * (README.md, `packages/recorder/src/effects.ts`: the compared writes are not adjacent in the
+ * file's real history, so the later write did not build on exactly what the earlier task left).
+ * The third does not: `apps/cli/test/cli.test.ts`, agent_6e6c8445 -> agent_c460874d, is a
+ * *hash-verified clean handoff* -- zero intervening writes, later `beforeVersion` identical to
+ * earlier `afterVersion` -- despite `contentionAmong` calling it contention on a 15.6-minute idle
+ * gap. That is the corpus's own previously-flagged "widest gap any positive rests on" case. See
+ * `outcome-cli-test-two-sessions` below for the full trail, and `docs/measurements/overlap-precision.md`
+ * for what this does to the reported numbers. This is reported as a finding, not fixed here:
+ * `packages/query/src/overlap.ts` is the detector under test and is out of scope for this pass.
+ *
+ * Five sequential pairs the old rule already called negative (no timing overlap) are also
+ * hash-verified clean, which is the expected shape and the reason the gate is not zero for zero.
  */
 export interface OverlapCorpusCase {
   readonly caseId: string;
@@ -50,9 +63,37 @@ export interface OverlapCorpusCase {
   readonly tasks: readonly OverlappingTask[];
   /** Observed activity per worker, keyed and grouped by the rule's own helpers. */
   readonly activityByWorker: ReadonlyMap<string, WorkerActivity>;
+  /**
+   * The independent evidence the label above was derived from: two real `file.changed` records
+   * for the same resource, verified against the live ledger at commit `6240502`. Never null for
+   * an entry in `overlapCorpus` -- a case with no independent evidence belongs in
+   * `detectorBehaviorRegressionCases` instead.
+   */
+  readonly outcome: ContentHashOutcome;
 }
 
-export const overlapCorpusVersion = "field-v2";
+/**
+ * One verified content-hash comparison between two writes to the same resource.
+ *
+ * `chainMatches` is the whole signal: it says whether `laterBeforeHash` is literally the same
+ * digest as `earlierAfterHash`. Nothing here says *why* a mismatch happened -- that is what
+ * `intervening` is for, because a mismatch caused by the same agent's own next turn, or by an
+ * unattributed observation nobody can attribute to a second worker, is not the same finding as a
+ * mismatch caused by a distinct third party. Reporting the hashes without that context would let
+ * "diverged" be misread as "clobbered."
+ */
+export interface ContentHashOutcome {
+  readonly resourceLocator: string;
+  readonly earlierTaskId: string;
+  readonly earlierAfterHash: string;
+  readonly laterTaskId: string;
+  readonly laterBeforeHash: string;
+  readonly chainMatches: boolean;
+  /** What, if anything, is known to have touched the file between the two compared writes. */
+  readonly intervening: string;
+}
+
+export const overlapCorpusVersion = "field-v3-hash-verified";
 
 /** The single worktree every recorded event in this corpus was observed in. */
 const WT = "wt_b169f6f5-b19d-5ad0-a8ab-0f48448673d5";
@@ -89,12 +130,6 @@ function active(
  * the rule asks: the boundaries of each stretch of continuous work at a 30-minute silence
  * threshold, **plus the real event nearest before every write any case below judges**.
  *
- * That second half is not optional, and finding out why is the reason this comment exists.
- * Boundaries alone resolved `agent_2478f630`'s activity before the 19:19:56 write to 17:25:19 --
- * a two-hour gap -- and turned a labelled positive into a negative. Its true nearest event was
- * at 19:19:40, sixteen seconds before. A corpus that samples its input more coarsely than the
- * rule reads it is measuring a different rule.
- *
  * Shared across cases because it is a property of the session, not of the file.
  */
 const OBSERVED_ACTIVITY = active([
@@ -112,14 +147,12 @@ const OBSERVED_ACTIVITY = active([
   [A_2478, [
     "2026-08-22T15:21:05.926Z", "2026-08-22T16:44:38.043Z",
     "2026-08-22T17:25:19.376Z",
-    // Nearest before the 19:07:07 and 19:19:56 writes: 0.4 and 0.3 minutes.
     "2026-08-22T19:06:43.770Z", "2026-08-22T19:19:40.184Z",
     "2026-08-22T19:26:37.604Z",
   ]],
   [A_6E6C, [
     "2026-08-22T18:44:12.893Z", "2026-08-22T19:27:39.286Z",
     "2026-08-23T01:42:30.653Z",
-    // Nearest before the 02:16:37 write: 15.6 minutes, the widest gap any positive rests on.
     "2026-08-23T02:00:58.633Z",
     "2026-08-23T02:37:23.730Z", "2026-08-23T02:51:44.702Z",
   ]],
@@ -130,96 +163,240 @@ const OBSERVED_ACTIVITY = active([
   ]],
 ]);
 
+/**
+ * The field corpus: only pairs with a verified content-hash comparison on both sides.
+ *
+ * n=8. Two agent pairs contribute the two hash-verified positives and one hash-verified false
+ * positive; three agent pairs contribute the five hash-verified negatives. This is one
+ * repository, one developer's session set, and eight cases -- read `docs/measurements/overlap-precision.md`
+ * before citing a number out of this file.
+ */
 export const overlapCorpus: readonly OverlapCorpusCase[] = [
-  // ---- Positives: two sessions genuinely in flight over one file. ----
+  // ---- Hash-verified divergence: the later write did not build on the compared task's output. ----
   {
-    caseId: "field-v1-readme-two-sessions",
+    caseId: "outcome-readme-two-sessions",
     note:
-      "agent_2478f630 wrote README.md at 16:21 and was still making calls at 19:26, an hour "
-      + "after agent_6e6c8445 wrote the same file at 19:19. Both sessions were open over it.",
+      "agent_2478f630 wrote README.md at 16:21 (task_0bb449ec, afterVersion de4d5db5..). Before "
+      + "agent_6e6c8445 wrote it again at 19:19 (task_84cff6b6, beforeVersion 5f4d8c5c..), three "
+      + "more writes landed: agent_2478f630's own task_aa0c992a (17:49) and task_36f945ab "
+      + "(18:28), then one unattributed write (18:47, no task, no agent). No second identified "
+      + "worker intervened, but the later write plainly did not build on this task's exact "
+      + "output -- the file was in active flux the whole time both sessions were open over it, "
+      + "which is what the original note called this pair without a hash to check it against.",
     expectedContention: true,
     tasks: [
       task("task_0bb449ec-74ff-4d48-9b92-0d3c165632a3", A_2478, "2026-08-22T16:21:30.353Z"),
       task("task_84cff6b6-afe5-4505-922b-fc4b2e10c90e", A_6E6C, "2026-08-22T19:19:56.857Z"),
     ],
     activityByWorker: OBSERVED_ACTIVITY,
+    outcome: {
+      resourceLocator: "README.md",
+      earlierTaskId: "task_0bb449ec-74ff-4d48-9b92-0d3c165632a3",
+      earlierAfterHash: "de4d5db57d22aab324b4558adb3b2818fc09c668dfc18c618d3aecd5eb057e8f",
+      laterTaskId: "task_84cff6b6-afe5-4505-922b-fc4b2e10c90e",
+      laterBeforeHash: "5f4d8c5cdb2d0e2ecf75339ea35d4a927f84f8abaf49955e605849894f6c64ae",
+      chainMatches: false,
+      intervening:
+        "agent_2478f630's task_aa0c992a (17:49) and task_36f945ab (18:28), then one "
+        + "unattributed write (18:47) -- no second identified agent.",
+    },
   },
   {
-    caseId: "field-v1-effects-two-sessions",
+    caseId: "outcome-effects-two-sessions",
     note:
-      "The same two sessions over packages/recorder/src/effects.ts. This is the pair that was "
-      + "independently recorded as genuine two-agent contention when it happened.",
+      "agent_2478f630 wrote packages/recorder/src/effects.ts at 18:28 (task_36f945ab, corrected "
+      + "from the field-v2 corpus's task_aa0c992a, which the ledger shows really wrote at 17:49 "
+      + "to a different file -- that pairing was a labeling error, not a real event). Before "
+      + "agent_6e6c8445 wrote it again at 19:07 (task_84cff6b6), one unattributed write landed "
+      + "(18:47). The independently recorded genuine two-agent contention still checks out: the "
+      + "later write did not build on this task's exact output.",
     expectedContention: true,
     tasks: [
-      task("task_aa0c992a-9ef3-4a81-8043-97d3a6cecd8d", A_2478, "2026-08-22T18:28:15.880Z"),
+      task("task_36f945ab-de20-48e7-9abd-c6aa3269c4ad", A_2478, "2026-08-22T18:28:15.880Z"),
       task("task_84cff6b6-afe5-4505-922b-fc4b2e10c90e", A_6E6C, "2026-08-22T19:07:07.173Z"),
     ],
     activityByWorker: OBSERVED_ACTIVITY,
+    outcome: {
+      resourceLocator: "packages/recorder/src/effects.ts",
+      earlierTaskId: "task_36f945ab-de20-48e7-9abd-c6aa3269c4ad",
+      earlierAfterHash: "8877c56e01bf0f1a5413983132fa7e1c3aa5e0744a74cbedf8f143c1ede63741",
+      laterTaskId: "task_84cff6b6-afe5-4505-922b-fc4b2e10c90e",
+      laterBeforeHash: "d7f59047e1e925dcc5eaa16b7025a5d562fd4ea3a4be494687b4bc9d7ad2603c",
+      chainMatches: false,
+      intervening: "One unattributed write (18:47) -- no second identified agent.",
+    },
   },
+
+  // ---- Hash-verified clean handoff, despite the detector calling it contention. ----
   {
-    caseId: "field-v1-cli-test-two-sessions",
+    caseId: "outcome-cli-test-two-sessions",
     note:
-      "A different pair on apps/cli/test/cli.test.ts: agent_6e6c8445 wrote at 01:50 and was "
-      + "still working at 02:51, after agent_c460874d wrote at 02:16.",
-    expectedContention: true,
+      "agent_6e6c8445 wrote apps/cli/test/cli.test.ts at 01:50 (task_bdcd6537, afterVersion "
+      + "9ee968d4..). agent_c460874d wrote it at 02:16 (task_da4a5484, beforeVersion 9ee968d4.. "
+      + "-- the SAME digest). Zero writes intervened. This is the field-v1/field-v2 corpus's "
+      + "'widest gap any positive rests on' pair (15.6 minutes), and content hashes prove it was "
+      + "a clean, directly-adjacent handoff: agent_c460874d built on exactly what agent_6e6c8445 "
+      + "left. `contentionAmong` calls this contention because the gap sits under "
+      + "IDLE_GAP_MINUTES=30. Independent evidence disagrees. This is the corpus's one measured "
+      + "disagreement between the timing heuristic and the outcome, and it is reported here as a "
+      + "finding rather than fixed -- packages/query/src/overlap.ts is the detector under test.",
+    expectedContention: false,
     tasks: [
       task("task_bdcd6537-faff-498c-a44e-fee221d48343", A_6E6C, "2026-08-23T01:50:03.801Z"),
       task("task_da4a5484-8850-42e6-b8d0-03f6e8f6aed4", A_C460, "2026-08-23T02:16:37.618Z"),
     ],
     activityByWorker: OBSERVED_ACTIVITY,
+    outcome: {
+      resourceLocator: "apps/cli/test/cli.test.ts",
+      earlierTaskId: "task_bdcd6537-faff-498c-a44e-fee221d48343",
+      earlierAfterHash: "9ee968d4326865e18da102f2b6a97b9ec1edee8344e29566b4c46e8c10e3fd75",
+      laterTaskId: "task_da4a5484-8850-42e6-b8d0-03f6e8f6aed4",
+      laterBeforeHash: "9ee968d4326865e18da102f2b6a97b9ec1edee8344e29566b4c46e8c10e3fd75",
+      chainMatches: true,
+      intervening: "None -- directly adjacent in the file's real history.",
+    },
   },
 
-  // ---- Negatives: real sequence. These are the rows the old rule reported as overlaps. ----
+  // ---- Hash-verified clean handoffs, agreeing with the detector's negative call. ----
   {
-    caseId: "field-v1-effects-test-sequence",
+    caseId: "outcome-effects-sequence-b48c-6222",
     note:
-      "agent_b48c1c15 finished at 07:47; agent_2478f630 wrote the file eleven hours later. "
-      + "The second was building on settled work, which is what collaboration looks like.",
+      "agent_b48c1c15 wrote packages/recorder/src/effects.ts at 05:57 (task_628b6926); "
+      + "agent_62225cb8 wrote it at 11:52 (task_efccb533) with a beforeVersion identical to "
+      + "b48c1c15's afterVersion. Clean, directly-adjacent handoff, no timing overlap either.",
     expectedContention: false,
     tasks: [
-      task("task_seq_b48c", A_B48C, "2026-08-22T05:57:11.643Z"),
-      task("task_aa0c992a-9ef3-4a81-8043-97d3a6cecd8d", A_2478, "2026-08-22T18:28:15.880Z"),
+      task("task_628b6926-0cc6-4e36-9eb7-9061d1918afe", A_B48C, "2026-08-22T05:57:11.643Z"),
+      task("task_efccb533-4c3b-42a2-9cd6-513c21d4cb9a", A_6222, "2026-08-22T11:52:59.178Z"),
     ],
     activityByWorker: OBSERVED_ACTIVITY,
+    outcome: {
+      resourceLocator: "packages/recorder/src/effects.ts",
+      earlierTaskId: "task_628b6926-0cc6-4e36-9eb7-9061d1918afe",
+      earlierAfterHash: "397e6f42f3c545ecc483370d6733826906767702d26328a51b2fd36ad6fe10b3",
+      laterTaskId: "task_efccb533-4c3b-42a2-9cd6-513c21d4cb9a",
+      laterBeforeHash: "397e6f42f3c545ecc483370d6733826906767702d26328a51b2fd36ad6fe10b3",
+      chainMatches: true,
+      intervening: "None -- directly adjacent in the file's real history.",
+    },
   },
   {
-    caseId: "field-v1-gateway-index-four-workers-in-sequence",
+    caseId: "outcome-gateway-index-sequence-b48c-6222",
     note:
-      "packages/gateway/src/index.ts was written by four different sessions over two days, and "
-      + "every one of them had stopped before the next began. Four workers is not four "
-      + "collisions -- this is the case that most clearly showed the old rule counting "
-      + "popularity rather than contention.",
+      "agent_b48c1c15 wrote packages/gateway/src/index.ts at 07:46 (task_771fe0be); "
+      + "agent_62225cb8 wrote it at 13:51 (task_7cddd7e8) with a matching beforeVersion. Clean "
+      + "handoff, one of four sessions that each touched this file in sequence.",
     expectedContention: false,
     tasks: [
-      task("task_seq_gw_1", A_B48C, "2026-08-22T07:46:13.891Z"),
-      task("task_seq_gw_2", A_6222, "2026-08-22T13:51:29.032Z"),
-      task("task_seq_gw_3", A_2478, "2026-08-22T18:28:15.880Z"),
-      task("task_seq_gw_4", A_0509, "2026-08-23T05:35:30.206Z"),
+      task("task_771fe0be-cb26-4b44-a1e5-caa8bff7cffd", A_B48C, "2026-08-22T07:46:13.891Z"),
+      task("task_7cddd7e8-e5cc-416c-a082-3ffbcce09605", A_6222, "2026-08-22T13:51:29.032Z"),
     ],
     activityByWorker: OBSERVED_ACTIVITY,
+    outcome: {
+      resourceLocator: "packages/gateway/src/index.ts",
+      earlierTaskId: "task_771fe0be-cb26-4b44-a1e5-caa8bff7cffd",
+      earlierAfterHash: "9fc2ac78e07a4c3bee110cf603fe8e29651ca2a668a096b636a65b22cfccfabd",
+      laterTaskId: "task_7cddd7e8-e5cc-416c-a082-3ffbcce09605",
+      laterBeforeHash: "9fc2ac78e07a4c3bee110cf603fe8e29651ca2a668a096b636a65b22cfccfabd",
+      chainMatches: true,
+      intervening: "None -- directly adjacent in the file's real history.",
+    },
   },
   {
-    caseId: "field-v1-recap-sequence-with-repeat-writers",
+    caseId: "outcome-gateway-index-sequence-6222-2478",
     note:
-      "packages/gateway/src/recap.ts, where two of the writers each wrote twice. Repeated "
-      + "writes by one worker must not manufacture contention with themselves.",
+      "agent_62225cb8 wrote packages/gateway/src/index.ts at 13:51 (task_7cddd7e8); "
+      + "agent_2478f630 wrote it at 18:28 (task_36f945ab) with a matching beforeVersion. Clean "
+      + "handoff between the second and third of the four sequential sessions on this file.",
     expectedContention: false,
     tasks: [
-      task("task_seq_rc_1", A_B48C, "2026-08-22T07:46:13.891Z"),
-      task("task_seq_rc_2", A_6222, "2026-08-22T11:52:59.178Z"),
-      task("task_seq_rc_3", A_6222, "2026-08-22T15:08:24.677Z"),
-      task("task_seq_rc_4", A_2478, "2026-08-22T16:21:30.353Z"),
-      task("task_seq_rc_5", A_2478, "2026-08-22T18:28:15.880Z"),
+      task("task_7cddd7e8-e5cc-416c-a082-3ffbcce09605", A_6222, "2026-08-22T13:51:29.032Z"),
+      task("task_36f945ab-de20-48e7-9abd-c6aa3269c4ad", A_2478, "2026-08-22T18:28:15.880Z"),
     ],
     activityByWorker: OBSERVED_ACTIVITY,
+    outcome: {
+      resourceLocator: "packages/gateway/src/index.ts",
+      earlierTaskId: "task_7cddd7e8-e5cc-416c-a082-3ffbcce09605",
+      earlierAfterHash: "ce6d9d52bd90419fd37b6f81552749f183eeb11b97abd8af667320af5e7900bd",
+      laterTaskId: "task_36f945ab-de20-48e7-9abd-c6aa3269c4ad",
+      laterBeforeHash: "ce6d9d52bd90419fd37b6f81552749f183eeb11b97abd8af667320af5e7900bd",
+      chainMatches: true,
+      intervening: "None -- directly adjacent in the file's real history.",
+    },
   },
+  {
+    caseId: "outcome-gateway-recap-sequence-b48c-6222",
+    note:
+      "agent_b48c1c15 created packages/gateway/src/recap.ts at 07:46 (task_771fe0be); "
+      + "agent_62225cb8 wrote it at 11:52 (task_efccb533) with a matching beforeVersion. Clean "
+      + "handoff at the start of a file five sessions each touched in turn.",
+    expectedContention: false,
+    tasks: [
+      task("task_771fe0be-cb26-4b44-a1e5-caa8bff7cffd", A_B48C, "2026-08-22T07:46:13.891Z"),
+      task("task_efccb533-4c3b-42a2-9cd6-513c21d4cb9a", A_6222, "2026-08-22T11:52:59.178Z"),
+    ],
+    activityByWorker: OBSERVED_ACTIVITY,
+    outcome: {
+      resourceLocator: "packages/gateway/src/recap.ts",
+      earlierTaskId: "task_771fe0be-cb26-4b44-a1e5-caa8bff7cffd",
+      earlierAfterHash: "d302a2b17dd6cf69c527980e23d43d0a124cdd0abaaf8bc2ff5a99c2d68ffc3a",
+      laterTaskId: "task_efccb533-4c3b-42a2-9cd6-513c21d4cb9a",
+      laterBeforeHash: "d302a2b17dd6cf69c527980e23d43d0a124cdd0abaaf8bc2ff5a99c2d68ffc3a",
+      chainMatches: true,
+      intervening: "None -- directly adjacent in the file's real history.",
+    },
+  },
+  {
+    caseId: "outcome-gateway-recap-sequence-6222-2478",
+    note:
+      "agent_62225cb8 wrote packages/gateway/src/recap.ts at 15:08 (task_26793dd8); "
+      + "agent_2478f630 wrote it at 16:21 (task_0bb449ec) with a matching beforeVersion. Clean "
+      + "handoff, no timing overlap: agent_62225cb8's last observed activity (15:18) precedes "
+      + "the later write by over an hour.",
+    expectedContention: false,
+    tasks: [
+      task("task_26793dd8-8467-4b78-a8d9-b956273f493c", A_6222, "2026-08-22T15:08:24.677Z"),
+      task("task_0bb449ec-74ff-4d48-9b92-0d3c165632a3", A_2478, "2026-08-22T16:21:30.353Z"),
+    ],
+    activityByWorker: OBSERVED_ACTIVITY,
+    outcome: {
+      resourceLocator: "packages/gateway/src/recap.ts",
+      earlierTaskId: "task_26793dd8-8467-4b78-a8d9-b956273f493c",
+      earlierAfterHash: "57a5a7d15f492a6a7f29c47e693ac0870f2cb4a30cb6b585b6e7366a8c1d5612",
+      laterTaskId: "task_0bb449ec-74ff-4d48-9b92-0d3c165632a3",
+      laterBeforeHash: "57a5a7d15f492a6a7f29c47e693ac0870f2cb4a30cb6b585b6e7366a8c1d5612",
+      chainMatches: true,
+      intervening: "None -- directly adjacent in the file's real history.",
+    },
+  },
+];
 
-  // ---- Structural negatives: shapes the rule must never call contention. ----
+/**
+ * Cases with no independent hash evidence: they describe what `contentionAmong` is *specified*
+ * to do at a boundary, not a measurement of whether that specification is right on real data.
+ *
+ * `field-v2` folded these into the same array as its field cases, which is part of what made a
+ * nine-case corpus look like nine pieces of field evidence when four of them were structural or
+ * constructed. Kept here because they are still real regression value -- losing them would let
+ * `contentionAmong` silently regress on shapes it was explicitly built to handle -- but they do
+ * not feed `evaluateOverlapQuality`'s precision/recall gate, and citing their pass rate as field
+ * validity would repeat the mistake this file exists to fix.
+ */
+export interface DetectorBehaviorCase {
+  readonly caseId: string;
+  readonly note: string;
+  readonly expectedContention: boolean;
+  readonly tasks: readonly OverlappingTask[];
+  readonly activityByWorker: ReadonlyMap<string, WorkerActivity>;
+}
+
+export const detectorBehaviorRegressionCases: readonly DetectorBehaviorCase[] = [
   {
-    caseId: "field-v1-one-worker-consecutive-turns",
+    caseId: "structural-one-worker-consecutive-turns",
     note:
       "One session's own two turns. A session runs one task at a time, so this is sequence by "
-      + "construction. This exact shape was eight out of eight false positives once already.",
+      + "construction, independent of any timing threshold or content hash. This exact shape "
+      + "was eight out of eight false positives once already.",
     expectedContention: false,
     tasks: [
       task("task_own_a", A_6E6C, "2026-08-23T01:50:03.801Z"),
@@ -228,10 +405,11 @@ export const overlapCorpus: readonly OverlapCorpusCase[] = [
     activityByWorker: OBSERVED_ACTIVITY,
   },
   {
-    caseId: "field-v1-unattributed-second-writer",
+    caseId: "structural-unattributed-second-writer",
     note:
-      "A change with no agent and no worktree could belong to either party, so counting it as "
-      + "a second participant would invent the very thing being reported.",
+      "A change with no agent and no worktree could belong to either party, so counting it as a "
+      + "second participant would invent the very thing being reported. Structural, by "
+      + "`hasDistinctWorkers`'s own definition -- not a timing or content question.",
     expectedContention: false,
     tasks: [
       task("task_attributed", A_2478, "2026-08-22T16:21:30.353Z"),
@@ -239,49 +417,30 @@ export const overlapCorpus: readonly OverlapCorpusCase[] = [
     ],
     activityByWorker: OBSERVED_ACTIVITY,
   },
-  // ---- Adversarial: the shape `field-v1` gets wrong, which is the point of `field-v2`. ----
   {
-    caseId: "field-v2-idle-session-spanning-a-later-write",
+    caseId: "boundary-idle-session-spanning-a-later-write",
     note:
-      "The case the old corpus had no example of, and the reason its precision was a tautology. "
-      + "agent_2478f630's session ran 15:21 to 19:26, and agent_62225cb8 wrote at 16:21 -- "
-      + "squarely inside that span. But 2478's nearest observed activity before 16:21 is "
-      + "15:21, an hour earlier, and it was silent from 16:44 to 17:25. A session that has not "
-      + "ended is not a worker at the keyboard. The old rule says contention here because "
-      + "19:26 > 16:21; the answer is no.",
+      "Constructed to probe the shape `field-v1`'s session-span rule got wrong: a session that "
+      + "has not ended is not a worker at the keyboard. There is no real second `file.changed` "
+      + "at this exact instant for agent_62225cb8 to hash-check against -- this pins "
+      + "`contentionAmong`'s specified behavior at the idle-gap boundary, not a field outcome.",
     expectedContention: false,
     tasks: [
       task("task_idle_earlier", A_2478, "2026-08-22T15:21:05.926Z"),
       task("task_idle_later", A_6222, "2026-08-22T16:21:30.353Z"),
     ],
     activityByWorker: active([
-      // 2478 with the mid-session activity removed: a session open across the write, present
-      // only at its two ends. Every timestamp is one the ledger really recorded for it.
       [A_2478, ["2026-08-22T15:21:05.926Z", "2026-08-22T19:26:37.604Z"]],
       [A_6222, ["2026-08-22T15:18:04.471Z"]],
     ]),
   },
   {
-    caseId: "field-v2-idle-gap-just-inside-the-threshold",
+    caseId: "boundary-long-session-that-never-came-back",
     note:
-      "The other side of the same boundary, so the threshold is pinned from both directions. "
-      + "agent_6e6c8445 wrote cli.test.ts at 01:50 and was last seen at 02:00:58, fifteen and a "
-      + "half minutes before agent_c460874d wrote at 02:16:37 -- then came back at 02:37. That "
-      + "is a pause in a session, not the end of one, and it is the widest gap any positive in "
-      + "this corpus rests on. A threshold below sixteen minutes would drop it.",
-    expectedContention: true,
-    tasks: [
-      task("task_gap_earlier", A_6E6C, "2026-08-23T01:50:03.801Z"),
-      task("task_gap_later", A_C460, "2026-08-23T02:16:37.618Z"),
-    ],
-    activityByWorker: OBSERVED_ACTIVITY,
-  },
-  {
-    caseId: "field-v2-long-session-that-never-came-back",
-    note:
-      "agent_7a1033a6's session spans 67.8 hours in the ledger. A worker whose last act "
-      + "precedes the other write has finished, however long its session looks: reporting it "
-      + "would make every historical write in a long-running session contend with the present.",
+      "agent_b48c1c15's activity here spans 67.8 hours in the ledger. A worker whose last act "
+      + "precedes the other write has finished, however long its session looks. Constructed to "
+      + "pin that specification; the two timestamps are real activity boundaries but not a real "
+      + "shared-file write pair, so there is nothing to hash-check.",
     expectedContention: false,
     tasks: [
       task("task_long_earlier", A_B48C, "2026-08-21T15:46:26.790Z"),
@@ -290,11 +449,12 @@ export const overlapCorpus: readonly OverlapCorpusCase[] = [
     activityByWorker: OBSERVED_ACTIVITY,
   },
   {
-    caseId: "field-v1-boundary-finished-exactly-at-the-later-write",
+    caseId: "boundary-finished-exactly-at-the-later-write",
     note:
       "The earlier worker's last activity is the same instant as the later write. Treated as "
       + "finished, not as contending: an inclusive boundary would make every hand-off where one "
-      + "session ends as another begins into a collision.",
+      + "session ends as another begins into a collision. Pins the exclusive-boundary code path; "
+      + "no real second write exists at this exact instant to hash-check.",
     expectedContention: false,
     tasks: [
       task("task_boundary_a", A_B48C, "2026-08-22T05:57:11.643Z"),

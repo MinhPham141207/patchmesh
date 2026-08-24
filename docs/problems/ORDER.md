@@ -4,9 +4,10 @@ Sequencing for the twelve problems in this directory. Ordered by dependency and
 information gain, **not** by severity — severity ranks pain, order ranks what unblocks
 learning.
 
-> **Status: Wave 0 shipped 2026-08-23. Wave 1a shipped 2026-08-24.** PM-10 B, PM-12, PM-08 B,
-> PM-03 and PM-01 A are done, along with the free documentation items. Wave 1a - PM-16, PM-14 B,
-> PM-15, PM-13 B+C and PM-10's default output - closed the measurement gap that Wave 0 opened.
+> **Status: Wave 0 shipped 2026-08-23. Wave 1a and Wave 1b shipped 2026-08-24.** PM-10 B, PM-12,
+> PM-08 B, PM-03 and PM-01 A are done, along with the free documentation items. Wave 1a - PM-16,
+> PM-14 B, PM-15, PM-13 B+C and PM-10's default output - closed the measurement gap that Wave 0
+> opened. Wave 1b took PM-02 A most of the way and made the overlap gate falsifiable.
 > Wave 1 proper (content hashing, PM-09) is next.
 
 ## The constraint that decided the first step
@@ -93,15 +94,60 @@ The baseline to measure against is in PM-13.
 - **[PM-09](PM-09-null-attribution.md) A** — correlation backfill, plus C (report the rate in
   `doctor`). Cheap, and it directly improves the recap quality now in front of every session.
 
-## Wave 2 — say something before the write
+## Wave 1b — say something near the write, and make the gate able to fail — **DONE 2026-08-24**
 
-The first real product change.
+Four packages in parallel, partitioned by directory so no two workers shared a file.
 
-- **[PM-02](PM-02-no-intervention-point.md) A and
-  [PM-07](PM-07-stale-read-needs-an-undeclarable-contract.md) A together.** These are one
-  feature, not two: the time-based staleness reframe *is* the `PreToolUse` advisory.
-  Building them separately builds it twice.
-- Requires Wave 1: PM-03 for cross-worktree reach, hashing to hold false positives down.
+| Item | Outcome |
+| --- | --- |
+| [PM-02](PM-02-no-intervention-point.md) A — contention advisory | **Partial.** Detection ships and is cheap. Delivery moved from before the write to one call after it. |
+| [PM-02](PM-02-no-intervention-point.md)'s precision claim | Corpus relabelled from content hashes. Precision **1.0 -> 0.667** (n=8). The gate can now fail. |
+| Concurrency data | `tools/concurrency` manufactures real labelled contention. `IDLE_GAP_MINUTES` confirmed inclusive at exactly 30. |
+| [PM-15](PM-15-answers-log-is-not-a-call-counter.md) residue | `recordAnswer` removed from the MCP surface. One adoption source remains. |
+
+> **Why PM-02 A is partial, and what it cost.** The advisory was built for `PreToolUse` and
+> works there, but the host has **no non-blocking channel from `PreToolUse` to the model**:
+> `allow`'s reason is user-transcript-only, and `deny`/`ask` both block — which this file rules
+> out until the advisory has a measured false-positive rate. So delivery runs through
+> `PostToolUse` `additionalContext`, which does reach the model. That is one tool call *after*
+> the write rather than before it. It is a real weakening of the intent and it is recorded as
+> such; it is still far earlier than Stop-time ingest plus a voluntary call. The `PreToolUse`
+> path is kept intact and unmodified, so it is already correct if the host gains such a channel.
+
+> **The relabelling found a defect, and it was not fixed here.** `apps/cli/test/cli.test.ts` —
+> the widest gap any positive rested on, at 15.6 minutes — is a **hash-verified clean handoff**:
+> the later write's `beforeVersion` is byte-identical to the earlier write's `afterVersion`, with
+> nothing between them. `contentionAmong` flags it only because 15.6 < 30. That is n=1 on the
+> disagreeing side, so it does not prove 30 is wrong. It proves the constant was tuned against a
+> corpus that restated the detector's own rule and had never been checked independently.
+> Whoever next touches `overlap.ts` owns this.
+
+> **A limit on the new labels, stated plainly.** Content-hash chains never break between adjacent
+> real writes in this ledger, because the observer serialises one working tree. So a hash mismatch
+> mostly means other writes intervened, not that a destructive clobber occurred. The label is
+> genuinely independent of the detector's timing rule — which was the point — but it is weaker
+> evidence of interference than "clobber" suggests.
+
+## Wave 2 — actually say it before the write
+
+- **A turn-start advisory on `UserPromptSubmit`** — **DONE 2026-08-24.** Its `additionalContext`
+  reaches the model and fires before the turn's first tool call, so this is the first thing
+  PatchMesh says before a write rather than after one. Repository-wide rather than per-file,
+  because `UserPromptSubmit` carries no `tool_input` to match a path against. Silent when
+  nothing is in flight. Complements the per-edit `PostToolUse` check; it does not replace it.
+
+  > **It needed no host configuration change.** `UserPromptSubmit` was already wired to the
+  > recorder binary by `patchmesh init`, as the turn boundary that gives ordinary work a task —
+  > so this was a decision inside an invocation that already happened, exactly as the
+  > `Pre`/`PostToolUse` advisories were. The assumption that it required a new hook was wrong.
+  > All three advisory stages now ride hooks that were already installed.
+
+- **[PM-07](PM-07-stale-read-needs-an-undeclarable-contract.md) A** — the time-based staleness
+  reframe. Still one feature with the advisory, and it now has a delivery channel to ride on.
+- **Re-examine `IDLE_GAP_MINUTES`** against `tools/concurrency` and the hash-verified corpus,
+  which between them are the first evidence about the constant that is not circular.
+- Option B (blocking) stays out. It needs a measured false-positive rate in the wild, and
+  `adoption.ts` now shows how little the surface is exercised.
 
 ## Wave 3 — make detectors produce findings
 
