@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
-import { findWorktreeRoot, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
+import { agentIdForSession, findWorktreeRoot, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
 import { findOverlappingWork, recapRecentWork, renderOverlap, renderRecap } from "patchmesh-query";
 import { measurementPathFor, recordAnswer } from "./measure.js";
+import { claimInjection, injectionStatePathFor } from "./injection-state.js";
 
 /**
  * The read side of the loop: a `SessionStart` hook that hands a new session what the last one
@@ -107,7 +108,11 @@ export function withinBudget(text: string, maxBytes = MAX_CONTEXT_BYTES): string
  * there is none, nothing about contention is said at all -- "no collisions" in every session
  * is the permanent-`degraded` mistake in a different costume.
  */
-export function asAdditionalContext(recap: string, contention?: string | undefined): string {
+export function asAdditionalContext(
+  recap: string,
+  contention?: string | undefined,
+  agentId?: string | null,
+): string {
   const blocks: string[] = ["## PatchMesh — what previous sessions did here", ""];
   if (contention !== undefined && contention !== "") {
     blocks.push(
@@ -117,10 +122,32 @@ export function asAdditionalContext(recap: string, contention?: string | undefin
       "",
     );
   }
+  blocks.push(recap, "");
+
+  // Two things a reader of this block cannot work out for itself.
+  //
+  // The first is its own identity. `patchmesh_recent_activity` has always taken
+  // `excludeAgentId` so a caller does not rediscover its own work, and nothing ever told an
+  // agent what to pass -- so the parameter was unusable and a live call answered by reporting
+  // the caller's own in-flight call back to it. The hook knows the session id; deriving the
+  // agent id here is the only moment anything does.
+  //
+  // The second is when asking is worth it. This used to close by saying the recap was already
+  // spent and to call `patchmesh_recap` "only for a different window, agent, or depth" -- a
+  // stop instruction, and agents obeyed it: 14 voluntary calls across the ledger's whole life,
+  // against 152 to the memory server the same agents used in the same sessions. A push surface
+  // that ends by discouraging the pull surface is the reason the pull surface is unused. What
+  // replaces it names the one moment a call changes what happens next. See docs/problems/PM-13.
+  if (agentId !== undefined && agentId !== null) {
+    blocks.push(
+      `You are \`${agentId}\`. Pass it as \`excludeAgentId\` to \`patchmesh_recent_activity\` to leave your own calls out.`,
+    );
+  }
   blocks.push(
-    recap,
-    "",
-    "Ask `patchmesh_recap` or `patchmesh_overlapping_work` for more, or run `patchmesh recap`.",
+    "Before your first edit to a file, ask `patchmesh_recent_activity` for that `path`: work in "
+      + "flight is not in git yet, so nothing else can tell you another agent is already in it.",
+    "This recap covers one day, five tasks deep. `patchmesh_recap` reaches past that edge, and "
+      + "`patchmesh_overlapping_work` names what two workers are both changing.",
   );
   return blocks.join("\n");
 }
@@ -190,12 +217,36 @@ export async function main(): Promise<number> {
     }
 
     const contention = contentionNotice(worktreeRoot);
-    const context = withinBudget(asAdditionalContext(renderRecap(result, undefined), contention?.text));
+    // The host declares the session; the agent id is derived from it exactly as the recorder
+    // derives it, so what the agent is told to pass is what the ledger recorded it under.
+    const sessionId = isRecord(payload) && typeof payload["session_id"] === "string" ? payload["session_id"] : null;
+    const agentId = sessionId === null ? null : agentIdForSession(sessionId);
+    const context = withinBudget(
+      asAdditionalContext(renderRecap(result, undefined), contention?.text, agentId),
+    );
+
+    // Which of startup, resume, clear or compact fired this. Recorded rather than acted on:
+    // the burst of near-simultaneous fires that PM-14 describes was diagnosed without knowing
+    // which source produced it, because nothing wrote it down. Now a day of rows will say.
+    const trigger = isRecord(payload) && typeof payload["source"] === "string" ? payload["source"] : undefined;
+
+    // The same bytes, to the same session, seconds after they already arrived, are not context
+    // -- they are noise that also inflates the answer count PM-01 is judged by. A repeat far
+    // enough apart still goes through, because a compact or a resume is when an agent has lost
+    // its context and most needs it back. See docs/problems/PM-14.
+    if (!claimInjection(injectionStatePathFor(worktreeRoot, LEDGER_DIRECTORY), sessionId, context)) {
+      debug("identical context already injected into this session; staying quiet");
+      return 0;
+    }
 
     // Measured on the same terms as every other answer, so answers-per-session stops being
     // an assumption. This is the number PM-01 exists to move and PM-10 needs a sample of.
     recordAnswer(measurementPathFor(worktreeRoot, LEDGER_DIRECTORY), {
       tool: "session_start_recap",
+      source: "session_start",
+      ok: true,
+      agentId,
+      trigger,
       answerBytes: Buffer.byteLength(context, "utf8"),
       items: result.tasks.length + (contention?.files ?? 0),
       withheld: result.truncated,

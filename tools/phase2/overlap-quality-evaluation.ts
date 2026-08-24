@@ -60,7 +60,7 @@ const SUBJECT_RESOURCE = `res_${"0".repeat(64)}`;
 /** Map each labeled case through the real rule into the shape the shared gate scores. */
 export function overlapCorpusCases(): readonly DetectorCorpusCase[] {
   return overlapCorpus.map((entry) => {
-    const contention = contentionAmong(entry.tasks, entry.lastActiveByWorker);
+    const contention = contentionAmong(entry.tasks, entry.activityByWorker);
     return {
       caseId: entry.caseId,
       findingType: "concurrent_file_write",
@@ -79,8 +79,8 @@ export function overlapCorpusCases(): readonly DetectorCorpusCase[] {
           confidence: OBSERVED_CONTENTION_CONFIDENCE,
           reason:
             `${contention.earlierWorkerAgentId ?? "an unattributed worker"} wrote at `
-            + `${contention.earlierWriteAt} and was still working at `
-            + `${contention.earlierWorkerLastActiveAt}, after `
+            + `${contention.earlierWriteAt} and was last seen `
+            + `${contention.earlierWorkerIdleGapMs}ms before `
             + `${contention.laterWorkerAgentId ?? "another worker"} wrote at ${contention.laterWriteAt}`,
         },
     } as DetectorCorpusCase;

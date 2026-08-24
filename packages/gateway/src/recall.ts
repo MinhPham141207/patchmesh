@@ -6,7 +6,8 @@ import {
   resourceIdForPath,
   type InFlightCall,
 } from "patchmesh-recorder";
-import { SqliteEventStore } from "patchmesh-storage";
+import { readWindowCached } from "patchmesh-storage";
+import { describeWindow, idShortener } from "patchmesh-query";
 
 /** One recorded call, reduced to what another agent needs in order to decide something. */
 export interface RecalledCall {
@@ -62,6 +63,8 @@ export interface RecallResult {
   readonly truncated: number;
   readonly logicalPath: string | null;
   readonly agents: readonly string[];
+  /** The window this answer covers, in minutes, so the answer can say what it looked at. */
+  readonly withinMinutes: number;
 }
 
 /**
@@ -81,8 +84,12 @@ const DEFAULT_WITHIN_MINUTES = 240;
  */
 const NEWLINE = "\n";
 
-const CAVEAT =
-  "\nThis is a record of what happened, not a judgement. Same file does not mean same work.";
+/**
+ * The standing "this reports, it does not judge" caveat moved into the MCP tool description,
+ * which a session pays for once rather than once per answer. What remains is the part that is
+ * about these rows rather than about the tool.
+ */
+const CAVEAT = "\nSame file does not mean same work.";
 
 function payloadOf(event: ProtocolEvent): Record<string, unknown> {
   return event.payload as unknown as Record<string, unknown>;
@@ -120,19 +127,19 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
       truncatedChanges: 0,
       logicalPath: null,
       agents: [],
+      withinMinutes,
     };
   }
 
-  const store = SqliteEventStore.open(options.ledgerPath);
-  let events: readonly ProtocolEvent[];
-  try {
-    events = store.read({
+  // Unchecked and cached, as an advisory read: see `reconstructStoredEvent`.
+  const events = readWindowCached(
+    options.ledgerPath,
+    {
       eventTypes: ["tool.requested", "tool.completed", "file.changed"],
       since: since.toISOString(),
-    });
-  } finally {
-    store.close();
-  }
+    },
+    { validate: false },
+  );
 
   // A completion carries the outcome but not the operation, so requests are the spine and
   // each one picks up its own completion by causation.
@@ -214,6 +221,7 @@ export function recallRecentActivity(options: RecallOptions): RecallResult {
     truncatedChanges: matchedChanges.length - changes.length,
     logicalPath: requestedPath,
     agents: [...new Set(calls.map((call) => call.agentId))],
+    withinMinutes,
   };
 }
 
@@ -244,7 +252,7 @@ function summarizeOperation(operation: string): string {
  * informative half was the fifteen paths. The worker is the thing a caller is deciding about,
  * so it is said once and the files are listed under it.
  */
-function renderChanges(result: RecallResult): string {
+function renderChanges(result: RecallResult, short: (id: string) => string): string {
   const groups = new Map<string, { agentId: string; taskId: string | null; at: string; byKind: Map<string, string[]> }>();
   for (const change of result.changes) {
     const agentId = change.agentId ?? "unattributed";
@@ -264,8 +272,8 @@ function renderChanges(result: RecallResult): string {
   const header = `${result.changes.length} file change(s) observed, by ${workers} worker(s), most recent first:`;
   const lines: string[] = [header];
   for (const group of groups.values()) {
-    const task = group.taskId === null ? "no task" : group.taskId;
-    lines.push(`- ${group.agentId} (${task}) at ${group.at}`);
+    const task = group.taskId === null ? "no task" : short(group.taskId);
+    lines.push(`- ${short(group.agentId)} (${task}) at ${group.at}`);
     for (const [changeKind, paths] of group.byKind) lines.push(`  ${changeKind}: ${paths.join(", ")}`);
   }
   if (result.truncatedChanges > 0) lines.push(`(${result.truncatedChanges} older change(s) not shown.)`);
@@ -282,33 +290,31 @@ function renderChanges(result: RecallResult): string {
  *
  * Detail follows the question. A caller that narrowed to a file gets every call that named it,
  * because that is the answer it asked for. A caller asking about the whole repository gets a
- * histogram, plus any call that failed - a failure is the one thing in an unnarrowed stream
- * that a reader could not have predicted.
+ * count, plus any call that failed - a failure is the one thing in an unnarrowed stream that a
+ * reader could not have predicted.
  */
-function renderCalls(result: RecallResult, scope: string): string {
+function renderCalls(result: RecallResult, scope: string, short: (id: string) => string): string {
   const pathScoped = result.logicalPath !== null;
   const line = (call: RecalledCall) => {
-    const task = call.taskId === null ? "no task" : call.taskId;
+    const task = call.taskId === null ? "no task" : short(call.taskId);
     const outcome = call.outcome === "failed" ? " [failed]" : "";
-    return `- ${call.at} ${call.agentId} (${task}) ${call.toolName}: ${call.operation}${outcome}`;
+    return `- ${call.at} ${short(call.agentId)} (${task}) ${call.toolName}: ${call.operation}${outcome}`;
   };
 
   if (pathScoped) {
-    const header = `${result.calls.length} recorded call(s) for ${scope}, across ${result.agents.length} agent(s), most recent first:`;
+    const header = `${result.calls.length} recorded call(s) for ${scope} in the last ${describeWindow(result.withinMinutes)}, across ${result.agents.length} agent(s), most recent first:`;
     const footer = result.truncated > 0 ? `${NEWLINE}(${result.truncated} older matching call(s) not shown.)` : "";
     return `${header}${NEWLINE}${result.calls.map(line).join(NEWLINE)}${footer}`;
   }
 
-  const byTool = new Map<string, number>();
-  for (const call of result.calls) byTool.set(call.toolName, (byTool.get(call.toolName) ?? 0) + 1);
-  const histogram = [...byTool.entries()]
-    .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1))
-    .map(([toolName, count]) => `${toolName} ${count}`)
-    .join(", ");
-
+  // No tool histogram. 79% of recorded calls are shell commands stored as a redacted string,
+  // so the histogram said "mostly run_shell" in every window -- a property of what the recorder
+  // can see rather than of this answer, and nothing a reader can act on. The count and the
+  // failures are what remain: a failure is the one thing in an unnarrowed stream that could not
+  // have been predicted.
   const total = result.calls.length + result.truncated;
   const lines = [
-    `${total} call(s) recorded across ${result.agents.length} agent(s) in this window. Of the ${result.calls.length} most recent: ${histogram}.`,
+    `${total} call(s) recorded across ${result.agents.length} agent(s) in the last ${describeWindow(result.withinMinutes)}.`,
   ];
   const failures = result.calls.filter((call) => call.outcome === "failed");
   if (failures.length > 0) {
@@ -327,10 +333,21 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
         ? `\`${requestedPath}\` (outside this repository, so nothing is recorded for it)`
         : "this repository";
 
+  // See `shortIds`: one table for the whole answer, because ids are only ever compared with
+  // the ones printed beside them.
+  const short = idShortener([
+    ...result.calls.flatMap((call) => (call.taskId === null ? [call.agentId] : [call.agentId, call.taskId])),
+    ...result.changes.flatMap((change) => [
+      ...(change.agentId === null ? [] : [change.agentId]),
+      ...(change.taskId === null ? [] : [change.taskId]),
+    ]),
+    ...result.inFlight.flatMap((call) => (call.agentId === null ? [] : [call.agentId])),
+  ]);
+
   const inFlightLines = result.inFlight.map((call) => {
     const seconds = Math.round(call.runningForMs / 1000);
     const what = call.operation === null ? call.hostToolName : `${call.hostToolName}: ${summarizeOperation(call.operation)}`;
-    return `- ${call.agentId ?? "unattributed"} ${what} (running ${seconds}s)`;
+    return `- ${call.agentId === null ? "unattributed" : short(call.agentId)} ${what} (running ${seconds}s)`;
   });
   // Deliberately first: work still in flight decides more than work already finished.
   const inFlightSection =
@@ -338,7 +355,7 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
       ? ""
       : `${result.inFlight.length} call(s) running right now:${NEWLINE}${inFlightLines.join(NEWLINE)}${NEWLINE}${NEWLINE}`;
 
-  const changes = result.changes.length === 0 ? null : renderChanges(result);
+  const changes = result.changes.length === 0 ? null : renderChanges(result, short);
 
   if (result.calls.length === 0) {
     // A file written by a shell command is named by no tool argument, so changes can be the
@@ -354,5 +371,5 @@ export function renderRecall(result: RecallResult, requestedPath: string | undef
   // filesystem shows; the second is the one a caller can act on, and leading with the first
   // buried it under whatever shell plumbing happened to run in the window.
   const changesFirst = changes === null ? "" : `${changes}${NEWLINE}${NEWLINE}`;
-  return `${inFlightSection}${changesFirst}${renderCalls(result, scope)}${CAVEAT}`;
+  return `${inFlightSection}${changesFirst}${renderCalls(result, scope, short)}${CAVEAT}`;
 }

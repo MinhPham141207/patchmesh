@@ -1,6 +1,7 @@
 # PM-10 — The net-token invariant rests on an estimate
 
-- **Status:** `partial` — option B shipped and baseline frozen 2026-08-23
+- **Status:** `partial` — option B shipped and baseline frozen 2026-08-23; the default output
+  fixed 2026-08-24; option A still blocked on sample size
 - **Severity:** medium
 - **Depends on:** PM-01
 
@@ -33,6 +34,39 @@ Option A (the displacement join) still needs a real post-PM-01 sample. Option D 
 rejected: bytes, not tokens.
 
 ---
+
+## Residue update (2026-08-24) — the default output was the misleading one
+
+Two things were true at once for a day, and the command reported the wrong one for free.
+
+**The treatment arm is still n=1**, 36 hours after `SessionStart` injection went live:
+
+```
+CONTROL    median 83.5   n=8   5 never changed
+TREATMENT  median 191    n=1   2 never changed
+```
+
+**And the default output hid that.** With no cohort flag, `recap --metrics` printed a single
+pooled median of **84** across both arms. Against the frozen baseline of 83 that reads as
+"the intervention did nothing", when the truth is "the intervention has not been measured
+yet". The cohort split existed but was opt-in, so the reading anyone got without asking was
+the one that could mislead.
+
+**Fixed:** the split is now computed by default. The boundary is derived from the first
+`session_start_recap` row in `answers.ndjson` — the only record of when the treatment began,
+because the session-start binary reads and never writes an event. When either arm is below
+`MIN_ARM_SAMPLE` (5) the output says so in words, on the same screen as the numbers:
+
+```
+NOT YET COMPARABLE: the treatment arm is below 5 measured sessions.
+Whatever the two medians are, the difference between them is not evidence yet. More
+sessions is the only thing that changes this; waiting inside one does not.
+```
+
+An explicit `--since`/`--until` suppresses the split: the caller is already looking at one
+arm, and splitting that arm again would compare it against its own remainder.
+
+A metric that can mislead by default is worse than one that says "not yet".
 
 ## The problem
 

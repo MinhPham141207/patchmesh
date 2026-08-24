@@ -1,5 +1,4 @@
-import type { ProtocolEvent } from "patchmesh-protocol";
-import { SqliteEventStore } from "patchmesh-storage";
+import { readEventsCached } from "patchmesh-storage";
 
 /**
  * How long an agent works before it changes anything: the cost of resuming.
@@ -53,7 +52,46 @@ export interface ResumeMetrics {
   readonly cohort: { readonly since: string | null; readonly until: string | null };
   /** Sessions excluded because they started outside the cohort, so a small `n` explains itself. */
   readonly excludedByCohort: number;
+  /**
+   * The before/after split, when a treatment boundary is known.
+   *
+   * Present so that the *default* output is the honest one. With no cohort flag this command
+   * printed a single pooled median over both arms -- 84 against a frozen baseline of 83 --
+   * which reads as "the intervention did nothing" when the truth is "the intervention has not
+   * been measured yet". The split existed but was opt-in, so the reading anyone got for free
+   * was the misleading one. See docs/problems/PM-10.
+   */
+  readonly arms?: TreatmentSplit | undefined;
 }
+
+/** One side of a before/after comparison, reported on its own terms. */
+export interface ResumeArm {
+  readonly medianCalls: number | null;
+  readonly measuredAgents: number;
+  readonly agentsWithoutChange: number;
+}
+
+export interface TreatmentSplit {
+  /** When the treatment began. Sessions that started before it are control, at or after it treatment. */
+  readonly boundary: string;
+  readonly control: ResumeArm;
+  readonly treatment: ResumeArm;
+  /**
+   * Whether the smaller arm carries enough sessions to support a comparison at all.
+   *
+   * Not a significance test -- it is a floor beneath which the command declines to be read as
+   * a result. A median of one session is a session, not an effect.
+   */
+  readonly conclusive: boolean;
+}
+
+/**
+ * Sessions an arm needs before its median is worth comparing.
+ *
+ * Deliberately a round, small, stated number rather than a test. The failure this guards
+ * against is not a subtle statistical one; it is reading `n=1` as an answer.
+ */
+export const MIN_ARM_SAMPLE = 5;
 
 export interface ResumeMetricsOptions {
   readonly ledgerPath: string;
@@ -85,6 +123,14 @@ export interface ResumeMetricsOptions {
    * The measure is about resuming a session, and a subagent does not resume anything.
    */
   readonly includeSubagents?: boolean | undefined;
+  /**
+   * When the intervention being measured began, so the reading splits itself without being asked.
+   *
+   * Supplied by the caller rather than discovered here: the boundary is the moment the
+   * `SessionStart` hook first injected anything, which is recorded in the measurement file the
+   * gateway writes, not in the ledger this module reads.
+   */
+  readonly treatmentSince?: string | undefined;
 }
 
 interface Accumulator {
@@ -112,13 +158,15 @@ function median(values: readonly number[]): number | null {
 }
 
 export function measureTimeToResume(options: ResumeMetricsOptions): ResumeMetrics {
-  const store = SqliteEventStore.open(options.ledgerPath);
-  let events: readonly ProtocolEvent[];
-  try {
-    events = store.read({ eventTypes: ["tool.requested", "file.changed"] });
-  } finally {
-    store.close();
-  }
+  // Unbounded rather than windowed, and therefore cacheable on its own terms: the metric is
+  // about whole sessions, and a session that started before the window is not measurable from
+  // inside it. No `since` also means the key is stable, so the repeated runs a cohort split
+  // makes -- one for each arm -- read the ledger once between them.
+  const events = readEventsCached(
+    options.ledgerPath,
+    { eventTypes: ["tool.requested", "file.changed"] },
+    { validate: false },
+  );
 
   const byAgent = new Map<string, Accumulator>();
   let firstEventAt: string | null = null;
@@ -193,7 +241,106 @@ export function measureTimeToResume(options: ResumeMetricsOptions): ResumeMetric
     lastEventAt,
     cohort: { since: options.since ?? null, until: options.until ?? null },
     excludedByCohort,
+    ...(options.treatmentSince === undefined
+      ? {}
+      : { arms: splitOnBoundary(byAgent, options.treatmentSince) }),
   };
+}
+
+/**
+ * Split the accumulated sessions on the moment the treatment began.
+ *
+ * The boundary is compared against each session's **first event**, never against event time --
+ * a session that started before the hook existed belongs wholly to the control arm however
+ * long it goes on running. The comparison is exclusive on one side and inclusive on the other
+ * so no session can be counted in both.
+ */
+function splitOnBoundary(byAgent: ReadonlyMap<string, Accumulator>, boundary: string): TreatmentSplit {
+  const arm = (include: (accumulator: Accumulator) => boolean): ResumeArm => {
+    const members = [...byAgent.values()].filter(include);
+    const measured = members
+      .map((member) => member.callsBeforeFirstChange)
+      .filter((value): value is number => value !== null);
+    return {
+      medianCalls: median(measured),
+      measuredAgents: measured.length,
+      agentsWithoutChange: members.length - measured.length,
+    };
+  };
+  const control = arm((accumulator) => accumulator.firstEventAt < boundary);
+  const treatment = arm((accumulator) => accumulator.firstEventAt >= boundary);
+  return {
+    boundary,
+    control,
+    treatment,
+    conclusive:
+      control.measuredAgents >= MIN_ARM_SAMPLE && treatment.measuredAgents >= MIN_ARM_SAMPLE,
+  };
+}
+
+/**
+ * The moment the `SessionStart` hook first injected context, read from the measurement file.
+ *
+ * This is the only record of when the treatment began. The ledger cannot answer it: the
+ * session-start binary only reads, so its fires leave no events behind -- they leave rows in
+ * `answers.ndjson` and nowhere else. Returns null when nothing has ever been injected, which
+ * means there is no treatment arm to split off yet.
+ */
+export function treatmentBoundaryFrom(answersContent: string): string | null {
+  for (const line of answersContent.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      const row: unknown = JSON.parse(line);
+      if (
+        typeof row === "object"
+        && row !== null
+        && (row as { tool?: unknown }).tool === "session_start_recap"
+        && typeof (row as { at?: unknown }).at === "string"
+      ) {
+        // The file is append-only and written in order, so the first matching row is the
+        // earliest injection. Reading further would only find later ones.
+        return (row as { at: string }).at;
+      }
+    } catch {
+      // A truncated final line is normal for an append-only log; it is not a reason to fail.
+    }
+  }
+  return null;
+}
+
+/**
+ * The before/after block, including the sentence that stops it being over-read.
+ *
+ * The two medians are printed with their sample sizes attached, and when either arm is below
+ * the floor the block says so in words instead of leaving the numbers to be compared anyway.
+ * A reader who sees "83.5" and "191" side by side will compare them; the only defence is to
+ * state, on the same screen, that one of them rests on a single session.
+ */
+function renderArms(arms: TreatmentSplit): readonly string[] {
+  const describe = (label: string, arm: ResumeArm): string =>
+    `  ${label.padEnd(10)} median ${String(arm.medianCalls ?? "n/a").padStart(6)} call(s)`
+    + `   n=${arm.measuredAgents}, ${arm.agentsWithoutChange} never changed`;
+  const lines = [
+    `Sessions started before ${arms.boundary} are control; at or after it, treatment.`,
+    "",
+    describe("CONTROL", arms.control),
+    describe("TREATMENT", arms.treatment),
+    "",
+  ];
+  if (arms.conclusive) {
+    lines.push(`Both arms carry at least ${MIN_ARM_SAMPLE} measured sessions, so the comparison can be read.`);
+  } else {
+    const short = [
+      ...(arms.control.measuredAgents < MIN_ARM_SAMPLE ? ["control"] : []),
+      ...(arms.treatment.measuredAgents < MIN_ARM_SAMPLE ? ["treatment"] : []),
+    ].join(" and ");
+    lines.push(
+      `NOT YET COMPARABLE: the ${short} arm is below ${MIN_ARM_SAMPLE} measured sessions.`,
+      "Whatever the two medians are, the difference between them is not evidence yet. More",
+      "sessions is the only thing that changes this; waiting inside one does not.",
+    );
+  }
+  return lines;
 }
 
 export function renderResumeMetrics(metrics: ResumeMetrics): string {
@@ -217,6 +364,7 @@ export function renderResumeMetrics(metrics: ResumeMetrics): string {
       `Excluded:          ${metrics.excludedByCohort} session(s) started outside it`,
     );
   }
+  if (metrics.arms !== undefined) lines.push("", ...renderArms(metrics.arms));
   lines.push("");
   for (const agent of metrics.agents) {
     const value = agent.callsBeforeFirstChange === null

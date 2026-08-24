@@ -92,3 +92,19 @@ export function commitsWithin(
     })
     .map((commit) => commit.subject);
 }
+
+/**
+ * A window a reader can hold in their head, from the minutes a caller passed.
+ *
+ * Every read tool takes `withinMinutes` and each defaults to a different number -- recap looks
+ * back a day, overlaps and recall four hours. An agent that asks all three about "recently"
+ * therefore gets three different recentlies, and nothing in any answer said so. Stating the
+ * window is what makes "nothing found" mean something: it is the difference between "quiet"
+ * and "you asked about the last four minutes".
+ */
+export function describeWindow(withinMinutes: number): string {
+  if (withinMinutes < 90) return `${Math.round(withinMinutes)}m`;
+  const hours = withinMinutes / 60;
+  if (hours < 36) return `${Number(hours.toFixed(hours < 10 ? 1 : 0))}h`;
+  return `${Number((hours / 24).toFixed(1))}d`;
+}

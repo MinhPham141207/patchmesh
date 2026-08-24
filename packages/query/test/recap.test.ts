@@ -74,10 +74,15 @@ test("a recap summarizes each task by who worked and what changed", async () => 
     assert.deepEqual(task.changedPaths, ["one.ts", "two.ts"]);
 
     const rendered = renderRecap(result, undefined);
-    assert.match(rendered, /1 recent task\(s\)/u);
+    // The window is stated on every answer now: the three read tools default to different
+    // ones, and "nothing found" is only meaningful once the answer says what it looked at.
+    assert.match(rendered, /1 task\(s\) in this repository in the last 24h/u);
     assert.match(rendered, /2 call\(s\), 1 failed/u);
     assert.match(rendered, /changed: one\.ts, two\.ts/u);
-    assert.match(rendered, /not what it means/u);
+    // The standing "reports, does not judge" half of the caveat moved into the MCP tool
+    // description, which is paid once per session; what stays on the answer is the half that is
+    // about these rows. See `renderRecap`.
+    assert.match(rendered, /a changed file is not a finished intention/iu);
   } finally {
     rmSync(repo.root, { recursive: true, force: true });
   }

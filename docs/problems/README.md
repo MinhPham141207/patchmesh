@@ -3,8 +3,10 @@
 One file per problem PatchMesh currently faces. Each carries a status, the evidence it
 rests on, and candidate solutions with their trade-offs.
 
-Measured against the live ledger on 2026-08-23: 3,674 events, 17 agents, 56 tasks,
-1,005 null-attribution events, 8 answers ever returned.
+Measured against the live ledger on 2026-08-24: 5,523 events, 21 sessions, 2,275 tool calls,
+93 answers returned - of which 82 were the session-start hook's own injections and **14 were
+an agent choosing to ask**. Recording is not the binding constraint and has not been for some
+time; being asked is. See [PM-13](PM-13-pull-is-zero-and-the-recap-suppresses-it.md).
 
 ## Status vocabulary
 
@@ -34,6 +36,10 @@ See [ORDER.md](ORDER.md) for the recommended sequence.
 | [PM-10](PM-10-invariant-rests-on-a-counterfactual.md) | The net-token invariant rests on an estimate | `partial` | medium |
 | [PM-11](PM-11-feedback-loop-has-no-input.md) | The feedback loop has no input | `blocked` | low |
 | [PM-12](PM-12-health-is-permanently-degraded.md) | Health is permanently `degraded` | `resolved` | low |
+| [PM-13](PM-13-pull-is-zero-and-the-recap-suppresses-it.md) | Pull is zero, and the recap suppressed it | `partial` | high |
+| [PM-14](PM-14-sessionstart-fires-in-bursts.md) | `SessionStart` fires in bursts, re-serving the same text | `partial` | medium |
+| [PM-15](PM-15-answers-log-is-not-a-call-counter.md) | `answers.ndjson` is not a call counter | `resolved` | medium |
+| [PM-16](PM-16-the-cache-could-never-hit.md) | The read cache could never hit | `resolved` | medium |
 
 ### Shipped 2026-08-23 (Wave 0 of [ORDER.md](ORDER.md))
 
@@ -49,6 +55,20 @@ See [ORDER.md](ORDER.md) for the recommended sequence.
 **PM-01 is installed and verified** — `patchmesh doctor` reports all 6 hooks installed. The
 `SessionStart` hook injects the recap and, when there is any, leads with the files another
 worker was recently in flight over.
+
+### Shipped 2026-08-24 (Wave 1a - the measurement wave)
+
+Prompted by an audit of how much agents actually rely on the MCP surface. Ordered so the
+instrument landed before the treatment: PM-15 had to be trustworthy before PM-13's change
+could be judged by it.
+
+| Item | What landed |
+| --- | --- |
+| [PM-16](PM-16-the-cache-could-never-hit.md) | `readWindowCached` buckets the window boundary so a relative window can share a read. 7-day recap **606ms -> 186ms**, 7-day recall **498ms -> 33ms**. Ships with a hit counter. |
+| [PM-14](PM-14-sessionstart-fires-in-bursts.md) B | Per-session injection digest; an identical repeat inside 5 minutes is suppressed, a later one is not. The matcher is left alone pending the new `trigger` data. |
+| [PM-15](PM-15-answers-log-is-not-a-call-counter.md) | Adoption now derived from the ledger, not `answers.ndjson`. Rows gained `source`, `agentId`, `trigger`, `ok`; failures are recorded; `PATCHMESH_MEASURE=0` opts out. |
+| [PM-13](PM-13-pull-is-zero-and-the-recap-suppresses-it.md) B+C | All three tool descriptions and the injected recap now lead with **when to call**, not what is returned. The "call this only for a different window" stop instruction is gone. |
+| [PM-10](PM-10-invariant-rests-on-a-counterfactual.md) | `recap --metrics` splits control vs treatment **by default** and states plainly when an arm is too thin to compare. |
 
 ## Closed, recorded so they are not re-litigated
 

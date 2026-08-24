@@ -1,7 +1,8 @@
 import type { ProtocolEvent } from "patchmesh-protocol";
 import { ignoredByRepository } from "patchmesh-recorder";
-import { commitsWithin, readCommitsSince } from "./label.js";
-import { SqliteEventStore } from "patchmesh-storage";
+import { commitsWithin, describeWindow, readCommitsSince } from "./label.js";
+import { idShortener } from "./short-id.js";
+import { readWindowCached } from "patchmesh-storage";
 
 /**
  * What a prior session already established, so a fresh agent resumes instead of re-deriving.
@@ -46,6 +47,8 @@ export interface RecapResult {
   readonly truncated: number;
   /** Calls that belong to no task, which a recap cannot describe as a unit of work. */
   readonly unattributedCalls: number;
+  /** The window this answer covers, in minutes, so the answer can say what it looked at. */
+  readonly withinMinutes: number;
 }
 
 /** A recap looks further back than recall: its subject is the last session, not the last minutes. */
@@ -73,18 +76,19 @@ export function recapRecentWork(options: RecapOptions): RecapResult {
   const now = (options.now ?? (() => new Date()))();
   const since = new Date(now.getTime() - withinMinutes * 60_000);
 
-  const store = SqliteEventStore.open(options.ledgerPath);
-  let events: readonly ProtocolEvent[];
-  try {
-    // `tool.completed` is not summarized directly, but it carries the failure outcome each
-    // request is counted by; dropping it here would silently zero every failure count.
-    events = store.read({
+  // `tool.completed` is not summarized directly, but it carries the failure outcome each
+  // request is counted by; dropping it here would silently zero every failure count.
+  //
+  // Read unchecked and through the cache: this is an advisory answer, not an integrity
+  // decision. See `reconstructStoredEvent` and `readEventsCached`.
+  const events = readWindowCached(
+    options.ledgerPath,
+    {
       eventTypes: ["tool.requested", "tool.completed", "file.changed"],
       since: since.toISOString(),
-    });
-  } finally {
-    store.close();
-  }
+    },
+    { validate: false },
+  );
 
   const failedRequestIds = new Set<string>();
   for (const event of events) {
@@ -161,24 +165,32 @@ export function recapRecentWork(options: RecapOptions): RecapResult {
 
   all.sort((left, right) => right.endedAt.localeCompare(left.endedAt));
   const selected = all.slice(0, limit);
-  return { tasks: selected, truncated: all.length - selected.length, unattributedCalls };
+  return { tasks: selected, truncated: all.length - selected.length, unattributedCalls, withinMinutes };
 }
 
 /** Render a recap as the compact text an agent reads before deciding where to start. */
 export function renderRecap(result: RecapResult, agent: string | undefined): string {
   const scope = agent === undefined ? "this repository" : `\`${agent}\``;
+  // Which "recently" this is; see `describeWindow`.
+  const window = describeWindow(result.withinMinutes);
   if (result.tasks.length === 0) {
     const tail =
       result.unattributedCalls > 0
         ? ` ${result.unattributedCalls} recorded call(s) belong to no task, so there is nothing to summarize as a unit of work.`
         : "";
-    return `No recent work recorded for ${scope}.${tail}`;
+    return `No work recorded for ${scope} in the last ${window}.${tail}`;
   }
+
+  // See `shortIds`: an id is only ever compared with the ones printed beside it.
+  const short = idShortener([
+    ...result.tasks.flatMap((task) => task.agentIds),
+    ...result.tasks.map((task) => task.taskId),
+  ]);
 
   const blocks = result.tasks.map((task) => {
     const who =
       task.agentIds.length === 1
-        ? task.agentIds[0]!
+        ? short(task.agentIds[0]!)
         : `${task.agentIds.length} agents (${task.agentIds.filter((id) => id.includes(".sub.")).length} subagent(s))`;
     const failed = task.failed > 0 ? `, ${task.failed} failed` : "";
     // A task that landed commits while observing no changes of its own is a real and common
@@ -195,16 +207,18 @@ export function renderRecap(result: RecapResult, agent: string | undefined): str
     // "committed", not "did": the commit landed while this task was running, which is an
     // observation about timing rather than a statement of what the task was for.
     const committed = task.commits.length === 0 ? "" : `\n  committed: ${task.commits.join(" | ")}`;
-    return `- ${task.taskId}\n  ${who}, ${task.startedAt} to ${task.endedAt}, ${task.calls} call(s)${failed}\n${files}${committed}`;
+    return `- ${short(task.taskId)}\n  ${who}, ${task.startedAt} to ${task.endedAt}, ${task.calls} call(s)${failed}\n${files}${committed}`;
   });
 
-  const header = `${result.tasks.length} recent task(s) in ${scope}, most recent first:`;
+  const header = `${result.tasks.length} task(s) in ${scope} in the last ${window}, most recent first:`;
   const truncated = result.truncated > 0 ? `\n(${result.truncated} older task(s) not shown.)` : "";
   const unattributed =
     result.unattributedCalls > 0
       ? `\n${result.unattributedCalls} call(s) belong to no task and are not summarized here.`
       : "";
-  const caveat =
-    "\nThis is what was done, not what it means. A changed file is not a finished intention.";
+  // The standing caveat moved into the MCP tool description, which is paid once per session
+  // rather than once per answer. What is left is the half a reader cannot get from the
+  // description because it is about *these* rows: a changed file is not a finished intention.
+  const caveat = "\nA changed file is not a finished intention.";
   return `${header}\n${blocks.join("\n")}${truncated}${unattributed}${caveat}`;
 }
