@@ -281,3 +281,65 @@ test("a caller can ask only about overlaps its own task is part of", async () =>
     rmSync(repo.root, { recursive: true, force: true });
   }
 });
+
+test("a file another worker has open right now is reported, and leads the answer", () => {
+  const repo = repository();
+  try {
+    const journalPath = journalPathFor(repo.root, ".patchmesh");
+
+    // A call that started and has not reported back. Read from the journal, which is the only
+    // live source: ingest runs on Stop, so the ledger cannot know about it yet.
+    appendJournalEntry(
+      journalPath,
+      {
+        session_id: SECOND_SESSION,
+        hook_event_name: "PreToolUse",
+        tool_use_id: "call_open",
+        tool_name: "Edit",
+        tool_input: { file_path: "src/shared.ts" },
+      },
+      "2026-08-21T12:29:30.000Z",
+    );
+
+    const result = findOverlappingWork({
+      worktreeRoot: repo.root,
+      ledgerPath: repo.ledgerPath,
+      now: NOW,
+    });
+
+    assert.equal(result.live.length, 1);
+    assert.equal(result.live[0]!.logicalPath, "src/shared.ts");
+    assert.equal(result.live[0]!.hostToolName, "Edit");
+    assert.equal(result.live[0]!.runningForMs, 30_000);
+
+    const rendered = renderOverlap(result, undefined);
+    assert.match(rendered, /^1 file\(s\) are open right now/u, "live leads: it is the only part that can still change an outcome");
+    assert.match(rendered, /src\/shared\.ts/u);
+    assert.match(rendered, /running 30s/u);
+    assert.match(rendered, /A call in flight is not a write/u);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test("an opaque Bash call is not reported as holding a file", () => {
+  const repo = repository();
+  try {
+    appendJournalEntry(
+      journalPathFor(repo.root, ".patchmesh"),
+      {
+        session_id: SECOND_SESSION,
+        hook_event_name: "PreToolUse",
+        tool_use_id: "call_bash",
+        tool_name: "Bash",
+        tool_input: { command: "sed -i 's/a/b/' src/shared.ts" },
+      },
+      "2026-08-21T12:29:30.000Z",
+    );
+
+    const result = findOverlappingWork({ worktreeRoot: repo.root, ledgerPath: repo.ledgerPath, now: NOW });
+    assert.equal(result.live.length, 0, "the path is in the command text, and recovering it is the banned inference");
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});

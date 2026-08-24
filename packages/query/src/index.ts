@@ -49,6 +49,8 @@ export type {
   ResumeMetricsOptions,
   TreatmentSplit,
 } from "./resume.js";
+export { readActiveWork, renderActiveWork } from "./active.js";
+export type { ActiveWork, ActiveWorkOptions, RecordingHealth, RecordingVerdict } from "./active.js";
 export { measureAdoption, renderAdoption } from "./adoption.js";
 export type { AdoptionMetrics, AdoptionOptions, ServerAdoption, ToolAdoption } from "./adoption.js";
 // Exported for the recap tests that pin commit-window assignment; not part of a command surface.

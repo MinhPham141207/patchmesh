@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { OverlapOptions, OverlapResult, RecapOptions, RecapResult } from "patchmesh-query";
+import type { ActiveWork, ActiveWorkOptions, OverlapOptions, OverlapResult, RecapOptions, RecapResult } from "patchmesh-query";
 import type { RecallOptions, RecallResult } from "./recall.js";
 
 export interface GatewayOptions {
@@ -55,6 +55,8 @@ let heavy:
       readonly renderOverlap: (result: OverlapResult, requestedPath: string | undefined) => string;
       readonly recapRecentWork: (options: RecapOptions) => RecapResult;
       readonly renderRecap: (result: RecapResult, agent: string | undefined) => string;
+      readonly readActiveWork: (options: ActiveWorkOptions) => ActiveWork;
+      readonly renderActiveWork: (result: ActiveWork) => string;
     }>
   | undefined;
 
@@ -71,6 +73,8 @@ function loadHeavy(): NonNullable<typeof heavy> {
     renderOverlap: query.renderOverlap,
     recapRecentWork: query.recapRecentWork,
     renderRecap: query.renderRecap,
+    readActiveWork: query.readActiveWork,
+    renderActiveWork: query.renderActiveWork,
   }));
   return heavy;
 }
@@ -131,6 +135,52 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
         const reason = error instanceof Error ? error.message : "unknown failure";
         const text = `No PatchMesh ledger available (${reason}).`;
         return { content: [{ type: "text" as const, text }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_active_work",
+    {
+      title: "Who is working right now",
+      description:
+        "**Call this when you are about to start, resume, or hand off work, and want to know " +
+        "whether you are alone in this repository.** It answers two things together, because " +
+        "they are one question: which calls other workers have running *right now*, read live " +
+        "from the journal rather than the ledger - and whether recording is actually working, " +
+        "so you know what an empty answer is worth. Every other PatchMesh tool reports history, " +
+        "where \"nothing found\" and \"nothing recorded\" look identical; this one separates " +
+        "them. A `recording` verdict means silence is real silence. A `stale` verdict means no " +
+        "absence reported by any of these tools should be trusted. Pass `excludeAgentId` with " +
+        "your own agent id, which the PatchMesh session-start context names, to leave your own " +
+        "running calls out.",
+      inputSchema: {
+        withinMinutes: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Window used to judge whether recording is live. Defaults to 240."),
+        excludeAgentId: z
+          .string()
+          .optional()
+          .describe("Omit this agent's own running calls, so a caller does not see itself as company."),
+      },
+    },
+    async ({ withinMinutes, excludeAgentId }) => {
+      try {
+        const modules = await loadHeavy();
+        const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        const result = modules.readActiveWork({
+          worktreeRoot: options.worktreeRoot,
+          ledgerPath,
+          withinMinutes,
+          excludeAgentId,
+        });
+        return { content: [{ type: "text" as const, text: modules.renderActiveWork(result) }] };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "unknown failure";
+        return { content: [{ type: "text" as const, text: `No PatchMesh ledger available (${reason}).` }] };
       }
     },
   );

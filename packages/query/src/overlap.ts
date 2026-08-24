@@ -2,6 +2,7 @@ import type { ProtocolEvent } from "patchmesh-protocol";
 import {
   ignoredByRepository,
   logicalPathFor,
+  readInFlightCalls,
   resolveRepositoryIdentity,
   resourceIdForPath,
 } from "patchmesh-recorder";
@@ -92,6 +93,27 @@ export type WorkerActivity = readonly string[];
  */
 export const IDLE_GAP_MINUTES = 30;
 
+/**
+ * A file another worker has open *right now*, as opposed to one two workers shared in the past.
+ *
+ * The ledger cannot answer this and never will: ingest runs on the Stop hook, so by the time a
+ * write reaches the ledger the session that made it has ended. That is why every overlap this
+ * module reported before was necessarily a post-mortem -- true, useful for review, and always
+ * too late to change what either worker did. The journal is the only live source, and it is the
+ * same one `recallRecentActivity` already reads.
+ *
+ * `alsoChangedRecently` is the ledger half: workers who touched this file inside the window and
+ * have already finished. A live holder with no history behind it is still worth naming, so this
+ * may be empty.
+ */
+export interface LiveContention {
+  readonly logicalPath: string;
+  readonly agentId: string | null;
+  readonly hostToolName: string;
+  readonly runningForMs: number;
+  readonly alsoChangedRecently: readonly string[];
+}
+
 export interface ResourceOverlap {
   readonly logicalPath: string;
   readonly tasks: readonly OverlappingTask[];
@@ -111,6 +133,16 @@ export interface OverlapOptions {
 
 export interface OverlapResult {
   readonly overlaps: readonly ResourceOverlap[];
+  /**
+   * Files a different worker has in flight as this answer is produced.
+   *
+   * Listed apart from `overlaps` rather than merged into them because they are a different kind
+   * of claim: an overlap is a completed fact about two writes, and this is an observation about
+   * a call that has not returned. Merging them would let a reader treat "someone is in this
+   * file" as "someone wrote this file", which is exactly the inference the rest of this module
+   * refuses to make.
+   */
+  readonly live: readonly LiveContention[];
   readonly truncated: number;
   readonly logicalPath: string | null;
   /** Files observed changing in the window at all, so "none" can be told from "nothing seen". */
@@ -129,12 +161,65 @@ export interface OverlapResult {
   readonly eventsObserved: number;
 }
 
+/** Host tools whose recorded operation is a path rather than an opaque command. */
+const PATHED_HOST_TOOLS = new Set(["Edit", "Write"]);
+
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const DEFAULT_WITHIN_MINUTES = 240;
 
 function payloadOf(event: ProtocolEvent): Record<string, unknown> {
   return event.payload as unknown as Record<string, unknown>;
+}
+
+/**
+ * What other workers have open right now, joined to who else touched those files recently.
+ *
+ * Best effort and never fatal, exactly as `recallRecentActivity` treats the same read: an
+ * unreadable journal means the live view is empty, not that the answer failed. A live view that
+ * throws would take down the historical answer beside it, which is the more established of the
+ * two.
+ *
+ * Only calls whose host tool names a path are considered. ~90% of recorded `Bash` calls carry
+ * no path, and recovering one from command text is the inference this project bans, so an
+ * opaque call is left out rather than reported against a file it may not touch.
+ */
+function liveContentionFrom(
+  options: OverlapOptions,
+  now: Date,
+  changedByWorker: ReadonlyMap<string, ReadonlySet<string>>,
+): readonly LiveContention[] {
+  let inFlight;
+  try {
+    inFlight = readInFlightCalls({ worktreeRoot: options.worktreeRoot, now: () => now });
+  } catch {
+    return [];
+  }
+
+  const live: LiveContention[] = [];
+  const seen = new Set<string>();
+  for (const call of inFlight) {
+    const path = call.operation;
+    if (path === null || !PATHED_HOST_TOOLS.has(call.hostToolName)) continue;
+    if (seen.has(path)) continue;
+    seen.add(path);
+
+    // Everyone except the holder who also changed this file inside the window. The holder is
+    // excluded because a worker contending with itself is a sequence, not a collision.
+    const others: string[] = [];
+    for (const [worker, paths] of changedByWorker) {
+      if (worker === call.agentId) continue;
+      if (paths.has(path)) others.push(worker);
+    }
+    live.push({
+      logicalPath: path,
+      agentId: call.agentId,
+      hostToolName: call.hostToolName,
+      runningForMs: call.runningForMs,
+      alsoChangedRecently: others,
+    });
+  }
+  return live;
 }
 
 /**
@@ -156,6 +241,7 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
   if (pathRequested && requestedPath === null) {
     return {
       overlaps: [],
+      live: [],
       truncated: 0,
       logicalPath: null,
       filesObserved: 0,
@@ -244,8 +330,24 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
 
   all.sort((left, right) => right.tasks[0]!.at.localeCompare(left.tasks[0]!.at));
   const overlaps = all.slice(0, limit);
+  // Who changed which file in the window, so a live holder can be joined to the workers who
+  // already touched what it is holding. Built from the same grouped changes the overlaps use.
+  const changedByWorker = new Map<string, Set<string>>();
+  for (const entry of byResource.values()) {
+    for (const task of entry.tasks.values()) {
+      if (task.agentId === null) continue;
+      const paths = changedByWorker.get(task.agentId) ?? new Set<string>();
+      paths.add(entry.locator);
+      changedByWorker.set(task.agentId, paths);
+    }
+  }
+  const live = liveContentionFrom(options, now, changedByWorker).filter(
+    (item) => requestedPath === null || item.logicalPath === requestedPath,
+  );
+
   return {
     overlaps,
+    live,
     truncated: all.length - overlaps.length,
     logicalPath: requestedPath,
     filesObserved: byResource.size,
@@ -413,6 +515,31 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
   // that does not say which one it used cannot be told from one that found nothing.
   const window = describeWindow(result.withinMinutes);
 
+  // Live first, and printed even when there are no historical overlaps at all. A file somebody
+  // is inside right now is the only thing in this answer that can still change what the reader
+  // does next; everything below it is review.
+  const liveShort = idShortener([
+    ...result.live.flatMap((item) => (item.agentId === null ? [] : [item.agentId])),
+    ...result.live.flatMap((item) => [...item.alsoChangedRecently]),
+  ]);
+  const liveSection =
+    result.live.length === 0
+      ? ""
+      : `${result.live.length} file(s) are open right now, by a worker that has not finished:\n`
+        + result.live
+          .map((item) => {
+            const who = item.agentId === null ? "an unidentified worker" : liveShort(item.agentId);
+            const seconds = Math.max(Math.round(item.runningForMs / 1000), 0);
+            const alsoLine =
+              item.alsoChangedRecently.length === 0
+                ? ""
+                : `\n    also changed in this window by: ${item.alsoChangedRecently.map(liveShort).join(", ")}`;
+            return `- \`${item.logicalPath}\` — ${who} (${item.hostToolName}, running ${seconds}s)${alsoLine}`;
+          })
+          .join("\n")
+        + "\nThis is read from the journal, not the ledger, so it is what is happening rather than "
+        + "what happened. A call in flight is not a write: it may not change this file at all.\n\n";
+
   if (result.overlaps.length === 0) {
     // "Nothing observed" and "observed, nothing shared" are different answers, and an agent
     // deciding whether to proceed needs to know which one it got.
@@ -425,7 +552,7 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
           ? " Nothing at all is recorded in this window, so this may be a ledger that has not been written to yet."
           : ` ${result.eventsObserved} event(s) were recorded in it.`;
       return (
-        `No file changes have been observed for ${scope} in the last ${window}, so overlap ` +
+        `${liveSection}No file changes have been observed for ${scope} in the last ${window}, so overlap ` +
         `cannot be assessed. This is an absence of evidence, not evidence of independence.${seen}`
       );
     }
@@ -436,7 +563,7 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
       result.sequential > 0
         ? ` ${result.sequential} file(s) were changed by two workers in sequence, each finishing before the next began.`
         : "";
-    return `No two workers changed the same file at once in ${scope} in the last ${window} (${result.filesObserved} file(s) observed changing).${inSequence}`;
+    return `${liveSection}No two workers changed the same file at once in ${scope} in the last ${window} (${result.filesObserved} file(s) observed changing).${inSequence}`;
   }
 
   // One shortening table for the whole answer: ids are only ever compared with the other ids

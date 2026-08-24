@@ -24,7 +24,7 @@ const status: StatusView = {
 const emptyGraph: WorkGraphSnapshot = { nodes: [], edges: [], coverage: [] };
 // Files were observed changing but none was shared: "nothing contested" rather than the
 // distinct answer "nothing was seen, so nothing can be assessed".
-const emptyOverlaps = () => ({ overlaps: [], truncated: 0, logicalPath: null, filesObserved: 3, sequential: 0 });
+const emptyOverlaps = () => ({ overlaps: [], live: [], truncated: 0, logicalPath: null, filesObserved: 3, sequential: 0 });
 /** A worktree root and a reader, so `overlaps` never needs a real checkout under test. */
 const overlapDeps = { worktreeRoot: "/repo", readOverlaps: emptyOverlaps };
 /**
