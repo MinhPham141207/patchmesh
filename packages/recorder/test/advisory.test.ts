@@ -48,6 +48,22 @@ function seedInFlight(
   );
 }
 
+/** Seed the journal with a completed (PostToolUse) write from some session. */
+function seedWrite(root: string, session: string, path: string, at: string): void {
+  appendJournalEntry(
+    journalPathFor(root, ".patchmesh"),
+    {
+      hook_event_name: "PostToolUse",
+      session_id: session,
+      tool_name: "Edit",
+      tool_use_id: `done-${Math.random()}`,
+      tool_input: { file_path: path },
+      tool_response: {},
+    },
+    at,
+  );
+}
+
 function preToolUsePayload(
   sessionId: string,
   toolName: string,
@@ -583,6 +599,77 @@ test("the binary emits UserPromptSubmit additionalContext and still journals the
 
     const journal = readFileSync(journalPathFor(root, ".patchmesh"), "utf8");
     assert.match(journal, /UserPromptSubmit/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// -- Recent cross-agent writes: the replacement predicate. The in-flight view only sees an
+// agent caught mid-call (~1.9s); these stages also fire when a different session *completed*
+// a write to the path inside the recent window and this session has not been told yet.
+
+test("PreToolUse fires when another session recently wrote the path", () => {
+  const root = worktree();
+  try {
+    seedWrite(root, OTHER_SESSION, "src/shared.ts", "2026-08-24T11:56:00.000Z");
+    const advisory = computeContentionAdvisory({
+      worktreeRoot: root,
+      payload: preToolUsePayload(OWN_SESSION, "Edit", { file_path: "src/shared.ts" }),
+      now: () => new Date("2026-08-24T12:00:00.000Z"),
+    });
+    assert.match(advisory?.message ?? "", /wrote `src\/shared\.ts` 4 minutes ago/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the same fact is delivered once — the second look is silent", () => {
+  const root = worktree();
+  try {
+    seedWrite(root, OTHER_SESSION, "src/shared.ts", "2026-08-24T11:56:00.000Z");
+    const options = {
+      worktreeRoot: root,
+      payload: preToolUsePayload(OWN_SESSION, "Edit", { file_path: "src/shared.ts" }),
+      now: () => new Date("2026-08-24T12:00:00.000Z"),
+    };
+    assert.ok(computeContentionAdvisory(options) !== null);
+    assert.equal(computeContentionAdvisory(options), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("PostToolUse framing adds the just-written clause", () => {
+  const root = worktree();
+  try {
+    seedWrite(root, OTHER_SESSION, "src/shared.ts", "2026-08-24T11:58:30.000Z");
+    const advisory = computePostWriteAdvisory({
+      worktreeRoot: root,
+      payload: postToolUsePayload(OWN_SESSION, "Edit", { file_path: "src/shared.ts" }),
+      now: () => new Date("2026-08-24T12:00:00.000Z"),
+    });
+    assert.match(advisory?.message ?? "", /You just wrote `src\/shared\.ts` too\./);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("turn-start names recent cross-agent paths once each", () => {
+  const root = worktree();
+  try {
+    seedWrite(root, OTHER_SESSION, "src/a.ts", "2026-08-24T11:50:00.000Z");
+    seedWrite(root, "third", "src/b.ts", "2026-08-24T11:55:00.000Z");
+    const advisory = computeTurnStartAdvisory({
+      worktreeRoot: root,
+      payload: turnStartPayload(OWN_SESSION),
+      now: () => new Date("2026-08-24T12:00:00.000Z"),
+    });
+    assert.deepEqual([...advisory?.paths ?? []].sort(), ["src/a.ts", "src/b.ts"]);
+    assert.equal(computeTurnStartAdvisory({
+      worktreeRoot: root,
+      payload: turnStartPayload(OWN_SESSION),
+      now: () => new Date("2026-08-24T12:00:05.000Z"),
+    }), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

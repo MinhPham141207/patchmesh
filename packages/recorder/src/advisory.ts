@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { agentIdForSession } from "./identity.js";
 import { readInFlightCalls } from "./inflight.js";
+import { readRecentWrites, readWatermark, watermarkPathFor, type RecentWrite } from "./recent-writes.js";
 
 /**
  * PM-02 option A: an advisory that a different agent has a call in flight touching the same
@@ -49,6 +51,18 @@ export interface ContentionAdvisory {
    * conflict, only that another call is in flight there.
    */
   readonly message: string;
+  /**
+   * Set only when this fact came from the recent-write side of the predicate (not from an
+   * in-flight collision). The consumer advances the cursor after the message reaches stdout,
+   * so each fact is delivered once per session; `bin.ts` owns that advance.
+   */
+  readonly delivery?: DeliveredFact | undefined;
+}
+
+/** Where a delivered fact lives and how far to move the session's read cursor past it. */
+export interface DeliveredFact {
+  readonly cursorPath: string;
+  readonly advanceTo: string;
 }
 
 export interface ComputeAdvisoryOptions {
@@ -96,6 +110,48 @@ function renderMessage(
 }
 
 /**
+ * Render a completed write by another session, observed minutes -- not seconds -- ago. The
+ * honest tense changes with the fact: nothing is "in flight" here, the write already
+ * finished. The `PostToolUse` framing adds the same clause as above: the write this hook
+ * fired for also happened, so both sides are on disk now.
+ */
+function renderRecentWriteMessage(stage: AdvisoryStage, path: string, agentId: string | null, agoMs: number): string {
+  const minutes = Math.max(Math.round(agoMs / 60_000), 1);
+  const agentLabel = agentId ?? "an unidentified agent";
+  const noun = minutes === 1 ? "minute" : "minutes";
+  const observation = `${agentLabel} wrote \`${path}\` ${minutes} ${noun} ago.`;
+  const afterTheFact = stage === "PostToolUse" ? ` You just wrote \`${path}\` too.` : "";
+  return `${observation}${afterTheFact} Same file does not mean same work.`;
+}
+
+/**
+ * Read this session's delivery cursor and the unreported recent writes past it.
+ *
+ * A cursor that did not exist before this call was just armed by `readWatermark` at `now`,
+ * which would filter out every write in the window -- so on that first contact the window is
+ * consulted whole. From the second look on, only entries strictly newer than the watermark
+ * count; each fact is delivered once per session because `bin.ts` advances the watermark
+ * after the message reaches stdout.
+ */
+function unreportedRecentWrites(
+  options: ComputeAdvisoryOptions,
+  sessionId: string,
+): { readonly writes: readonly RecentWrite[]; readonly cursorPath: string } {
+  const now = (options.now ?? (() => new Date()))();
+  const cursorPath = watermarkPathFor(options.worktreeRoot, options.directory ?? ".patchmesh", sessionId);
+  const cursorExisted = existsSync(cursorPath);
+  const watermark = readWatermark(cursorPath, now.toISOString());
+  const writes = readRecentWrites({
+    worktreeRoot: options.worktreeRoot,
+    directory: options.directory,
+    now: options.now,
+    excludeSessionId: sessionId,
+    sinceIso: cursorExisted ? watermark : undefined,
+  });
+  return { writes, cursorPath };
+}
+
+/**
  * Null unless this is a call of the given `stage` on `Edit`/`Write` whose path is also named
  * by a different agent's still-running call. Excludes the caller's own agent, derived from its
  * own `session_id` exactly as the recorder derives it elsewhere, so an agent never rediscovers
@@ -123,14 +179,31 @@ function computeAdvisoryFor(stage: AdvisoryStage, options: ComputeAdvisoryOption
   });
 
   const collision = inFlight.find((call) => call.operation === path);
-  if (collision === undefined) return null;
+  if (collision !== undefined) {
+    return {
+      path,
+      agentId: collision.agentId,
+      hostToolName: collision.hostToolName,
+      runningForMs: collision.runningForMs,
+      message: renderMessage(stage, path, collision.hostToolName, collision.agentId, collision.runningForMs),
+    };
+  }
 
+  // Nothing in flight right now; the honest next question is who wrote here lately and whether
+  // this session was told. Facts are delivered once per session through the cursor.
+  if (sessionId === null) return null;
+  const { writes, cursorPath } = unreportedRecentWrites(options, sessionId);
+  const write = writes.find((candidate) => candidate.path === path);
+  if (write === undefined) return null;
+
+  const agoMs = (options.now ?? (() => new Date()))().getTime() - new Date(write.at).getTime();
   return {
     path,
-    agentId: collision.agentId,
-    hostToolName: collision.hostToolName,
-    runningForMs: collision.runningForMs,
-    message: renderMessage(stage, path, collision.hostToolName, collision.agentId, collision.runningForMs),
+    agentId: write.agentId,
+    hostToolName: write.hostToolName,
+    runningForMs: agoMs,
+    message: renderRecentWriteMessage(stage, path, write.agentId, agoMs),
+    delivery: { cursorPath, advanceTo: write.at },
   };
 }
 
@@ -162,12 +235,17 @@ const TURN_START_PATH_LIMIT = 5;
 
 /** What another agent was observed to be in, at the moment this turn began. */
 export interface TurnStartAdvisory {
-  /** Distinct paths other agents have in flight, most recently started first. */
+  /** Distinct paths other agents have in flight or recently finished, most recent first. */
   readonly paths: readonly string[];
   /** Paths that matched but were not named, so the notice can say what it withheld. */
   readonly withheld: number;
   readonly agents: readonly string[];
   readonly message: string;
+  /**
+   * Set only when some named paths came from the recent-write side; `bin.ts` advances this
+   * cursor after the notice reaches stdout so each fact is delivered once per session.
+   */
+  readonly delivery?: DeliveredFact | undefined;
 }
 
 /**
@@ -185,7 +263,7 @@ function renderTurnStartMessage(paths: readonly string[], withheld: number, agen
   const subject = agentCount === 1 ? "Another agent has" : `${agentCount} other agents have`;
   const withheldNote = withheld > 0 ? `\n(${withheld} further path(s) not named.)` : "";
   return (
-    `${subject} work in flight in this repository right now, in:\n`
+    `${subject} work in flight or just finished in this repository, in:\n`
     + `${lines.join("\n")}${withheldNote}\n`
     + "Same file does not mean same work. This is what was observed at the start of this turn, "
     + "not a claim that anything is contested."
@@ -204,8 +282,11 @@ function renderTurnStartMessage(paths: readonly string[], withheld: number, agen
  * Only in-flight calls whose host tool names a path are reported. An opaque `Bash` call tells
  * us nothing about which file it is in, and guessing from its command text is the inference
  * this project bans -- so it is left out rather than reported as a path it might not touch.
+ * Recent completed writes join them through the delivery cursor, so a write that finished
+ * minutes ago still reaches the next turn instead of vanishing with its 1.9s window.
  *
- * Returns null when nothing is in flight. Silence is deliberate: a notice on every turn saying
+ * Returns null when nothing is in flight and nothing recent went unreported. Silence is
+ * deliberate: a notice on every turn saying
  * there are no collisions is the permanently-degraded mistake PM-12 already paid for, in a new
  * costume. An advisory that always fires stops being read.
  */
@@ -232,6 +313,19 @@ export function computeTurnStartAdvisory(options: ComputeAdvisoryOptions): TurnS
     if (!paths.includes(path)) paths.push(path);
     agents.add(call.agentId ?? "an unidentified agent");
   }
+
+  // Merge what other sessions finished writing inside the recent window and this session has
+  // not been told about yet -- the same cursor/watermark pattern as the content stages, but
+  // repository-wide since a turn start has no path of its own to match against.
+  let delivery: DeliveredFact | undefined;
+  if (sessionId !== null) {
+    const { writes, cursorPath } = unreportedRecentWrites(options, sessionId);
+    for (const write of writes) {
+      if (!paths.includes(write.path)) paths.push(write.path);
+      agents.add(write.agentId ?? "an unidentified agent");
+    }
+    if (writes.length > 0) delivery = { cursorPath, advanceTo: writes[0]!.at };
+  }
   if (paths.length === 0) return null;
 
   const withheld = Math.max(paths.length - TURN_START_PATH_LIMIT, 0);
@@ -241,5 +335,6 @@ export function computeTurnStartAdvisory(options: ComputeAdvisoryOptions): TurnS
     withheld,
     agents: agentList,
     message: renderTurnStartMessage(paths, withheld, agentList),
+    delivery,
   };
 }

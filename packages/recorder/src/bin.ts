@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
-import { computeContentionAdvisory, computePostWriteAdvisory, computeTurnStartAdvisory } from "./advisory.js";
+import {
+  computeContentionAdvisory,
+  computePostWriteAdvisory,
+  computeTurnStartAdvisory,
+  type DeliveredFact,
+} from "./advisory.js";
 import { findWorktreeRoot } from "./identity.js";
 import { appendJournalEntry, journalPathFor } from "./journal.js";
 import { redactHookPayload } from "./redact.js";
+import { advanceWatermark } from "./recent-writes.js";
 
 /**
  * Hook entry point, on the agent's critical path.
@@ -75,9 +81,20 @@ export function emitAdvisory(
         },
       })}\n`,
     );
+    advanceDeliveredFact(advisory);
   } catch (error) {
     debug(error instanceof Error ? `advisory failed: ${error.message}` : "unknown advisory failure");
   }
+}
+
+/**
+ * Move the session's delivery cursor past a fact that just reached stdout. Only after the
+ * write: if emission fails, the message is lost but the channel is not -- the next look
+ * re-delivers. A cursor failure costs nothing on its own.
+ */
+function advanceDeliveredFact(advisory: { readonly delivery?: DeliveredFact | undefined }): void {
+  if (advisory.delivery === undefined) return;
+  try { advanceWatermark(advisory.delivery.cursorPath, advisory.delivery.advanceTo); } catch { /* advisory-only */ }
 }
 
 /**
@@ -115,6 +132,7 @@ export function emitPostWriteAdvisory(
         },
       })}\n`,
     );
+    advanceDeliveredFact(advisory);
   } catch (error) {
     debug(error instanceof Error ? `post-write advisory failed: ${error.message}` : "unknown post-write advisory failure");
   }
@@ -150,6 +168,7 @@ export function emitTurnStartAdvisory(
         },
       })}\n`,
     );
+    advanceDeliveredFact(advisory);
   } catch (error) {
     debug(error instanceof Error ? `turn-start advisory failed: ${error.message}` : "unknown turn-start advisory failure");
   }
