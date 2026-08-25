@@ -53,5 +53,19 @@ export { readActiveWork, renderActiveWork } from "./active.js";
 export type { ActiveWork, ActiveWorkOptions, RecordingHealth, RecordingVerdict } from "./active.js";
 export { measureAdoption, renderAdoption } from "./adoption.js";
 export type { AdoptionMetrics, AdoptionOptions, ServerAdoption, ToolAdoption } from "./adoption.js";
+export {
+  acknowledgeMessage,
+  MAILBOX_DEFAULT_TTL_DAYS,
+  readInbox,
+  sendMail,
+  undeliveredCount,
+} from "./mailbox.js";
+export type {
+  AcknowledgeMessageOptions,
+  InboxOptions,
+  InboxResult,
+  InboxRow,
+  SendMailOptions,
+} from "./mailbox.js";
 // Exported for the recap tests that pin commit-window assignment; not part of a command surface.
 export { commitsWithin, describeWindow, readCommitsSince } from "./label.js";
