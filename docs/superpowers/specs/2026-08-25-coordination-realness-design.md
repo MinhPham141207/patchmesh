@@ -28,12 +28,9 @@ Six problems, sequenced so each slice ships green (`pnpm check`) independently:
 
 **Defect.** `recap.ts` computes `endedAt` as `max(event.timestamp)` over a task's events. An open task renders as a closed `X to Y` range, so a session-start briefing describes the agent's current work as finished.
 
-**Fix.** A task is *active* when either:
+**Fix.** A task is *active* when its last observed event is within `IDLE_GAP_MINUTES` (30, already calibrated) of now. In-flight matching by `taskId` was considered and rejected: journal entries carry no task identifier — tasks are derived at ingest from turn markers — so in-flight state cannot be joined to a task without inventing a new recorded field. Recency against the measured contention silences (0.3–15.6 min) is the honest signal: "last activity 12 min ago" does not claim the task finished, which is exactly the error being fixed.
 
-1. an in-flight journal call (`readInFlightCalls`, already imported by the recorder) carries its `taskId`, or
-2. its span's last event is newer than the newest event timestamp in the ledger (anything the ledger has not yet seen was not finished at last read) *and* within `IDLE_GAP_MINUTES` (30, already calibrated).
-
-Active tasks render `started X · active now`; only genuinely closed tasks get the `X to Y` range. No new data is recorded — this reuses what the journal and ledger already hold.
+Active tasks render `started X · last activity Nm ago (may still be running)`; only genuinely stale tasks get the closed `X to Y` range. `RecappedTask` gains an additive `active: boolean`. No new data is recorded — this reuses what the ledger already holds.
 
 ## P1 — Advisory predicate replacement *(the core change)*
 
@@ -59,7 +56,7 @@ Messages stay observed-fact ("X wrote src/auth.ts 4 min ago"), never inference (
 
 ## P2 — Live section in overlap answers
 
-`patchmesh_overlapping_work` (MCP) and `overlaps` (CLI) gain a trailing **"Live (from journals, not yet ingested)"** section built by the same reader P1 uses: cross-session recent writes observed in any reachable journal, bounded (counts + top paths, same answer-size discipline as every MCP answer — capped and truncation reported). The ledger-derived result above it is unchanged. One implementation serves both surfaces; neither invents a second definition of "overlap".
+`patchmesh_overlapping_work` and `overlaps` already carry a live section (`OverlapResult.live`, built from journals by `liveContentionFrom`). This wave strengthens it: opaque calls in flight are **counted** (`liveOpaqueCalls`) so "unknown write activity nearby" is a number rather than a silence, consistent with P4's accepted scope. The ledger-derived result above it is unchanged; the existing bounded-answer discipline applies unchanged.
 
 ## P3 — Attribution under concurrency
 
