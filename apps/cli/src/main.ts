@@ -121,7 +121,7 @@ function stopOnAbort(signal: AbortSignal, server: GraphServer): Promise<void> {
   });
 }
 
-/** Drop the one newline a shell pipe appends, so `echo hi | send --body-stdin` sends "hi". */
+/** Drop the one newline a shell pipe appends, so `echo hi | send ...` (no --body) sends "hi". */
 function trimTrailingNewline(text: string): string {
   return text.replace(/\r?\n$/, "");
 }
@@ -326,7 +326,7 @@ async function renderCommand(
     if (!result.ok) {
       throw new ReadServiceError("usage", result.reason ?? "the message could not be acknowledged");
     }
-    return renderAckResponse(ack.messageId, disposition, parsed.json);
+    return renderAckResponse(ack.messageId, disposition, ack.note, parsed.json);
   }
   // The default text mode answers with calls, not records: bounded, newest first, readable.
   // `--raw` and `--json` keep the per-event page, which is what scripts and follow read.

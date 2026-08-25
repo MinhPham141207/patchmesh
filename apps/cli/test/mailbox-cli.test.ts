@@ -199,6 +199,8 @@ test("inbox renders bounded rows newest first and names the withheld count", asy
     assert.match(lines[0] ?? "", /^20 message\(s\) waiting for agent_bee$/u);
     assert.equal(lines.length, 22, "20 rows plus the withheld line");
     assert.match(lines.at(-1) ?? "", /\(\+2 more withheld\)/u);
+    // Rows carry no trailing separator when refs are empty.
+    assert.doesNotMatch(lines[1] ?? "", / · $/u);
     assert.match(result.stdout, /subject msg_00000000000000000000000000000021/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -366,10 +368,33 @@ test("--json passes the mailbox results through untouched", async () => {
     );
 
     const acked = await runCli([
-      "ack", messageId, "--decline", "--from", "agent_bee", "--json", "--database", ledgerPath,
+      "ack", messageId, "--decline", "--note", "not mine", "--from", "agent_bee",
+      "--json", "--database", ledgerPath,
     ], { ...dependencies, worktreeRoot: root });
     assert.equal(acked.exitCode, 0);
-    assert.deepEqual(JSON.parse(acked.stdout), { ok: true });
+    assert.deepEqual(JSON.parse(acked.stdout), {
+      ok: true,
+      messageId,
+      disposition: "declined",
+      note: "not mine",
+    });
+
+    // Without a note the answer still names what was recorded, but carries no note field.
+    seed(ledgerPath, [
+      sentEvent({
+        messageId: `msg_${"e".repeat(32)}`,
+        to: { kind: "agent", agentId: "agent_bee" },
+        agentId: "agent_aye",
+      }),
+    ]);
+    const bareAck = await runCli([
+      "ack", `msg_${"e".repeat(32)}`, "--from", "agent_bee", "--json", "--database", ledgerPath,
+    ], { ...dependencies, worktreeRoot: root });
+    assert.deepEqual(JSON.parse(bareAck.stdout), {
+      ok: true,
+      messageId: `msg_${"e".repeat(32)}`,
+      disposition: "read",
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

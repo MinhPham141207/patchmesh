@@ -158,7 +158,9 @@ export function renderInbox(result: InboxResult, agent: string | undefined, json
   }
   const lines = [`${result.rows.length} message(s) waiting for ${who}`];
   for (const row of result.rows) {
-    lines.push([row.fromAgentId ?? "-", row.kind, row.subject, row.refs.join(", ")].join(" · "));
+    const refs = row.refs.join(", ");
+    const cells = refs === "" ? [row.fromAgentId ?? "-", row.kind, row.subject] : [row.fromAgentId ?? "-", row.kind, row.subject, refs];
+    lines.push(cells.join(" · "));
   }
   if (result.withheld > 0) lines.push(`(+${result.withheld} more withheld)`);
   if (result.expired > 0) lines.push(`${result.expired} expired message(s) not shown.`);
@@ -170,8 +172,22 @@ export function renderInbox(result: InboxResult, agent: string | undefined, json
  * becomes a usage error in the main flow, because a person must learn their ack recorded
  * nothing -- the same rule a send validation failure follows.
  */
-export function renderAckResponse(messageId: string, disposition: string, json: boolean): string {
-  if (json) return `${JSON.stringify({ ok: true })}\n`;
+export function renderAckResponse(
+  messageId: string,
+  disposition: string,
+  note: string | null | undefined,
+  json: boolean,
+): string {
+  // A machine consumer must be able to learn what was recorded from the answer itself, the
+  // same discipline a send confirmation follows.
+  if (json) {
+    return `${JSON.stringify({
+      ok: true,
+      messageId,
+      disposition,
+      ...(note === null || note === undefined || note === "" ? {} : { note }),
+    })}\n`;
+  }
   return [
     "MESSAGE ACKNOWLEDGED",
     `Message: ${messageId}`,
