@@ -65,12 +65,26 @@ existed, with a comment saying "counted in SQLite rather than by loading them". 
 
 ## Results
 
+The clean comparison is the projection itself - same process, same frozen input:
+
 ```
-projectWorkGraph, full ledger    16,934 ms  ->  1,295 ms    13x
-patchmesh status                 40,897 ms  -> 12,733 ms     3.2x
-patchmesh agents                 28,739 ms  ->  7,400 ms     3.9x
-patchmesh doctor                  6,064 ms  ->  1,085 ms     5.6x
+projectWorkGraph, 8,931 events   16,934 ms  ->  1,295 ms    13x
 ```
+
+End to end, warm, three runs each (the CLI numbers move a lot between a cold and a warm file
+cache, so these are warm medians and the "before" column is a single cold run of the same
+shape - treat the ratios as indicative, and the projection benchmark above as the measurement):
+
+```
+patchmesh status                 40,897 ms  ->  1,464 ms
+patchmesh agents                 28,739 ms  ->  1,278 ms
+patchmesh doctor                  6,064 ms  ->    252 ms
+patchmesh recap                   5,397 ms  ->    448 ms
+patchmesh overlaps                4,013 ms  ->    351 ms
+```
+
+`doctor` gains more than the projection fix alone explains, because it no longer loads the
+ledger at all; `recap` and `overlaps` gain from the effects-walk gate in PM-17 as well.
 
 Per-event cost is now flat across a 16x range (90–220 µs/event with no trend), where before it
 rose from 113 to 1,756.
