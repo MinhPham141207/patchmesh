@@ -78,6 +78,7 @@ Found by re-judging the product against the live ledger rather than against its 
 | --- | --- |
 | [PM-17](PM-17-reports-answer-about-the-last-stop.md) | `freshenLedger`: every report drains the journal before reading, so it answers about now rather than about the last `Stop`. Free when nothing is pending (0.13-0.97ms), bounded at 500 entries, fail-open. `doctor` deliberately abstains. |
 | [PM-18](PM-18-nothing-budgets-the-ledger.md) | `doctor` reports ledger size always and warns past 64MiB, naming `prune` rather than running it. |
+| [PM-19](PM-19-the-projection-went-quadratic-again.md) | The projection was O(requests x events) again: a scan per call in `toolCoverage`, plus `mergeEvidence` re-sorting a growing list. `status` **41s -> 12.7s**, the projection **16.9s -> 1.3s**, output byte-identical. Guarded by a scaling test that fails on the old code. |
 
 ## Closed, recorded so they are not re-litigated
 

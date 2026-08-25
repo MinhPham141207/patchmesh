@@ -218,8 +218,10 @@ function readLedger(path: string): LedgerFacts | null {
   if (!existsSync(path)) return null;
   const store = SqliteEventStore.open(path);
   try {
-    const events = store.read();
-    return { events: events.length, latest: events.at(-1)?.timestamp ?? null };
+    // Asked of SQLite rather than answered by loading the ledger. This read every event, parsed
+    // each one out of its canonical blob and validated it, to report two numbers: on a
+    // 8,931-event ledger that was most of `doctor`'s six seconds, and it grew with history.
+    return { events: store.count(), latest: store.latestTimestamp() };
   } finally {
     store.close();
   }

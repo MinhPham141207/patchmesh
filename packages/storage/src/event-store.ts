@@ -544,6 +544,21 @@ export class SqliteEventStore {
     return row.total;
   }
 
+  /**
+   * The most recent event's timestamp, or null when the store is empty.
+   *
+   * The companion to `count()`, and it exists for the same caller: `doctor` wants to say how
+   * many events there are and how recent they are, and was loading, parsing and validating
+   * every one of them to learn two numbers. Served by the `events(timestamp)` index that
+   * migration 003 already added for the recall window.
+   */
+  latestTimestamp(): string | null {
+    this.assertOpen();
+    const row = this.database.prepare("SELECT MAX(timestamp) AS latest FROM events").get() as
+      { readonly latest: string | null };
+    return row.latest;
+  }
+
   close(): void {
     if (this.closed) return;
     this.database.close();

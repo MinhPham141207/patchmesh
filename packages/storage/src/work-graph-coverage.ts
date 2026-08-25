@@ -72,6 +72,7 @@ function toolCoverage(
   completion: ToolCompletedEvent | undefined,
   eventsById: ReadonlyMap<EventId, ProtocolEvent>,
   observedEffectsByCause: ReadonlyMap<EventId, readonly EventId[]>,
+  observedReadsByCause: ReadonlyMap<EventId, readonly EventId[]>,
 ): ProjectionCoverage {
   const evidenceEventIds: EventId[] = [request.eventId];
   const gaps: ProjectionCoverageGap[] = [];
@@ -86,10 +87,11 @@ function toolCoverage(
   const deterministicallyAttributedEffectEventIds = new Set(
     completion.payload.deterministicallyAttributedEffectEventIds ?? [],
   );
-  const observedReadEventIds = [...eventsById.values()]
-    .filter((event) => (event.eventType === "file.read" || event.eventType === "symbol.read")
-      && event.causationId === request.eventId)
-    .map((event) => event.eventId);
+  // Indexed rather than scanned. This was a filter over every event in the ledger, run once per
+  // tool request, which made the whole projection quadratic: `patchmesh status` took 41s on a
+  // 8,824-event ledger and cost rose 4x for every doubling. The index is built in the same pass
+  // that already builds `observedEffectsByCause`, in event order, so the result is identical.
+  const observedReadEventIds = observedReadsByCause.get(request.eventId) ?? [];
   evidenceEventIds.push(...observedReadEventIds);
   for (const effectEventId of completion.payload.effectEventIds) {
     const effect = eventsById.get(effectEventId);
@@ -157,6 +159,10 @@ export function deriveProjectionCoverage(
   // Observed changes indexed by the completion they were bound to, which is the only direction
   // the hook path can express: the change is written after the completion and points back at it.
   const observedEffectsByCause = new Map<EventId, EventId[]>();
+  // Observed reads indexed by the request that caused them, for the same reason: `toolCoverage`
+  // needs the reads belonging to one call, and finding them by scanning every event once per
+  // call is what made this O(requests x events).
+  const observedReadsByCause = new Map<EventId, EventId[]>();
   for (const event of events) {
     if (event.eventType === "tool.completed") completionsByRequest.set(event.payload.requestEventId, event);
     if ((event.eventType === "file.changed" || event.eventType === "symbol.changed") && event.causationId !== null) {
@@ -164,12 +170,23 @@ export function deriveProjectionCoverage(
       if (bound === undefined) observedEffectsByCause.set(event.causationId, [event.eventId]);
       else bound.push(event.eventId);
     }
+    if ((event.eventType === "file.read" || event.eventType === "symbol.read") && event.causationId !== null) {
+      const read = observedReadsByCause.get(event.causationId);
+      if (read === undefined) observedReadsByCause.set(event.causationId, [event.eventId]);
+      else read.push(event.eventId);
+    }
   }
 
   const coverage: ProjectionCoverage[] = [];
   for (const event of events) {
     if (event.eventType === "tool.requested") {
-      coverage.push(toolCoverage(event, completionsByRequest.get(event.eventId), eventsById, observedEffectsByCause));
+      coverage.push(toolCoverage(
+        event,
+        completionsByRequest.get(event.eventId),
+        eventsById,
+        observedEffectsByCause,
+        observedReadsByCause,
+      ));
     }
     if (event.eventType === "file.changed" || event.eventType === "symbol.changed") {
       const attribution = effectiveAttribution(event, corrections);
