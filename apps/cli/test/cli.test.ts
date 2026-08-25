@@ -806,3 +806,29 @@ test("a report pointed at somebody else's database leaves this repository's jour
     rmSync(elsewhere, { recursive: true, force: true });
   }
 });
+
+test("a first report on a fresh install drains the journal instead of saying nothing was recorded", async () => {
+  // The recorder creates the ledger on its first *drain*, so a repository whose hooks have been
+  // running all session has a journal full of calls and no database yet. "There is no ledger"
+  // is decided in `main` before `runCli` is reached, so without freshening there too, the very
+  // first report a new user runs reports nothing recorded while the evidence sits beside it --
+  // the exact confusion `renderNoLedger` exists to clear up.
+  //
+  // Caught by installing the packed tarballs into a clean repository and running them, not by
+  // the suite: every test here had a ledger already.
+  const root = repositoryWithPendingCall();
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(root);
+    assert.equal(existsSync(ledgerPathFor(root)), false, "precondition: no ledger yet");
+
+    const exitCode = await main(["recap"]);
+
+    assert.equal(exitCode, 0);
+    assert.equal(existsSync(ledgerPathFor(root)), true, "the report created the ledger by draining");
+    assert.equal(existsSync(journalPathFor(root, LEDGER_DIRECTORY)), false, "and consumed the journal");
+  } finally {
+    process.chdir(previousCwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});

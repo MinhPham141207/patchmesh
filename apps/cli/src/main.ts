@@ -409,6 +409,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return result.exitCode;
     }
     const ledgerPath = databasePath(argv);
+    // Freshened here as well as inside `runCli`, because "there is no ledger" is decided before
+    // `runCli` is ever called, and on a fresh install that verdict is wrong: the recorder
+    // creates the ledger on its first *drain*, so a repository whose hooks have been running
+    // all session has a journal full of calls and no database yet. Without this, the first
+    // report a new user runs says nothing has been recorded while the evidence sits next to it
+    // -- which is the exact confusion `renderNoLedger` was written to clear up.
+    //
+    // The second freshen inside `runCli` then costs one `existsSync`, because this one drained.
+    if (REPORT_ONLY.has(argv[0] ?? "")) {
+      const worktreeRoot = findWorktreeRoot(process.cwd());
+      if (worktreeRoot !== null && ownsLedger(worktreeRoot, ledgerPath)) {
+        await freshenLedger({ worktreeRoot, ledgerPath, observeEffects: true });
+      }
+    }
     if (!existsSync(ledgerPath) && REPORT_ONLY.has(argv[0] ?? "")) {
       process.stdout.write(renderNoLedger(ledgerPath, argv.includes("--json")));
       return 0;
