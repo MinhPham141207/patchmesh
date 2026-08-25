@@ -90,7 +90,7 @@ test("opaque in-flight calls are counted, not path-guessed", () => {
     );
 
     const rendered = renderOverlap(result, undefined);
-    assert.match(rendered, /\(2 shell call\(s\) in flight nearby - which files they touch is unknown\.\)/u);
+    assert.match(rendered, /\(2 call\(s\) in flight nearby name no file - which files they touch is unknown\.\)/u);
   } finally {
     rmSync(repo.root, { recursive: true, force: true });
   }

@@ -567,7 +567,7 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
   // Appended whenever there are any, including when no pathed call made the list above: a
   // shell-only moment would otherwise render as "nothing open", which it is not.
   if (result.liveOpaqueCalls > 0) {
-    liveLines.push(`(${result.liveOpaqueCalls} shell call(s) in flight nearby - which files they touch is unknown.)`);
+    liveLines.push(`(${result.liveOpaqueCalls} call(s) in flight nearby name no file - which files they touch is unknown.)`);
   }
   const liveSection =
     liveLines.length === 0

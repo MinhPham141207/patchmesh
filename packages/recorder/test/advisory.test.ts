@@ -14,6 +14,7 @@ import {
   journalPathFor,
 } from "../src/index.js";
 import { emitAdvisory, emitPostWriteAdvisory, emitTurnStartAdvisory } from "../src/bin.js";
+import { advanceWatermark, watermarkPathFor } from "../src/recent-writes.js";
 
 const binPath = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
@@ -634,6 +635,44 @@ test("the same fact is delivered once — the second look is silent", () => {
     };
     assert.ok(computeContentionAdvisory(options) !== null);
     assert.equal(computeContentionAdvisory(options), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the cursor advance after emission is what makes delivery once-only", () => {
+  const root = worktree();
+  try {
+    const T0 = "2026-08-24T11:56:00.000Z";
+    const T1 = "2026-08-24T11:58:00.000Z";
+    const T2 = "2026-08-24T12:00:00.000Z";
+    // Pre-arm session B's cursor so the watermark filter is live from the first look -- without
+    // this, first-contact arming masks whether the post-stdout advance ever happened.
+    advanceWatermark(watermarkPathFor(root, ".patchmesh", OWN_SESSION), T0);
+    seedWrite(root, OTHER_SESSION, "src/shared.ts", T1);
+
+    const pinnedNow: typeof computeContentionAdvisory = (options) =>
+      computeContentionAdvisory({ ...options, now: () => new Date(T2) });
+    const payload = preToolUsePayload(OWN_SESSION, "Edit", { file_path: "src/shared.ts" });
+
+    const captured: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: Uint8Array | string): boolean => {
+      captured.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      emitAdvisory(root, payload, pinnedNow);
+      assert.equal(captured.length, 1, "the first look emits the fact");
+      emitAdvisory(root, payload, pinnedNow);
+      assert.equal(captured.length, 1, "the second look emits nothing: the cursor moved past the fact after stdout");
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+
+    // And the cursor really did move to the delivered fact's timestamp.
+    const cursor = JSON.parse(readFileSync(watermarkPathFor(root, ".patchmesh", OWN_SESSION), "utf8")) as { watermark?: string };
+    assert.equal(cursor.watermark, T1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
