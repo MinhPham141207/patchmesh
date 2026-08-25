@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { test } from "node:test";
 import type { EventId, ProtocolEvent } from "patchmesh-protocol";
 import type { ReadServices, StatusView } from "patchmesh-query";
 import type { WorkGraphSnapshot } from "patchmesh-storage";
+import { appendJournalEntry, journalPathFor, LEDGER_DIRECTORY, ledgerPathFor } from "patchmesh-recorder";
 import { runCli, main } from "../src/main.js";
 import { initializeRepository, renderInit } from "../src/init.js";
 
@@ -738,4 +740,69 @@ test("a detector that ran over complete coverage says so plainly", async () => {
   assert.match(result.stdout, /^No exported-contract invalidation findings\./u);
   assert.match(result.stdout, /clean result/u);
   assert.ok(!result.stdout.includes("absence of evidence"), "a complete-coverage zero is not hedged");
+});
+
+/** A real checkout with one call sitting undrained in its journal, as a live session leaves it. */
+function repositoryWithPendingCall(): string {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-freshen-cli-"));
+  execFileSync("git", ["init", "-q", root], { stdio: "ignore" });
+  appendJournalEntry(
+    journalPathFor(root, LEDGER_DIRECTORY),
+    {
+      session_id: "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      cwd: root,
+      hook_event_name: "PostToolUse",
+      tool_name: "Edit",
+      tool_input: { file_path: join(root, "a.ts") },
+      tool_response: {},
+    },
+    new Date().toISOString(),
+  );
+  return root;
+}
+
+test("a report drains its own repository's journal first, so it answers about now", async () => {
+  // The bug this closes: ingest runs on `Stop`, so a session's own work reached the ledger only
+  // after that session ended, and every report read the ledger. Measured on this repository, the
+  // latest event was 14 hours behind a journal written to minutes earlier -- and `overlaps`
+  // correctly reported no changes on a day of continuous work.
+  const root = repositoryWithPendingCall();
+  try {
+    const journal = journalPathFor(root, LEDGER_DIRECTORY);
+    assert.equal(existsSync(journal), true, "precondition: a call is waiting");
+
+    const result = await runCli(["recap", "--database", ledgerPathFor(root)], {
+      ...services,
+      worktreeRoot: root,
+      readRecap: () => ({ tasks: [], unattributed: 0, windowMinutes: 60, truncated: 0 }),
+    } as unknown as Parameters<typeof runCli>[1]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(existsSync(journal), false, "the report drained what the hook had journalled");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a report pointed at somebody else's database leaves this repository's journal alone", async () => {
+  // Draining consumes the journal. Doing that while reading a fixture, a copy, or another
+  // checkout's ledger would write these calls where they do not belong *and* destroy them, so
+  // they could never reach the ledger that wanted them. Reading a foreign database is read-only.
+  const root = repositoryWithPendingCall();
+  const elsewhere = mkdtempSync(join(tmpdir(), "patchmesh-foreign-"));
+  try {
+    const journal = journalPathFor(root, LEDGER_DIRECTORY);
+
+    const result = await runCli(["recap", "--database", join(elsewhere, "someone-else.db")], {
+      ...services,
+      worktreeRoot: root,
+      readRecap: () => ({ tasks: [], unattributed: 0, windowMinutes: 60, truncated: 0 }),
+    } as unknown as Parameters<typeof runCli>[1]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(existsSync(journal), true, "the journal is untouched when the database is not ours");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
 });

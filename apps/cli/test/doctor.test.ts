@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { appendJournalEntry, ingestJournal, journalPathFor, LEDGER_DIRECTORY, ledgerPathFor } from "patchmesh-recorder";
 import { diagnose, renderDoctor, type DoctorReport } from "../src/doctor.js";
 
 /**
@@ -177,4 +179,58 @@ test("the report is machine-readable on request", () => {
   const parsed = JSON.parse(renderDoctor(report, true)) as DoctorReport;
   assert.equal(parsed.healthy, false);
   assert.equal(Array.isArray(parsed.checks), true);
+});
+
+/** A repository with a real ledger in it, built through the recorder rather than by hand. */
+function recordedRepository(): string {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-doctor-ledger-"));
+  execFileSync("git", ["init", "-q", root], { stdio: "ignore" });
+  appendJournalEntry(
+    journalPathFor(root, LEDGER_DIRECTORY),
+    {
+      session_id: "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      cwd: root,
+      hook_event_name: "PostToolUse",
+      tool_name: "Edit",
+      tool_input: { file_path: join(root, "a.ts") },
+      tool_response: {},
+    },
+    new Date().toISOString(),
+  );
+  ingestJournal({
+    worktreeRoot: root,
+    journalPath: journalPathFor(root, LEDGER_DIRECTORY),
+    ledgerPath: ledgerPathFor(root),
+  });
+  return root;
+}
+
+test("the ledger's size is reported before it is a problem, so growth is visible", () => {
+  const root = recordedRepository();
+  try {
+    const report = diagnose({ worktreeRoot: root });
+    assert.equal(statusOf(report, "ledger"), "ok");
+    // Nothing prunes on its own, so the number a user would act on has to be on the screen
+    // during the months in which acting is still cheap.
+    assert.match(detailOf(report, "ledger"), /\d+(\.\d+)?(B|KB|MB|GB)/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a ledger past the size budget is a warning that names the command, never an automatic delete", () => {
+  const root = recordedRepository();
+  try {
+    const report = diagnose({ worktreeRoot: root, largeLedgerBytes: 1 });
+    assert.equal(statusOf(report, "ledger"), "warn");
+    assert.match(detailOf(report, "ledger"), /nothing prunes the ledger on its own/u);
+    // Retention deletes history, and history is the product. The fix is offered, not taken.
+    const fix = report.checks.find((check) => check.name === "ledger")?.fix ?? "";
+    assert.match(fix, /patchmesh prune --older-than/u);
+    // A warning, never a failure: a large ledger is a working ledger, and `doctor`'s exit code
+    // gates other things. Size must not be able to turn a recording repository into a broken one.
+    assert.notEqual(statusOf(report, "ledger"), "fail");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

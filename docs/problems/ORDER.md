@@ -4,11 +4,17 @@ Sequencing for the twelve problems in this directory. Ordered by dependency and
 information gain, **not** by severity — severity ranks pain, order ranks what unblocks
 learning.
 
-> **Status: Wave 0 shipped 2026-08-23. Wave 1a and Wave 1b shipped 2026-08-24.** PM-10 B, PM-12,
-> PM-08 B, PM-03 and PM-01 A are done, along with the free documentation items. Wave 1a - PM-16,
-> PM-14 B, PM-15, PM-13 B+C and PM-10's default output - closed the measurement gap that Wave 0
-> opened. Wave 1b took PM-02 A most of the way and made the overlap gate falsifiable.
-> Wave 1 proper (content hashing, PM-09) is next.
+> **Status: Wave 0 shipped 2026-08-23. Wave 1a and Wave 1b shipped 2026-08-24. PM-17 and PM-18
+> shipped 2026-08-25.** PM-10 B, PM-12, PM-08 B, PM-03 and PM-01 A are done, along with the free
+> documentation items. Wave 1a - PM-16, PM-14 B, PM-15, PM-13 B+C and PM-10's default output -
+> closed the measurement gap that Wave 0 opened. Wave 1b took PM-02 A most of the way and made
+> the overlap gate falsifiable. PM-17 closed a freshness gap that sat underneath all of them:
+> every report answered about the last `Stop` rather than about now, so a session's own work was
+> invisible for its whole duration. Wave 1 proper (content hashing, PM-09) is next.
+>
+> **PM-17 was not on this list, and that is the point.** It was found by re-judging the product
+> against the live ledger rather than against its tests, which were green throughout. A problem
+> file cannot be sequenced before somebody notices the problem.
 
 ## The constraint that decided the first step
 

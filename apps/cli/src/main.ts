@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDaemon, type PatchMeshDaemon } from "patchmesh-daemon";
 import {
@@ -20,7 +20,7 @@ import {
   type StatusView,
 } from "patchmesh-query";
 import type { EventType } from "patchmesh-protocol";
-import { findWorktreeRoot, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
+import { findWorktreeRoot, freshenLedger, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
 import { commands, parseArgs, usageText, type CommandName, type ParsedArgs } from "./args.js";
 import { renderGraphServerBanner, startGraphServer, type GraphServer, type GraphServerOptions } from "./graph-server.js";
 import { diagnose, renderDoctor } from "./doctor.js";
@@ -250,6 +250,12 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
       const report = diagnose({ worktreeRoot });
       return { exitCode: report.healthy ? 0 : 3, stdout: renderDoctor(report, parsed.json), stderr: "" };
     }
+    // Reports answer about now, so the journal is drained before they read. Deliberately after
+    // `doctor`, which is the one command whose subject *is* the undrained journal: freshening
+    // first would erase the backlog it exists to report.
+    if (worktreeRoot !== null && REPORT_ONLY.has(parsed.command) && ownsLedger(worktreeRoot, parsed.databasePath)) {
+      await freshenLedger({ worktreeRoot, ledgerPath: ledgerPathFor(worktreeRoot) });
+    }
     // Serving is handled before `renderCommand` because it is the one command that outlives
     // its own output: it returns a handle the caller has to hold, not a rendered string.
     if (parsed.command === "graph" && parsed.graphOutput.mode === "site") {
@@ -312,6 +318,27 @@ function needsNoStore(argv: readonly string[]): boolean {
  * that did not happen.
  */
 const REPORT_ONLY = new Set(["status", "recap", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain"]);
+
+/**
+ * Whether the database this command was pointed at is the repository's own ledger.
+ *
+ * Freshening drains the live journal, and a journal belongs to exactly one repository.
+ * `--database` can name anything -- a fixture, a copy, another checkout's ledger -- and
+ * draining this repository's in-flight calls into one of those would write them somewhere
+ * they do not belong *and* consume them, so they could never reach the ledger that wanted
+ * them. A report pointed at a foreign database therefore reads it exactly as it finds it.
+ */
+function ownsLedger(worktreeRoot: string, databasePath: string | null | undefined): boolean {
+  if (databasePath === null || databasePath === undefined || databasePath === "") return true;
+  try {
+    const same = (left: string, right: string): boolean =>
+      process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+    return same(resolve(databasePath), resolve(ledgerPathFor(worktreeRoot)));
+  } catch {
+    // Cannot tell whose it is, so do not write to it.
+    return false;
+  }
+}
 
 /**
  * What a repository looks like before it has been worked in.

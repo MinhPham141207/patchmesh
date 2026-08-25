@@ -70,6 +70,15 @@ could be judged by it.
 | [PM-13](PM-13-pull-is-zero-and-the-recap-suppresses-it.md) B+C | All three tool descriptions and the injected recap now lead with **when to call**, not what is returned. The "call this only for a different window" stop instruction is gone. |
 | [PM-10](PM-10-invariant-rests-on-a-counterfactual.md) | `recap --metrics` splits control vs treatment **by default** and states plainly when an arm is too thin to compare. |
 
+### Shipped 2026-08-25
+
+Found by re-judging the product against the live ledger rather than against its tests.
+
+| Item | What landed |
+| --- | --- |
+| [PM-17](PM-17-reports-answer-about-the-last-stop.md) | `freshenLedger`: every report drains the journal before reading, so it answers about now rather than about the last `Stop`. Free when nothing is pending (0.13-0.97ms), bounded at 500 entries, fail-open. `doctor` deliberately abstains. |
+| [PM-18](PM-18-nothing-budgets-the-ledger.md) | `doctor` reports ledger size always and warns past 64MiB, naming `prune` rather than running it. |
+
 ## Closed, recorded so they are not re-litigated
 
 | Problem | Closed by |
