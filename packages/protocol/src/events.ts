@@ -100,6 +100,11 @@ export interface ResourceChangedPayload {
   readonly beforeVersion: ResourceVersion | null;
   readonly afterVersion: ResourceVersion;
   readonly changeKind: "created" | "modified" | "deleted" | "renamed";
+  /**
+   * How this change was bound: to one named call, or only to the turn containing it.
+   * Optional so ledgers recorded before labelling existed replay unchanged.
+   */
+  readonly attribution?: "call" | "turn";
 }
 
 export interface TaskCompletedPayload {

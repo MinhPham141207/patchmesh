@@ -13,7 +13,7 @@ import type { TaskId } from "patchmesh-protocol";
 import { SqliteEventStore } from "patchmesh-storage";
 import type { AgentId } from "patchmesh-protocol";
 import { observeTurnEffects, type EffectAttributionCall } from "./effects.js";
-import { buildHookEvents, type HookPayload } from "./hook.js";
+import { buildHookEvents, declaredLogicalPath, type HookPayload } from "./hook.js";
 import { agentIdForSession, createEventId, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
 import { deriveAnalysisEvents, latestSymbolVersions } from "./symbols.js";
 import { ABANDONED_AFTER_MS } from "./inflight.js";
@@ -337,6 +337,9 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
         taskId: completed.taskId,
         startedAtMs: new Date(startedAt ?? entry.at).getTime(),
         completedAtMs: new Date(entry.at).getTime(),
+        // What the call's own input declared, normalized as a change's path is, so a change
+        // can name this call even where the mtime join is ambiguous or unanswerable.
+        declaredPath: declaredLogicalPath(worktreeRoot, entry.payload as HookPayload),
       });
       ingested += 1;
     } catch {

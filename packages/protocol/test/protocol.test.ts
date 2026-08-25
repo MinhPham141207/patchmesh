@@ -104,6 +104,17 @@ test("rejects an unsupported schema version", () => {
   assert.equal(result.diagnostics[0]?.code, "PHASE0_SCHEMA_UNSUPPORTED");
 });
 
+test("a file.changed payload may label its attribution basis", () => {
+  const changed = makeFileChanged();
+  const callBound = { ...changed, payload: { ...changed.payload, attribution: "call" } };
+  assert.deepEqual(parseEvent(callBound).diagnostics, []);
+  const turnBound = { ...changed, payload: { ...changed.payload, attribution: "turn" } };
+  assert.deepEqual(parseEvent(turnBound).diagnostics, []);
+  // The label is a closed vocabulary: anything else is not an honest basis.
+  const guessed = { ...changed, payload: { ...changed.payload, attribution: "probably_the_subagent" } };
+  assert.equal(parseEvent(guessed).value, null);
+});
+
 test("accepts an immutable V2 finding feedback event at the boundary", () => {
   const result = parseEvent(makeFindingFeedbackCreated());
   assert.deepEqual(result.diagnostics, []);

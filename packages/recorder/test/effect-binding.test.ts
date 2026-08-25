@@ -3,8 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { ObservedFileChange } from "patchmesh-observation";
 import { parseEvent, validateEventSet, type ProtocolEvent } from "patchmesh-protocol";
 import { SqliteEventStore } from "patchmesh-storage";
+import { bindChange, type EffectAttributionCall } from "../src/effects.js";
 import { ingestJournal, recordTurnEffects } from "../src/index.js";
 import { JOURNAL_VERSION } from "../src/journal.js";
 
@@ -58,6 +60,81 @@ function readEvents(ledgerPath: string): ProtocolEvent[] {
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** One candidate owner with a window in the far past (epoch ms), which no real mtime lands in. */
+function attributionCall(fields: Partial<EffectAttributionCall>): EffectAttributionCall {
+  return {
+    completionEventId: "evt_binding_candidate",
+    correlationId: "corr_binding_candidate",
+    agentId: null,
+    taskId: null,
+    startedAtMs: 0,
+    completedAtMs: 100,
+    declaredPath: null,
+    ...fields,
+  };
+}
+
+function observedChange(path: string, after: ObservedFileChange["after"]): ObservedFileChange {
+  return {
+    path,
+    before: null,
+    after,
+    changeKind: after === null ? "deleted" : "created",
+    outOfBand: false,
+  };
+}
+
+test("a change binds to the one call that declared its path even outside every window", () => {
+  const root = temporaryWorktree();
+  try {
+    // A real file, so the fallback rule had something to stat. Its mtime is modern and both
+    // windows ended decades ago, so the mtime join alone would return null; the single call
+    // that declared the path must win regardless.
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "auth.ts"), "declared\n", "utf8");
+    const change = observedChange("src/auth.ts", { contentHash: "hash", gitBlob: null, fileKind: "file" });
+
+    const owner = bindChange(root, change, [
+      attributionCall({ declaredPath: "src/auth.ts" }),
+      attributionCall({}),
+    ]);
+    assert.equal(owner?.declaredPath, "src/auth.ts");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("two calls declaring the same path stay ambiguous and fall back to the mtime rule", () => {
+  const root = temporaryWorktree();
+  try {
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "auth.ts"), "contested\n", "utf8");
+    const change = observedChange("src/auth.ts", { contentHash: "hash", gitBlob: null, fileKind: "file" });
+
+    const owner = bindChange(root, change, [
+      attributionCall({ declaredPath: "src/auth.ts", completedAtMs: 50 }),
+      attributionCall({ declaredPath: "src/auth.ts" }),
+    ]);
+    // Neither window contains the file's real mtime, so the fallback returns null. Picking
+    // one declarer would be inference dressed as evidence.
+    assert.equal(owner, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a deleted file binds when exactly one call declared its path", () => {
+  const root = temporaryWorktree();
+  try {
+    // Nothing left to stat, so the mtime rule could never answer; the declaration does.
+    const change = observedChange("doomed.md", null);
+    const owner = bindChange(root, change, [attributionCall({ declaredPath: "doomed.md" })]);
+    assert.equal(owner?.declaredPath, "doomed.md");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 /**
  * Establish a baseline, then write a file inside a recorded call's window and drain.
  *
@@ -106,6 +183,8 @@ test("a shell-written file binds to the call whose window contained the write", 
     assert.equal(changed.causationId, completion.eventId);
     assert.equal(changed.correlationId, completion.correlationId);
     assert.equal(changed.taskId, completion.taskId);
+    // The basis of the claim travels with the change, so rendering cannot overstate it.
+    assert.equal((changed.payload as { attribution?: string }).attribution, "call");
 
     // The trap this project has hit before: per-event validation cannot see correlation and
     // causation rules, which are properties of the set. Binding introduces exactly those.
@@ -153,6 +232,7 @@ test("a change no single call's window contains stays attributed to the turn", a
     // Ambiguity must not be resolved by picking one. Guessing here would be inference dressed
     // as evidence, which is the thing the evidence rules exist to forbid.
     assert.equal(changed.causationId, null);
+    assert.equal((changed.payload as { attribution?: string }).attribution, "turn");
     assert.deepEqual(validateEventSet(events), [], "an unbound change must still replay as valid");
   } finally {
     rmSync(root, { recursive: true, force: true });

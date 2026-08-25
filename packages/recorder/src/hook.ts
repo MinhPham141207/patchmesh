@@ -93,6 +93,22 @@ function pathFrom(toolInput: unknown, property: string | null): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/**
+ * The worktree-relative logical path this call's own input declared, or null when it names
+ * none.
+ *
+ * Shared between the recorded pair and effect attribution so both read the same declaration
+ * the same way -- including which `tool_input` property counts (a notebook edit declares
+ * `notebook_path`, not `file_path`). Normalized by `logicalPathFor`, so a declared path and
+ * an observed change's path compare equal.
+ */
+export function declaredLogicalPath(worktreeRoot: string, payload: HookPayload): string | null {
+  const hostToolName = typeof payload.tool_name === "string" ? payload.tool_name.trim() : "";
+  const normalized = normalizeTool(hostToolName, commandOf(payload.tool_input));
+  const rawPath = pathFrom(payload.tool_input, normalized.pathProperty);
+  return rawPath === null ? null : logicalPathFor(worktreeRoot, rawPath);
+}
+
 export interface BuildHookEventsOptions {
   readonly payload: HookPayload;
   readonly worktreeRoot: string;
@@ -135,8 +151,7 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
     resolveAttribution({ sessionId, hostToolName, ...fields, turnTaskId: options.turnTaskId ?? null });
   const agentId: AgentId | null = attribution.agentId;
   const taskId: TaskId | null = attribution.taskId;
-  const rawPath = pathFrom(payload.tool_input, normalized.pathProperty);
-  const logicalPath = rawPath === null ? null : logicalPathFor(identity.worktreeRoot, rawPath);
+  const logicalPath = declaredLogicalPath(identity.worktreeRoot, payload);
   const targetResourceId =
     logicalPath === null ? null : resourceIdForPath(identity.repositoryId, logicalPath);
 

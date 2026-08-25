@@ -214,6 +214,12 @@ export interface EffectAttributionCall {
   readonly taskId: TaskId | null;
   readonly startedAtMs: number;
   readonly completedAtMs: number;
+  /**
+   * Logical path the call's own input declared, normalized the same way a change's path is,
+   * or null for a call that names no path (Bash et al.). A declaration is evidence the host
+   * handed us directly, so where it answers, the mtime join does not have to.
+   */
+  readonly declaredPath: string | null;
 }
 
 /**
@@ -270,6 +276,29 @@ function soleCallCovering(
   return found;
 }
 
+/**
+ * Bind one observed change to the call that owns it, or to nothing.
+ *
+ * The declared path is tried first. Edit- and Write-shaped calls name their target in
+ * `tool_input`, and that naming is a fact the host asserted, not a pattern inferred -- so when
+ * exactly one call in the drain declared the changed path, it owns the change even where the
+ * mtime join is silent (overlapping windows) or unanswerable (a deleted file has no mtime).
+ * Zero or several declarers say nothing: several would be a guess between them, so the sole-
+ * window rule decides exactly as before.
+ *
+ * Exported because these three rules are the honesty contract for attribution and are pinned
+ * by tests directly; everything downstream only inherits their verdicts.
+ */
+export function bindChange(
+  worktreeRoot: string,
+  change: ObservedFileChange,
+  calls: readonly EffectAttributionCall[],
+): EffectAttributionCall | null {
+  const declaring = calls.filter((call) => call.declaredPath !== null && call.declaredPath === change.path);
+  if (declaring.length === 1) return declaring[0]!;
+  return soleCallCovering(worktreeRoot, change, calls);
+}
+
 export interface ObserveTurnEffectsOptions {
   readonly identity: RepositoryIdentity;
   readonly snapshotPath: string;
@@ -324,7 +353,7 @@ export async function observeTurnEffects(options: ObserveTurnEffectsOptions): Pr
   const events = candidates
     .filter((change) => !ignored.has(change.path))
     .map((change) => {
-      const owner = calls.length === 0 ? null : soleCallCovering(identity.worktreeRoot, change, calls);
+      const owner = calls.length === 0 ? null : bindChange(identity.worktreeRoot, change, calls);
       return fileChangedEvent({
         change,
         identity,
@@ -402,6 +431,10 @@ function fileChangedEvent(options: FileChangedEventOptions): ProtocolEvent {
       beforeVersion: change.before === null ? null : version(change.before),
       afterVersion: version(change.after),
       changeKind: change.changeKind,
+      // The basis travels with the claim: "call" means a specific call was bound, "turn"
+      // means only the turn is named. A causationId exists exactly when a call was bound,
+      // so the label and the link cannot drift apart.
+      attribution: options.causationId === null ? ("turn" as const) : ("call" as const),
     },
   } as unknown as ProtocolEvent;
 }
