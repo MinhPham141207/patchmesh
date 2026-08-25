@@ -373,6 +373,11 @@ q          Exit
 List observed agents and their attributed task evidence. M6 does not infer agent
 lifecycle status.
 
+Text output leads with a verdict line, orders agents by activity (event count),
+and shows short ids; subagents are indented under the parent whose id theirs
+truncates. `--json` keeps full ids and stable field order. The last line points
+at `patchmesh console` for the fuller view.
+
 ### Usage
 
 ```bash
@@ -396,9 +401,12 @@ patchmesh agents --agent agent-a
 ### Example output
 
 ```text
-ID        TASKS                 EVENTS
-agent-a   task-login            12
-agent-b   -                     7
+2 agents · busiest first
+AGENT    TASKS  EVENTS
+agent-a  1      12
+  ↳ agent-a.sub.b4c2d1e0  1   3
+agent-b  -      7
+Explore everything: patchmesh console
 ```
 
 `-` represents unavailable task attribution; JSON output uses `"taskId": null`.
@@ -921,7 +929,11 @@ patchmesh delivery <decision-id> --state <pending|delivered|acknowledged|failed>
 
 **Roadmap placement:** Phase 1 - Observe and Replay. Available, read-only.
 
-Inspect recorded normalized events.
+Inspect recorded activity. The default text output folds each tool call — a
+`tool.requested` and its `tool.completed`, plus the `file.changed` events it
+caused — into one readable row, newest first, capped at the 20 most recent
+calls. It opens on a verdict line naming the totals and ends by pointing at
+`patchmesh console` for the full stream.
 
 ### Usage
 
@@ -937,14 +949,23 @@ patchmesh events [options]
 --type <event-type> Filter by event type
 --since <duration>  Show recent events
 --until <time>      Set an ending timestamp
---limit <number>    Limit returned events
+--limit <number>    Cap the calls shown (default 20)
 --cursor <event-id> Resume after an event cursor
 --follow            Continue streaming new events
---raw               Show full normalized fields with secrets redacted
+--raw               One line per raw event, as scripts expect
 --json              Print newline-delimited JSON
 ```
 
 `--raw`, JSON, and newline-delimited JSON never bypass secret redaction.
+
+### Example output
+
+```text
+4212 calls · 10269 events recorded · showing the newest 20, 4192 older withheld
+08:51:37  -                -      -> opencode.json.backup
+06:55:10  agent_15d4c4eb   Write  Write apps/cli/src/main.ts -> apps/cli/src/main.ts
+Explore everything: patchmesh console
+```
 
 ### Examples
 

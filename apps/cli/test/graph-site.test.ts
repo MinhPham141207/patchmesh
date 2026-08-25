@@ -139,9 +139,14 @@ test("the server answers with the page and with a model rebuilt per request", as
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-type") ?? "", /text\/html/);
     const html = await page.text();
-    assert.match(html, /PatchMesh work graph/);
+    // `/` is the console now; the node-link explorer kept its own route rather than being deleted.
+    assert.match(html, /PatchMesh console/);
     // Self-contained: a local page that reaches out to a CDN is a page that breaks offline.
     assert.equal(/<script src=|<link[^>]+href="http/.test(html), false);
+
+    const legacy = await fetch(`${server.url}/graph`);
+    assert.equal(legacy.status, 200);
+    assert.match(await legacy.text(), /PatchMesh work graph/);
 
     const first = await fetch(`${server.url}/graph.json`);
     assert.equal(first.status, 200);
@@ -183,7 +188,7 @@ test("graph serves by default and holds until the server stops", async () => {
   });
 
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /Work graph at http:\/\/127\.0\.0\.1:\d+/);
+  assert.match(result.stdout, /Work map at http:\/\/127\.0\.0\.1:\d+\/map/);
   assert.match(result.stdout, /Ctrl\+C/);
   assert.notEqual(result.hold, undefined);
 

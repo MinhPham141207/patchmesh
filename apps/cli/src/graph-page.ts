@@ -852,7 +852,7 @@ function renderAgentDetail(host, agent) {
   host.appendChild(kv([
     ["Changes", agent.changeCount],
     ["Reads", agent.readCount],
-    ["Files touched", agent.fileIds.length],
+    ["Files touched", agent.fileCount === undefined ? agent.fileIds.length : agent.fileCount],
     ["First seen", when(agent.firstAt)],
     ["Last seen", when(agent.lastAt)]
   ]));
@@ -881,7 +881,7 @@ function renderTaskDetail(host, task) {
   host.appendChild(el("h3", null, task.id));
   host.appendChild(kv([
     ["Changes", task.changeCount],
-    ["Files touched", task.fileIds.length],
+    ["Files touched", task.fileCount === undefined ? task.fileIds.length : task.fileCount],
     ["Started", when(task.firstAt)],
     ["Last change", when(task.lastAt)]
   ]));

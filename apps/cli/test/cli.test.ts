@@ -563,8 +563,9 @@ test("agents nests a subagent under the parent whose id it truncates", async () 
 
   assert.equal(result.exitCode, 0);
   const lines = result.stdout.split("\n").filter((line) => line.includes("agent_"));
+  // Busiest first, not alphabetical: 569 events outrank 312.
   assert.match(lines[0] ?? "", /^agent_62225cb8/);
-  assert.match(lines[1] ?? "", /^agent_7a1033a6-93c4/);
+  assert.match(lines[1] ?? "", /agent_7a1033a6-93c4|agent_7a1033a6\b/);
   assert.match(lines[2] ?? "", /^\s+↳ agent_7a1033a6\.sub\.aaa/);
   // An agent with work outside any task says so rather than reporting a bare count.
   assert.match(lines[1] ?? "", /1 \(\+unattributed\)/);

@@ -22,7 +22,8 @@ import {
 import type { EventType } from "patchmesh-protocol";
 import { findWorktreeRoot, freshenLedger, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
 import { commands, parseArgs, usageText, type CommandName, type ParsedArgs } from "./args.js";
-import { renderGraphServerBanner, startGraphServer, type GraphServer, type GraphServerOptions } from "./graph-server.js";
+import { renderConsoleBanner, renderGraphServerBanner, startGraphServer, type GraphServer, type GraphServerOptions } from "./graph-server.js";
+import { collapseEvents } from "./console-model.js";
 import { diagnose, renderDoctor } from "./doctor.js";
 import { initializeRepository, renderInit } from "./init.js";
 import {
@@ -31,6 +32,8 @@ import {
   renderDetectorUnavailable,
   renderDeliveryResponse,
   renderEvents,
+  renderEventCalls,
+  TERMINAL_CALL_ROWS,
   renderFeedbackResponse,
   renderFindings,
   renderGraph,
@@ -233,7 +236,14 @@ async function renderCommand(
     const result = deliveryWriter.respondToDecisionDelivery(delivery);
     return renderDeliveryResponse(result, delivery.decisionId, delivery.state, parsed.json);
   }
-  if (!parsed.follow) return renderEvents(services.listEvents(parsed.eventQuery), parsed.json);
+  // The default text mode answers with calls, not records: bounded, newest first, readable.
+  // `--raw` and `--json` keep the per-event page, which is what scripts and follow read.
+  if (!parsed.follow) {
+    if (parsed.raw || parsed.json) return renderEvents(services.listEvents(parsed.eventQuery), parsed.json);
+    const { limit: _limit, ...filters } = parsed.eventQuery;
+    const page = services.listEvents(filters);
+    return renderEventCalls(collapseEvents(page.events, parsed.eventQuery.limit ?? TERMINAL_CALL_ROWS));
+  }
   let output = "";
   for await (const page of services.followEvents(parsed.eventQuery, signal)) output += renderEvents(page, parsed.json);
   return output;
@@ -258,19 +268,29 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
       // and can afford it. The MCP tools deliberately do not - see `freshenLedger`.
       await freshenLedger({ worktreeRoot, ledgerPath: ledgerPathFor(worktreeRoot), observeEffects: true });
     }
-    // Serving is handled before `renderCommand` because it is the one command that outlives
-    // its own output: it returns a handle the caller has to hold, not a rendered string.
-    if (parsed.command === "graph" && parsed.graphOutput.mode === "site") {
+    // Serving is handled before `renderCommand` because these are the commands that outlive
+    // their own output: they return a handle the caller has to hold, not a rendered string.
+    // `console` and `graph` are one server on one port - the console's Map lens is where
+    // `graph` now lands, so two commands never mean two ports.
+    const serves = parsed.command === "console" || (parsed.command === "graph" && parsed.graphOutput.mode === "site");
+    if (serves) {
       const ledger = parsed.databasePath ?? "";
+      const readRecap = dependencies.readRecap ?? recapRecentWork;
       const server = await (dependencies.serveGraph ?? startGraphServer)({
         services: dependencies.services,
         filters: parsed.graphFilters,
         ledger,
         ...(parsed.graphOutput.port === null ? {} : { port: parsed.graphOutput.port }),
+        // The Now lens leads with a recap, which opens the store itself and needs the
+        // worktree root. Outside a checkout it is simply absent, and the lens answers with
+        // counts alone rather than failing.
+        ...(worktreeRoot === null ? {} : { readRecap: () => readRecap({ worktreeRoot, ledgerPath: ledger }) }),
       });
       return {
         exitCode: 0,
-        stdout: renderGraphServerBanner(server.url, ledger),
+        stdout: parsed.command === "console"
+          ? renderConsoleBanner(server.url, ledger)
+          : renderGraphServerBanner(server.url, ledger),
         stderr: "",
         hold: dependencies.signal === undefined
           ? server.closed
@@ -319,7 +339,7 @@ function needsNoStore(argv: readonly string[]): boolean {
  * missing store means they recorded nothing. Exiting 0 there would report success for work
  * that did not happen.
  */
-const REPORT_ONLY = new Set(["status", "recap", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain"]);
+const REPORT_ONLY = new Set(["status", "recap", "agents", "events", "console", "graph", "overlaps", "stale", "contracts", "explain"]);
 
 /**
  * Whether the database this command was pointed at is the repository's own ledger.

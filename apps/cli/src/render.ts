@@ -12,6 +12,7 @@ import type {
   StatusView,
 } from "patchmesh-query";
 import { renderOverlap, renderRecap as renderRecapText } from "patchmesh-query";
+import { collapseEvents, shortId, type EventsLens } from "./console-model.js";
 
 /** Structural shape of one projection coverage gap, matching `ProjectionCoverageGap`. */
 interface CoverageGap {
@@ -200,34 +201,6 @@ export function renderStatus(status: StatusView, json: boolean): string {
 }
 
 /**
- * A subagent's parent is already in its id.
- *
- * The recorder names a subagent `<parentPrefix>.sub.<taskSuffix>`, so the relationship
- * between a parent and the work it spawned is recorded and was being thrown away by a flat
- * list sorted by string. Grouping by that prefix is the difference between eleven unrelated
- * UUIDs and one agent that ran five subagents.
- */
-function agentSortKeys(agents: readonly AgentView[]): ReadonlyMap<string, string> {
-  const parents = agents.map((agent) => agent.agentId).filter((agentId) => !agentId.includes(".sub."));
-  const keys = new Map<string, string>();
-  for (const agent of agents) {
-    const marker = agent.agentId.indexOf(".sub.");
-    if (marker === -1) {
-      // The trailing separator keeps a parent ahead of its own subagents without putting it
-      // ahead of an unrelated agent that merely sorts nearby.
-      keys.set(agent.agentId, `${agent.agentId}\t`);
-      continue;
-    }
-    // The prefix is a truncation of the parent's id, not the whole thing, so it has to be
-    // resolved against the agents actually present rather than compared as a string.
-    const prefix = agent.agentId.slice(0, marker);
-    const parent = parents.find((agentId) => agentId.startsWith(prefix)) ?? prefix;
-    keys.set(agent.agentId, `${parent}\t${agent.agentId.slice(marker)}`);
-  }
-  return keys;
-}
-
-/**
  * Bound a per-agent projection-coverage list, which is a different shape from a gap list.
  *
  * Each `ProjectionCoverage` carries its own nested `gaps`, so this array is the larger of the
@@ -280,16 +253,30 @@ export function renderAgents(view: AgentsView, json: boolean): string {
   }
   if (view.agents.length === 0) return "No agents observed.\n";
 
-  const keys = agentSortKeys(view.agents);
-  const key = (agent: AgentView) => keys.get(agent.agentId) ?? agent.agentId;
+  // Busiest first, subagents tucked under their parent. Alphabetical order by UUID - what this
+  // used to be - is a random order wearing a deterministic one's clothes, and a full
+  // 36-character id column is a table with no signal; the short form is what `recap` taught.
+  const parents = [...view.agents].filter((agent) => !agent.agentId.includes(".sub."));
+  const rankOf = new Map<string, number>(
+    [...parents]
+      .sort((left, right) => right.eventCount - left.eventCount)
+      .map((agent, index) => [agent.agentId, index]),
+  );
+  const sortKey = (agent: AgentView): string => {
+    const marker = agent.agentId.indexOf(".sub.");
+    if (marker === -1) return `${rankOf.get(agent.agentId) ?? parents.length}\t0\t${agent.agentId}`;
+    const prefix = agent.agentId.slice(0, marker);
+    const parent = view.agents.find((other) => other.agentId.startsWith(prefix))?.agentId ?? prefix;
+    return `${rankOf.get(parent) ?? parents.length}\t1\t${agent.agentId.slice(marker)}`;
+  };
   const rows = [...view.agents]
-    .sort((left, right) => (key(left) < key(right) ? -1 : key(left) > key(right) ? 1 : 0))
+    .sort((left, right) => (sortKey(left) < sortKey(right) ? -1 : sortKey(left) > sortKey(right) ? 1 : 0))
     .map((agent) => {
       const isSubagent = agent.agentId.includes(".sub.");
       const named = agent.taskIds.filter((taskId) => taskId !== null).length;
       return {
         // Indentation carries the parent relationship, so the id column stays the id column.
-        label: `${isSubagent ? "  ↳ " : ""}${agent.agentId}`,
+        label: `${isSubagent ? "  ↳ " : ""}${shortId(String(agent.agentId))}`,
         tasks: agent.taskIds.includes(null) ? `${named} (+unattributed)` : `${named}`,
         events: `${agent.eventCount}`,
       };
@@ -298,10 +285,45 @@ export function renderAgents(view: AgentsView, json: boolean): string {
   const width = (values: readonly string[]) => Math.max(...values.map((value) => value.length));
   const idWidth = width([...rows.map((row) => row.label), "AGENT"]);
   const taskWidth = width([...rows.map((row) => row.tasks), "TASKS"]);
-  const lines = [`${"AGENT".padEnd(idWidth)}  ${"TASKS".padEnd(taskWidth)}  EVENTS`];
+  const lines = [
+    `${view.agents.length} agent${view.agents.length === 1 ? "" : "s"} · busiest first`,
+    `${"AGENT".padEnd(idWidth)}  ${"TASKS".padEnd(taskWidth)}  EVENTS`,
+  ];
   for (const row of rows) {
     lines.push(`${row.label.padEnd(idWidth)}  ${row.tasks.padEnd(taskWidth)}  ${row.events.padStart(6)}`);
   }
+  lines.push("Explore everything: patchmesh console");
+  return `${lines.join("\n")}\n`;
+}
+
+/** How many folded calls the terminal shows before it starts withholding. */
+export const TERMINAL_CALL_ROWS = 20;
+
+/**
+ * Render the event stream as calls rather than records.
+ *
+ * The text mode this replaces printed every event since creation as
+ * `event-id · timestamp · type` - three columns that never said what happened, oldest first,
+ * so the first screen was the day the repository was created. The fold and the cap are the
+ * console's own (`collapseEvents`), so both surfaces answer with the same shape.
+ *
+ * `--raw` keeps the old one-line-per-event format for scripts; that escape hatch is why the
+ * pointer line below must never appear in it.
+ */
+export function renderEventCalls(lens: EventsLens): string {
+  const { total, shown, withheld } = lens.bounds;
+  if (total === 0) return "No events recorded.\n";
+  const head = `${total} call${total === 1 ? "" : "s"} · ${lens.eventsRead} events recorded`
+    + (withheld === 0 ? "" : ` · showing the newest ${shown}, ${withheld} older withheld`);
+  const lines = [head];
+  for (const row of lens.rows) {
+    const at = row.at.length >= 19 ? row.at.slice(11, 19) : row.at;
+    const more = row.moreChanged === 0 ? "" : ` (+${row.moreChanged} more files)`;
+    const changed = row.changed.length === 0 ? "" : ` -> ${row.changed.join(", ")}${more}`;
+    const failed = row.failed ? " [failed]" : "";
+    lines.push(`${at}\t${row.agentShort ?? "-"}\t${row.tool ?? "-"}\t${row.operation ?? ""}${changed}${failed}`);
+  }
+  lines.push("Explore everything: patchmesh console");
   return `${lines.join("\n")}\n`;
 }
 

@@ -1,7 +1,7 @@
 import type { DecisionDelivery, DecisionId, EventType, FindingId, FindingFeedback } from "patchmesh-protocol";
 import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters } from "patchmesh-query";
 
-export type CommandName = "init" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "help";
+export type CommandName = "init" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "console" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "help";
 
 export interface ParsedArgs {
   readonly command: CommandName;
@@ -47,7 +47,7 @@ export interface ParsedArgs {
   } | null;
 }
 
-export const commands = new Set<CommandName>(["init", "doctor", "prune", "status", "recap", "agents", "events", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "help"]);
+export const commands = new Set<CommandName>(["init", "doctor", "prune", "status", "recap", "agents", "events", "console", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "help"]);
 const eventTypes = new Set<EventType>([
   "tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read",
   "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected",
@@ -69,14 +69,16 @@ export function usageText(): string {
     "  prune --older-than <days> Delete events past a retention cutoff, keeping replay intact",
     "",
     "Report-only commands:",
+    "  console                    Serve every report as one local page and print its link",
+    "                             (--port <n>) — the whole picture, bounded",
     "  recap                      What previous sessions did (--within <minutes>, --limit <n>,",
     "                             --agent) — start here",
     "  recap --metrics            Calls an agent makes before its first change (time to resume)",
     "  status                     Store health, counts, and observation coverage",
-    "  agents                     Observed agents and their tasks",
-    "  events                     Durable event page (--raw, --follow, --type, --since,",
-    "                             --until, --limit, --cursor)",
-    "  graph                      Serve the work-graph explorer and print its link",
+    "  agents                     Observed agents, busiest first",
+    "  events                     Recent calls, newest first (--raw for raw event lines,",
+    "                             --follow, --type, --since, --until, --limit, --cursor)",
+    "  graph                      Serve the console's work map and print its link",
     "                             (--resource, --print, --port <n>)",
     "  overlaps                   Files more than one worker changed (--resource, --within)",
     "  stale                      Stale-read-before-write findings (needs proxy-recorded",
@@ -224,7 +226,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     }
     if (option === "--resource" && (command === "graph" || command === "overlaps")) { resourceId = value(argv, index, option); index += 1; continue; }
     if (option === "--print" && command === "graph") { graphPrint = true; continue; }
-    if (option === "--port" && command === "graph") {
+    if (option === "--port" && (command === "graph" || command === "console")) {
       const port = Number(value(argv, index, option));
       if (!Number.isInteger(port) || port < 0 || port > 65535) throw new ReadServiceError("usage", "--port takes a whole number between 0 and 65535");
       graphPort = port;
