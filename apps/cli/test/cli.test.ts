@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { EventId, ProtocolEvent } from "patchmesh-protocol";
 import type { ReadServices, StatusView } from "patchmesh-query";
-import type { WorkGraphSnapshot } from "patchmesh-storage";
+import { SqliteEventStore, type WorkGraphSnapshot } from "patchmesh-storage";
 import { appendJournalEntry, journalPathFor, LEDGER_DIRECTORY, ledgerPathFor } from "patchmesh-recorder";
 import { runCli, main } from "../src/main.js";
 import { initializeRepository, renderInit } from "../src/init.js";
@@ -500,6 +500,63 @@ test("a single coverage gap still names the scope that fell short", async () => 
   });
 
   assert.match(result.stdout, /Coverage gap:\s+unverified write\.dependent/);
+});
+
+/** A mailbox send, seeded straight into the ledger the way `sendMail` would leave it. */
+let mailSequence = 0;
+function sentMailEvent(messageId: string): ProtocolEvent {
+  mailSequence += 1;
+  return {
+    schemaVersion: 1,
+    eventId: `evt_${String(mailSequence).padStart(32, "0")}` as EventId,
+    eventType: "agent.message.sent",
+    source: { kind: "gateway", sourceId: "source_patchmesh_mailbox", instanceId: "11111111-1111-4111-8111-111111111111" },
+    timestamp: "2026-08-26T12:00:00.000Z",
+    repositoryId: "repo_11111111-1111-4111-8111-111111111111",
+    workspaceId: "ws_22222222-2222-4222-8222-222222222222",
+    worktreeId: "wt_33333333-3333-4333-8333-333333333333",
+    agentId: "agent_aaaa1111-2222-4333-8444-555555555555",
+    taskId: null,
+    correlationId: `corr_${String(mailSequence).padStart(32, "0")}`,
+    causationId: null,
+    sourceSequence: null,
+    payload: {
+      messageId,
+      to: { kind: "broadcast", agentId: null },
+      kind: "notice",
+      subject: `subject ${messageId}`,
+      body: `body ${messageId}`,
+      refs: [],
+      expiresAt: "2027-09-02T12:00:00.000Z",
+    },
+  } as unknown as ProtocolEvent;
+}
+
+test("status reports undelivered mailbox messages in text and --json", async () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-status-mail-"));
+  const ledgerPath = join(root, ".patchmesh", "ledger.db");
+  mkdirSync(join(ledgerPath, ".."), { recursive: true });
+  const store = SqliteEventStore.open(ledgerPath);
+  try {
+    store.appendAtomic([sentMailEvent("msg_a".padEnd(36, "a")), sentMailEvent("msg_b".padEnd(36, "b"))]);
+  } finally {
+    store.close();
+  }
+  try {
+    const text = await runCli(["status", "--database", ledgerPath], { ...overlapDeps, services });
+    assert.equal(text.exitCode, 0);
+    assert.match(text.stdout, /Undelivered messages: 2/);
+
+    const json = await runCli(["status", "--json", "--database", ledgerPath], { ...overlapDeps, services });
+    assert.equal(json.exitCode, 0);
+    assert.equal((JSON.parse(json.stdout) as { undeliveredMessages?: number }).undeliveredMessages, 2);
+
+    // No ledger named at all degrades to zero rather than an error, like every other count.
+    const quiet = await runCli(["status"], { ...overlapDeps, services });
+    assert.match(quiet.stdout, /Undelivered messages: 0/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("graph names resources by path and nests versions under the file they belong to", async () => {

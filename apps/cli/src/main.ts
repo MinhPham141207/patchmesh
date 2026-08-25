@@ -15,6 +15,7 @@ import {
   renderResumeMetrics,
   sendMail,
   treatmentBoundaryFrom,
+  undeliveredCount,
   type OverlapOptions,
   type OverlapResult,
   type ReadServices,
@@ -230,7 +231,12 @@ async function renderCommand(
       parsed.json,
     );
   }
-  if (parsed.command === "status") return renderStatus(services.getStatus(), parsed.json);
+  // The undelivered count is computed here rather than folded into `StatusView`: it needs the
+  // ledger path, which `ReadServices` does not carry (it reads through an injected reader), and
+  // `undeliveredCount` fails soft to zero on an unreadable ledger like every other count.
+  if (parsed.command === "status") {
+    return renderStatus(services.getStatus(), undeliveredCount(parsed.databasePath ?? ""), parsed.json);
+  }
   if (parsed.command === "agents") return renderAgents(services.listAgents(parsed.agentFilters), parsed.json);
   if (parsed.command === "graph") return renderGraph(services.getGraph(parsed.graphFilters), parsed.json);
   if (parsed.command === "overlaps") {

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { EventId, ProtocolEvent } from "patchmesh-protocol";
 import type { ReadServices } from "patchmesh-query";
+import { SqliteEventStore } from "patchmesh-storage";
 import type { GraphSiteModel } from "../src/graph-model.js";
 import {
   boundGraphSiteModel,
@@ -209,8 +213,66 @@ test("the now lens groups coverage gaps instead of listing one per scope", () =>
   const lens = buildNowLens(services, "/ledger", null);
   assert.deepEqual(lens.gaps, [{ kind: "opaque", reason: "not enumerable", count: 40 }]);
   assert.equal(lens.counts.events, 9330);
+  assert.equal(lens.counts.undeliveredMessages, 0);
   assert.equal(lens.tasks.length, 0);
   assert.equal(lens.window, null);
+});
+
+/** The two mailbox events an undelivered count is made of, seeded the way the CLI leaves them. */
+let mailSequence = 0;
+function mailboxEvent(eventType: "agent.message.sent" | "agent.message.delivered", messageId: string): ProtocolEvent {
+  mailSequence += 1;
+  const base = {
+    schemaVersion: 1,
+    eventId: `evt_${String(mailSequence).padStart(32, "0")}` as EventId,
+    source: { kind: "gateway", sourceId: "source_patchmesh_mailbox", instanceId: "11111111-1111-4111-8111-111111111111" },
+    timestamp: "2026-08-26T12:00:00.000Z",
+    repositoryId: "repo_11111111-1111-4111-8111-111111111111",
+    workspaceId: "ws_22222222-2222-4222-8222-222222222222",
+    worktreeId: "wt_33333333-3333-4333-8333-333333333333",
+    agentId: "agent_aaaa1111-2222-4333-8444-555555555555",
+    taskId: null,
+    correlationId: `corr_${String(mailSequence).padStart(32, "0")}`,
+    causationId: null,
+    sourceSequence: null,
+  };
+  return eventType === "agent.message.sent"
+    ? { ...base, eventType, payload: {
+        messageId, to: { kind: "broadcast", agentId: null }, kind: "notice", subject: `subject ${messageId}`,
+        body: `body ${messageId}`, refs: [], expiresAt: "2027-09-02T12:00:00.000Z",
+      } } as unknown as ProtocolEvent
+    : { ...base, eventType, timestamp: "2026-08-26T13:00:00.000Z", payload: { messageId, channel: "mcp_pull" } } as unknown as ProtocolEvent;
+}
+
+test("the now lens counts the ledger's undelivered mail beside its other counts", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-now-mail-"));
+  const ledgerPath = join(root, ".patchmesh", "ledger.db");
+  mkdirSync(join(ledgerPath, ".."), { recursive: true });
+  const store = SqliteEventStore.open(ledgerPath);
+  try {
+    // Two sent, one of them delivered to somebody: one message is still waiting.
+    store.appendAtomic([
+      mailboxEvent("agent.message.sent", "msg_a".padEnd(36, "a")),
+      mailboxEvent("agent.message.sent", "msg_b".padEnd(36, "b")),
+      mailboxEvent("agent.message.delivered", "msg_b".padEnd(36, "b")),
+    ]);
+  } finally {
+    store.close();
+  }
+  try {
+    const lens = buildNowLens({
+      getStatus: () => ({
+        health: "healthy", store: { state: "open", replayable: true },
+        eventCount: 0, eventTypeCounts: {}, agentCount: 0, taskCount: 0,
+        nullAttributionEventCount: 0,
+        coverage: { presentation: "unknown", covered: 0, total: 0, modes: [], gaps: [] },
+        errorCategory: null,
+      }),
+    } as unknown as ReadServices, ledgerPath, null);
+    assert.equal(lens.counts.undeliveredMessages, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 /* ------------------------------------------------- the /graph.json fix */

@@ -248,11 +248,12 @@ function boundGaps(gaps: readonly CoverageGap[]): BoundedGaps {
   };
 }
 
-export function renderStatus(status: StatusView, json: boolean): string {
+export function renderStatus(status: StatusView, undeliveredMessages: number, json: boolean): string {
   if (json) {
     const bounded = boundGaps(status.coverage.gaps as readonly CoverageGap[]);
     return `${JSON.stringify({
       ...status,
+      undeliveredMessages,
       coverage: {
         ...status.coverage,
         gaps: bounded.gaps,
@@ -270,6 +271,10 @@ export function renderStatus(status: StatusView, json: boolean): string {
     `Events recorded:   ${status.eventCount}`,
     `Agents observed:   ${status.agentCount}`,
     `Tasks observed:    ${status.taskCount}`,
+    // Mailbox health rides beside the observation counts: mail waiting on nobody's action is
+    // the one number here that says an agent owes another agent something. Computed by the
+    // caller (`undeliveredCount`), which fails soft to zero when the ledger is unreadable.
+    `Undelivered messages: ${undeliveredMessages}`,
     `Null attribution:  ${status.nullAttributionEventCount}`,
     `Coverage:          ${coverageSummary(status.coverage)}`,
   ];

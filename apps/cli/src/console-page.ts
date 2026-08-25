@@ -379,6 +379,7 @@ export const CONSOLE_PAGE_HTML = `<!doctype html>
       { k: "Tasks", v: num(c.tasks) },
       { k: "Coverage", v: rate + "%", sub: num(c.coveredScopes) + "/" + num(c.totalScopes) },
       { k: "Null attribution", v: num(c.nullAttribution), sub: pct + "%", tone: "caution" },
+      { k: "Undelivered mail", v: num(c.undeliveredMessages), tone: c.undeliveredMessages > 0 ? "caution" : "" },
       { k: "Health", v: d.health, tone: d.health === "healthy" ? "good" : "critical" }
     ]);
 

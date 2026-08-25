@@ -1,5 +1,5 @@
 import type { ProtocolEvent } from "patchmesh-protocol";
-import type { ReadServices, RecapResult } from "patchmesh-query";
+import { undeliveredCount, type ReadServices, type RecapResult } from "patchmesh-query";
 import type { GraphSiteModel, ModelGap } from "./graph-model.js";
 
 /**
@@ -70,6 +70,7 @@ export interface NowLens {
     readonly agents: number;
     readonly tasks: number;
     readonly nullAttribution: number;
+    readonly undeliveredMessages: number;
     readonly coveredScopes: number;
     readonly totalScopes: number;
     readonly presentation: string;
@@ -111,6 +112,9 @@ export function buildNowLens(services: ReadServices, ledger: string, recap: Reca
       agents: status.agentCount,
       tasks: status.taskCount,
       nullAttribution: status.nullAttributionEventCount,
+      // Read from the ledger this lens was opened on; `undeliveredCount` fails soft to zero
+      // when it is unreadable, the same degradation every other count here follows.
+      undeliveredMessages: undeliveredCount(ledger),
       coveredScopes: status.coverage.covered,
       totalScopes: status.coverage.total,
       presentation: status.coverage.presentation,
