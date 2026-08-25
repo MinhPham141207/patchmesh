@@ -17,6 +17,7 @@ import type {
   Source,
   TargetSnapshot,
   TargetSnapshotId,
+  MessageId,
   TaskId,
   VersionDomain,
   WorkspaceId,
@@ -525,6 +526,90 @@ export interface DecisionDeliveryChangedEvent extends BaseEvent {
 }
 
 /**
+ * Who a message is for.
+ *
+ * Deliberately only two kinds. `role` addressing is the obvious third and it is not here,
+ * because a role is a contract nothing declares yet -- adding the address before the thing it
+ * addresses would ship a field that can never resolve. See docs/features/F-01, capability C.
+ */
+export type MessageAudienceKind = "agent" | "broadcast";
+
+export interface MessageAudience {
+  readonly kind: MessageAudienceKind;
+  /** The addressee when `kind` is `agent`; null for a broadcast. */
+  readonly agentId: AgentId | null;
+}
+
+export type MessageKind = "notice" | "handoff" | "question" | "claim";
+
+/**
+ * Where a message reached its recipient.
+ *
+ * Recorded rather than assumed because the three channels have very different reach:
+ * `session_start` only lands when a session opens, `post_tool_use` only after a write, and
+ * `mcp_pull` only when the agent chose to ask. Which one delivered is what tells you whether
+ * push or pull is doing the work.
+ */
+export type MessageChannel = "session_start" | "post_tool_use" | "mcp_pull";
+
+/**
+ * A message left for another worker.
+ *
+ * The sender is the envelope's own `agentId`; it is not repeated here. `refs` are
+ * repository-relative logical paths, the same form `file.changed` carries, so a message about
+ * a file can be joined to the work on that file.
+ */
+export interface AgentMessageSentPayload {
+  readonly messageId: MessageId;
+  readonly to: MessageAudience;
+  readonly kind: MessageKind;
+  readonly subject: string;
+  readonly body: string;
+  readonly refs: readonly string[];
+  readonly expiresAt: string;
+}
+
+/**
+ * One recipient received one message. The recipient is the envelope's `agentId`.
+ *
+ * A broadcast produces one of these per agent that actually read it, which is what makes
+ * "sent to everyone" and "seen by nobody" distinguishable -- the distinction the whole
+ * mailbox rests on.
+ */
+export interface AgentMessageDeliveredPayload {
+  readonly messageId: MessageId;
+  readonly channel: MessageChannel;
+}
+
+/**
+ * A recipient said what it did about a message. The acknowledger is the envelope's `agentId`.
+ *
+ * `read` is the honest default: an agent that saw a message has not thereby agreed to
+ * anything. `accepted` and `declined` exist so a handoff can be refused rather than silently
+ * dropped.
+ */
+export interface AgentMessageAcknowledgedPayload {
+  readonly messageId: MessageId;
+  readonly disposition: "read" | "accepted" | "declined";
+  readonly note: string | null;
+}
+
+export interface AgentMessageSentEvent extends BaseEvent {
+  readonly eventType: "agent.message.sent";
+  readonly payload: AgentMessageSentPayload;
+}
+
+export interface AgentMessageDeliveredEvent extends BaseEvent {
+  readonly eventType: "agent.message.delivered";
+  readonly payload: AgentMessageDeliveredPayload;
+}
+
+export interface AgentMessageAcknowledgedEvent extends BaseEvent {
+  readonly eventType: "agent.message.acknowledged";
+  readonly payload: AgentMessageAcknowledgedPayload;
+}
+
+/**
  * WHICH OF THESE ARE ACTUALLY PRODUCED, as measured against a live ledger on 2026-08-23.
  *
  * Three of the sixteen event types below exist in recorded data: `tool.requested`,
@@ -580,7 +665,20 @@ export type ProjectionEvent =
   | ValidityChangedEvent
   | DecisionDeliveryChangedEvent;
 
-export type ProtocolEvent = Phase1InputEvent | ProjectionEvent;
+/**
+ * Events an agent writes on purpose, rather than ones observed from its work.
+ *
+ * A third kind alongside `Phase1InputEvent` (what a recorder saw) and `ProjectionEvent` (what a
+ * detector concluded). A message is neither: nothing observed it and nothing derived it -- a
+ * worker chose to say something. Keeping it separate is what stops a message from being counted
+ * as recorded activity in coverage, adoption, or time-to-resume, all of which measure work.
+ */
+export type CoordinationEvent =
+  | AgentMessageSentEvent
+  | AgentMessageDeliveredEvent
+  | AgentMessageAcknowledgedEvent;
+
+export type ProtocolEvent = Phase1InputEvent | ProjectionEvent | CoordinationEvent;
 
 export type EventType = ProtocolEvent["eventType"];
 

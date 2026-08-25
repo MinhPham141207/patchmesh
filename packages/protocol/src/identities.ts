@@ -16,6 +16,7 @@ export type DecisionId = `decision_${string}`;
 export type CoverageId = `coverage_${string}`;
 export type DeliveryId = `delivery_${string}`;
 export type ValidityId = `validity_${string}`;
+export type MessageId = `msg_${string}`;
 
 export type NullableAgentId = AgentId | null;
 export type NullableTaskId = TaskId | null;
