@@ -42,7 +42,7 @@ Components, all inside `packages/recorder/src/`:
 
 - **Recent-write reader** (`advisory.ts`, extending the existing `computeAdvisoryFor` shape): reads PostToolUse entries from the local journal (`journal.js`, already in the permitted import graph — `node:fs`/`node:path` only, so the import-graph guard in `journal.test.ts` still holds). Filters to entries whose `agentId` differs from the caller and whose declared path matches. Window: `RECENT_WRITE_MINUTES`, initially 30 (same calibration as `IDLE_GAP_MINUTES`; both face the measured 0.3–15.6 min contention silences).
 - **Per-session delivery cursor** (`.patchmesh/cursors/<agentId>.json`): stores `{ watermark }` — the timestamp of the last journal entry this session was told about. Rules:
-  - Absent cursor on first contact ⇒ initialise to *now*. First contact never dumps history; it arms the channel.
+  - Absent cursor on first contact ⇒ deliver the current window's matching facts **once**, then arm at the newest delivered entry. A session whose first Edit lands on a path written minutes ago is exactly the case the advisory exists for; silencing that case would make the channel dead on arrival. Flooding is bounded by construction: one fact per path, capped lists, and every later look is silent until new writes land.
   - Deliver facts for entries strictly newer than the watermark, then advance the watermark to the newest delivered entry. Each fact is delivered once per session.
   - Single-writer per session by construction (the session's own hooks), so no lock is needed beyond atomic replace-write.
 - **Stage behaviour**, all three sharing the one predicate:
