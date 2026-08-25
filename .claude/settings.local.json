@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"D:\\patchmesh\\packages\\gateway\\dist\\session-start-bin.js\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR/packages/gateway/dist/session-start-bin.js\"",
             "timeout": 15,
             "statusMessage": ""
           }
