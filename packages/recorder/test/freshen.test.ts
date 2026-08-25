@@ -166,7 +166,7 @@ test("the snapshot survives being written by two capturers at once", async () =>
   try {
     writeFileSync(join(root, "a.ts"), "export const a = 1;\n");
     callInto(root, join(root, "a.ts"), new Date().toISOString());
-    await freshenLedger({ worktreeRoot: root });
+    await freshenLedger({ worktreeRoot: root, observeEffects: true });
 
     // Two freshens racing is the shape drain-on-read introduces: a report and the Stop hook
     // capturing at the same moment. A torn snapshot does not fail loudly -- it reads as no
@@ -174,11 +174,66 @@ test("the snapshot survives being written by two capturers at once", async () =>
     // evidence that the write is atomic is that the file still parses afterwards.
     writeFileSync(join(root, "b.ts"), "export const b = 2;\n");
     callInto(root, join(root, "b.ts"), new Date().toISOString());
-    await Promise.all([freshenLedger({ worktreeRoot: root }), freshenLedger({ worktreeRoot: root })]);
+    await Promise.all([
+      freshenLedger({ worktreeRoot: root, observeEffects: true }),
+      freshenLedger({ worktreeRoot: root, observeEffects: true }),
+    ]);
 
     const snapshot: unknown = JSON.parse(readFileSync(join(root, LEDGER_DIRECTORY, "snapshot.json"), "utf8"));
     assert.equal(typeof snapshot, "object");
     assert.ok(Array.isArray((snapshot as { files?: unknown }).files));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("walking the filesystem is opt-in, because the walk costs far more than the drain", async () => {
+  // Draining is 4-6ms warm; observing effects stats and content-hashes every tracked file and
+  // shells out to git, measured at 681-949ms on the PatchMesh repository even when it finds
+  // nothing. The MCP tools an agent calls before every edit must not pay that, so the default
+  // is off and the CLI and SessionStart hook opt in. See `freshenLedger`.
+  const root = temporaryWorktree();
+  try {
+    writeFileSync(join(root, "a.ts"), "export const a = 1;\n");
+    callInto(root, join(root, "a.ts"), new Date().toISOString());
+
+    const drainOnly = await freshenLedger({ worktreeRoot: root });
+
+    assert.equal(drainOnly.outcome, "drained");
+    assert.ok(drainOnly.ingested > 0, "calls are always drained");
+    assert.equal(drainOnly.changed, 0, "and the filesystem is not walked");
+    assert.equal(existsSync(join(root, LEDGER_DIRECTORY, "snapshot.json")), false);
+
+    // Asking for it takes the baseline; there is nothing to compare against yet.
+    callInto(root, join(root, "a.ts"), new Date().toISOString());
+    await freshenLedger({ worktreeRoot: root, observeEffects: true });
+    assert.equal(existsSync(join(root, LEDGER_DIRECTORY, "snapshot.json")), true);
+
+    writeFileSync(join(root, "b.ts"), "export const b = 2;\n");
+    callInto(root, join(root, "b.ts"), new Date().toISOString());
+    const withEffects = await freshenLedger({ worktreeRoot: root, observeEffects: true });
+
+    assert.ok(withEffects.changed > 0, "the second walk sees what changed since the first");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a read with nothing new to record does not walk the filesystem even when asked", async () => {
+  // The live journal always holds at least the in-flight call that is doing the asking, so
+  // "pending > 0" is not enough of a gate on its own: without also requiring that the drain
+  // ingested something, a repeated read would pay the walk forever. No new calls also means no
+  // new call windows to bind changes to, so the walk could only produce unattributed
+  // observations at full price.
+  const root = temporaryWorktree();
+  try {
+    callInto(root, join(root, "a.ts"), new Date().toISOString());
+    await freshenLedger({ worktreeRoot: root, observeEffects: true });
+
+    const again = await freshenLedger({ worktreeRoot: root, observeEffects: true });
+
+    assert.equal(again.ingested, 0);
+    assert.equal(again.changed, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

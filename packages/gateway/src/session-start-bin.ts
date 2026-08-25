@@ -208,7 +208,7 @@ export async function main(): Promise<number> {
     // recap that omits the previous session's last turn is the failure that matters most. A
     // `SessionStart` hook is also the one moment where the previous session has certainly
     // stopped, so the journal it left behind is complete rather than mid-turn.
-    await freshenLedger({ worktreeRoot, ledgerPath: ledgerPathFor(worktreeRoot) });
+    await freshenLedger({ worktreeRoot, ledgerPath: ledgerPathFor(worktreeRoot), observeEffects: true });
 
     const result = recapRecentWork({
       worktreeRoot,

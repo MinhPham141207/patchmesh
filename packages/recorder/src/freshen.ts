@@ -32,6 +32,33 @@ export interface FreshenLedgerOptions {
   readonly journalPath?: string | undefined;
   readonly snapshotPath?: string | undefined;
   readonly maxEntries?: number | undefined;
+  /**
+   * Also walk the filesystem for what changed, not just drain the calls. Defaults to false.
+   *
+   * Draining is cheap - 4-6ms warm - because it moves lines from one file into a database.
+   * Observing effects is not: it stats and content-hashes every tracked file and shells out to
+   * `git check-ignore`, measured at **681-949ms on this repository even when it finds nothing
+   * to record**, and a CPU profile of it is 54% idle, so it is I/O bound and will not optimise
+   * away. It scales with the size of the checkout, not with how much happened.
+   *
+   * That is the same wall `effect-detection-cannot-run-on-the-hook-hot-path` hit one level
+   * down, and the answer is the same: it belongs on a session boundary, not a per-call path.
+   *
+   * So the split is by caller, and it is a real trade rather than a tuning knob:
+   *
+   * - **The MCP tools leave it off.** An agent is told to call `patchmesh_recent_activity`
+   *   before every edit, and PM-13's finding is that friction is what keeps the pull surface
+   *   at one call per 183. Making every one of those calls a second slower to fold in a
+   *   filesystem walk would buy freshness with the adoption the freshness is for. Those tools
+   *   still get current *calls*, and `overlapping_work` reads the journal directly for the
+   *   in-flight contention that actually changes what an agent does next.
+   * - **The CLI reports and the `SessionStart` hook turn it on.** A person running
+   *   `patchmesh overlaps` is asking a question once and can afford the walk; `SessionStart`
+   *   pays it once per session, at the moment the previous session's changes matter most.
+   * - **`Stop` remains the unthrottled path**, and is what binds observed changes to the call
+   *   windows that caused them.
+   */
+  readonly observeEffects?: boolean | undefined;
 }
 
 const EMPTY: FreshenResult = { outcome: "empty", pending: 0, ingested: 0, changed: 0, reason: null };
@@ -110,6 +137,13 @@ export async function freshenLedger(options: FreshenLedgerOptions): Promise<Fres
     // Nothing was claimed: another drain owns the journal right now. Returning here keeps a
     // read that lost the race from walking the filesystem for effects it cannot attribute.
     if (result.ledgerPath === null) return { ...EMPTY, pending };
+
+    // No new calls means no new call windows to bind changes to, so the walk could only
+    // produce unattributed observations at full price. The live journal always holds at least
+    // the in-flight call that is asking, so without this a repeated read pays the walk forever.
+    if (options.observeEffects !== true || ingested === 0) {
+      return { outcome: "drained", pending, ingested, changed: 0, reason: null };
+    }
 
     // Observed after the journal is safely drained, for the same reason `ingest-bin` does it
     // in this order: a failure here leaves the recorded calls in the ledger rather than

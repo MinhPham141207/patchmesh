@@ -107,6 +107,41 @@ waiting, 2,715–4,582ms. The `SessionStart` binary ran in **683ms** with a near
 the normal case, because `Stop` has usually already drained it. When `Stop` did not run,
 freshen is the repair.
 
+## The cost that had to be gated, found by measuring the MCP path
+
+The first version of this ran the effects walk on every freshen, and that was a **10x
+regression on the surface agents use**. Measured over stdio against the live server:
+`patchmesh_recap` 122ms warm before, **1,674ms** after; `patchmesh_recent_activity` 33ms
+before, **1,333ms** after.
+
+`recordTurnEffects` costs **681-949ms on this repository even when it drains nothing and finds
+nothing**, because it stats and content-hashes every tracked file and shells out to
+`git check-ignore`. A CPU profile of it is **54% idle** - it is I/O bound, scales with the size
+of the checkout rather than with how much happened, and will not optimise away. This is the
+same wall `effect-detection-cannot-run-on-the-hook-hot-path` hit one level down.
+
+So observation is opt-in, and the split is a real trade rather than a tuning knob:
+
+- **The MCP tools leave it off.** An agent is told to call `patchmesh_recent_activity` before
+  every edit, and PM-13's finding is that friction is exactly what keeps the pull surface at
+  one call per 183. Buying freshness with a second per call would spend the adoption the
+  freshness is for. Those tools still get current *calls*, and `overlapping_work` reads the
+  journal directly for the in-flight contention that actually changes what an agent does next.
+- **The CLI reports and `SessionStart` turn it on.** A person running `patchmesh overlaps` asks
+  once and can afford the walk; `SessionStart` pays it once, when the previous session's
+  changes matter most.
+- **`Stop` remains the unthrottled path**, and is what binds observed changes to the call
+  windows that caused them.
+
+It is additionally gated on the drain having ingested something. The live journal always holds
+at least the in-flight call that is doing the asking, so `pending > 0` is not a sufficient gate
+on its own - and no new calls means no new call windows to bind changes to, so the walk could
+only produce unattributed observations at full price.
+
+After gating, over stdio: `initialize` 498ms, `recap` 436ms then **63ms warm**,
+`recent_activity` **28ms** then **7ms warm**, `overlapping_work` **29ms**, `active_work` 47ms.
+Better than the pre-change baseline, with fresher answers.
+
 ## What it does not fix
 
 Reads are still invisible (PM-08), so freshening makes the *write* side current and leaves the
