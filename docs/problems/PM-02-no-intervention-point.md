@@ -1,11 +1,33 @@
 # PM-02 — Detection is post-hoc; nothing intervenes
 
-- **Status:** `open` — option A now delivers to the agent, but one hook later than intended:
-  via `PostToolUse` `additionalContext`, not `PreToolUse` before the write. The `PreToolUse`
-  channel stays built and wired for when the host gains a non-blocking way to reach the model
-  there; today it reaches only the user's transcript.
+- **Status:** `resolved` — the recent-write predicate shipped 2026-08-25 and the advisory
+  finally fires on real contention; see the resolution below.
 - **Severity:** high
 - **Depends on:** PM-01
+
+## Resolved (2026-08-25) — the recent-write predicate replaces the in-flight window
+
+The in-flight-window predicate did not merely underperform; it was measured dead. Over a full
+session of genuine two-agent contention it fired **zero times** — a call's `Pre`→`Post` window
+is about 1.9 seconds, so the old predicate required another agent to be inside an Edit on the
+exact same path at that instant ([spec](../superpowers/specs/2026-08-25-coordination-realness-design.md)).
+
+All three advisory stages now share one replacement predicate: *a different session wrote this
+path within the recent-write window (`RECENT_WRITE_MINUTES`, 30 — the same calibration as
+`IDLE_GAP_MINUTES`, both facing the measured 0.3–15.6 min contention silences), and this session
+has not been told yet.* The reader lives in `packages/recorder/src/recent-writes.ts`; a
+per-session delivery cursor (`.patchmesh/cursors/<agentId>.json`) delivers each fact exactly
+once — first contact delivers the current window then arms, so a session whose first Edit lands
+on a path written minutes ago hears about it without being flooded afterwards. Messages stay
+observed facts: "another worker wrote `<path>` N minutes ago."
+
+The acceptance test holds the whole thing to its promise:
+`packages/recorder/test/contention-acceptance.test.ts` stages real contention — two worktrees,
+two scripted sessions, one shared file — and asserts B's Edit receives exactly one `PreToolUse`
+warning naming A's write, that the cursor suppresses repeats, and that recording is unaffected.
+
+Known limit, unchanged: cursor and journal are per-worktree, so live advisories cover sessions
+inside one worktree; cross-worktree contention remains visible only through the shared ledger.
 
 ## Before the write, at last (2026-08-24) — `UserPromptSubmit` turn-start advisory
 

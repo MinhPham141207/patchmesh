@@ -155,6 +155,26 @@ Four packages in parallel, partitioned by directory so no two workers shared a f
 - Option B (blocking) stays out. It needs a measured false-positive rate in the wild, and
   `adoption.ts` now shows how little the surface is exercised.
 
+## Wave 2b — coordination realness — **DONE 2026-08-25**
+
+Six slices from [the coordination-realness spec](../superpowers/specs/2026-08-25-coordination-realness-design.md),
+each shipped green on main. The motivating measurement: the in-flight-window advisory predicate
+fired **zero times** over a full session of genuine two-agent contention, so P1 replaced it with
+a recent-write predicate plus a per-session delivery cursor.
+
+| Slice | Commit |
+| --- | --- |
+| P5 — recap liveness | `a7e2b63` Recap reports task liveness instead of closing open tasks |
+| P1 — recent-write reader + delivery cursor | `f03fe67` Add the recent-write reader and per-session delivery cursor |
+| P1 — all three advisory stages rewired | `78f8db3` Advisories fire on recent cross-agent writes, delivered once per session (acceptance: `4bded7e`) |
+| P2/P4 — opaque in-flight calls counted, not guessed | `8839971` Overlap answers count opaque in-flight calls instead of ignoring them |
+| P3 — declared-path binding + attribution labels | `1d02a38` Bind changes by declared path first, and label every change's attribution basis |
+| P6 — provenance follows the host | `2534429` Recorder provenance resolves its host instead of hardcoding Claude Code |
+
+PM-02 closes as resolved on the strength of the acceptance test
+(`packages/recorder/test/contention-acceptance.test.ts`); PM-08 stays partial with its accepted
+scope now live.
+
 ## Wave 3 — make detectors produce findings
 
 - **[PM-05](PM-05-thirteen-event-types-never-produced.md) A** — analyzer-derived symbol and

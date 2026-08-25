@@ -1,7 +1,22 @@
 # PM-08 — Most recorded traffic is opaque
 
-- **Status:** `partial` — option B shipped 2026-08-23
+- **Status:** `partial` — option B shipped 2026-08-23; the accepted scope shipped on the live
+  surfaces 2026-08-25 (see below)
 - **Severity:** medium
+
+## Accepted scope shipped (2026-08-25) — counted, never guessed
+
+The coordination-realness wave landed this problem's accepted boundary on the live surfaces
+rather than only in coverage accounting. Opaque calls in flight are now **counted** in overlap
+answers (`OverlapResult.liveOpaqueCalls`, `packages/query/src/overlap.ts`) and rendered as a
+number — "(N shell call(s) in flight nearby - which files they touch is unknown.)" — so unknown
+write activity nearby is no longer a silence. No path is ever inferred for them; the recognise-
+never-guess rule stands, and the advisories likewise match Edit/Write declared paths only.
+
+Named as future work, deliberately not built: a live `fs.watch` spike that would watch contested
+paths directly instead of inferring from journal windows. Its recorded risk is Windows file-
+notification timing — coalesced and buffered change events make the moment a write is observed
+unreliable enough that mistimed attribution would be worse than honest opacity.
 
 ## Resolution (2026-08-23) — option B shipped, and it bought less than expected
 
