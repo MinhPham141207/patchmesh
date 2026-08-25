@@ -168,6 +168,24 @@ test("an old Node is a failure, because the event store cannot open at all", () 
   }
 });
 
+test("the report names the host events are stamped with", () => {
+  const previous = process.env.PATCHMESH_HOST;
+  try {
+    delete process.env.PATCHMESH_HOST;
+    const report = diagnose({ worktreeRoot: null });
+    assert.equal(statusOf(report, "host"), "ok");
+    assert.equal(detailOf(report, "host"), "claude-code");
+
+    process.env.PATCHMESH_HOST = "opencode";
+    const overridden = diagnose({ worktreeRoot: null });
+    assert.equal(detailOf(overridden, "host"), "opencode");
+    assert.match(renderDoctor(overridden, false), /host: opencode/u);
+  } finally {
+    if (previous === undefined) delete process.env.PATCHMESH_HOST;
+    else process.env.PATCHMESH_HOST = previous;
+  }
+});
+
 test("outside a git repository the report says so instead of guessing", () => {
   const report = diagnose({ worktreeRoot: null });
   assert.equal(report.healthy, false);

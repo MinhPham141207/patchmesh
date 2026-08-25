@@ -42,6 +42,7 @@ export {
 } from "./journal.js";
 export type { JournalEntry } from "./journal.js";
 export { redactHookPayload, redactText } from "./redact.js";
+export { resolveSourceHost, sourceIdForHost } from "./source.js";
 export {
   LEDGER_DIRECTORY,
   LEDGER_FILENAME,

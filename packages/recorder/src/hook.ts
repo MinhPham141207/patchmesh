@@ -10,6 +10,7 @@ import {
   deterministicUuid,
 } from "./identity.js";
 import { normalizeTool } from "./tool-mapping.js";
+import { resolveSourceHost, sourceIdForHost } from "./source.js";
 
 /** The subset of a Claude Code `PostToolUse` hook payload the recorder relies on. */
 export interface HookPayload {
@@ -157,7 +158,7 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
 
   const source: Source = {
     kind: "gateway",
-    sourceId: "source_claude_code_hook",
+    sourceId: sourceIdForHost(resolveSourceHost()),
     // Stable per session so one agent session is one producer stream.
     instanceId: deterministicUuid("patchmesh:recorder-instance", sessionId),
   };

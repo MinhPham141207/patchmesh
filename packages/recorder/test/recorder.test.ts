@@ -20,7 +20,20 @@ import {
   recordHook,
   recordTurnEffects,
   resolveRepositoryIdentity,
+  resolveSourceHost,
 } from "../src/index.js";
+
+function withPatchMeshHost<T>(value: string | undefined, run: () => T): T {
+  const previous = process.env.PATCHMESH_HOST;
+  try {
+    if (value === undefined) delete process.env.PATCHMESH_HOST;
+    else process.env.PATCHMESH_HOST = value;
+    return run();
+  } finally {
+    if (previous === undefined) delete process.env.PATCHMESH_HOST;
+    else process.env.PATCHMESH_HOST = previous;
+  }
+}
 
 function temporaryWorktree(): string {
   const root = mkdtempSync(join(tmpdir(), "patchmesh-recorder-"));
@@ -90,6 +103,36 @@ test("every recorded event passes protocol validation for each supported host to
       }
       assert.deepEqual(validateEventSet([requested, completed]), [], `${toolName} failed set validation`);
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("provenance follows PATCHMESH_HOST, defaults to claude-code", () => {
+  withPatchMeshHost("opencode", () => assert.equal(resolveSourceHost(), "opencode"));
+  withPatchMeshHost(undefined, () => assert.equal(resolveSourceHost(), "claude-code"));
+});
+
+test("an invalid PATCHMESH_HOST falls back rather than minting a malformed source id", () => {
+  withPatchMeshHost("Open Code!", () => assert.equal(resolveSourceHost(), "claude-code"));
+  withPatchMeshHost("-leading", () => assert.equal(resolveSourceHost(), "claude-code"));
+  withPatchMeshHost("a".repeat(33), () => assert.equal(resolveSourceHost(), "claude-code"));
+});
+
+test("buildHookEvents stamps source_<host>_hook", () => {
+  const root = temporaryWorktree();
+  try {
+    const pair = withPatchMeshHost("opencode", () =>
+      buildHookEvents({ payload: hookPayload({ tool_name: "Edit", tool_input: { file_path: "src/a.ts" } }), worktreeRoot: root }),
+    );
+    // The default must stay byte-identical to what every existing ledger already carries.
+    assert.equal(pair.requested.source.sourceId, "source_opencode_hook");
+    assert.equal(
+      withPatchMeshHost(undefined, () =>
+        buildHookEvents({ payload: hookPayload({ tool_name: "Edit", tool_input: { file_path: "src/a.ts" } }), worktreeRoot: root }),
+      ).requested.source.sourceId,
+      "source_claude_code_hook",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

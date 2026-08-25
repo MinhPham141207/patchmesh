@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { LEDGER_DIRECTORY, ledgerPathFor, ledgerRootFor } from "patchmesh-recorder";
+import { LEDGER_DIRECTORY, ledgerPathFor, ledgerRootFor, resolveSourceHost } from "patchmesh-recorder";
 import { SqliteEventStore } from "patchmesh-storage";
 import { HOOK_EVENTS, ownsCommand, resolveHookTarget } from "./init.js";
 
@@ -333,7 +333,12 @@ function checkJournal(worktreeRoot: string, now: Date): readonly DoctorCheck[] {
 
 export function diagnose(options: DoctorOptions): DoctorReport {
   const now = (options.now ?? (() => new Date()))();
-  const checks: DoctorCheck[] = [checkNode(options.nodeVersion ?? process.version)];
+  const checks: DoctorCheck[] = [
+    checkNode(options.nodeVersion ?? process.version),
+    // Named even when everything else is broken: provenance is stamped per event, so a user
+    // reading the ledger needs to know which host this report's install is.
+    { name: "host", status: "ok", detail: resolveSourceHost() },
+  ];
 
   if (options.worktreeRoot === null) {
     checks.push({
