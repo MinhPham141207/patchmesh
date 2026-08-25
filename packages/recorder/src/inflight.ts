@@ -26,6 +26,14 @@ export interface InFlightCall {
   readonly agentId: string | null;
   readonly hostToolName: string;
   readonly operation: string | null;
+  /**
+   * The file the call names, when its tool input says so directly.
+   *
+   * Read from `tool_input.file_path` rather than reused from `operation`, which mixes command
+   * text and paths: an in-flight `Read` names a file it is not contending over, and a caller
+   * can only tell "not a write" from "unknown" if this is a separate claim.
+   */
+  readonly filePath: string | null;
   /** How long it has been running, in milliseconds, at the time of the read. */
   readonly runningForMs: number;
 }
@@ -109,6 +117,7 @@ export function readInFlightCalls(options: ReadInFlightOptions): readonly InFlig
         agentId: sessionId === null ? null : agentIdForSession(sessionId),
         hostToolName: stringField(payload, "tool_name") ?? "unknown",
         operation: stringField(toolInput, "command") ?? stringField(toolInput, "file_path"),
+        filePath: stringField(toolInput, "file_path"),
         runningForMs: Math.max(now - new Date(entry.at).getTime(), 0),
       });
     }

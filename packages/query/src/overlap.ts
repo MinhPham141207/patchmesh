@@ -143,6 +143,18 @@ export interface OverlapResult {
    * refuses to make.
    */
   readonly live: readonly LiveContention[];
+  /**
+   * In-flight calls that name no file at all, counted rather than dropped.
+   *
+   * Most real calls are shell commands whose command text is not a path claim, so the largest
+   * share of concurrent work used to be the part this answer stayed silent about -- and a
+   * reader could take "no files open" to mean "nobody working". Counting them says otherwise
+   * without guessing: recovering a path from command text is exactly the inference this
+   * project bans, so the number is all an honest answer can give. A call that names its file
+   * but is not a write -- an in-flight `Read`, say -- is neither counted here nor reported as
+   * holding anything: it names its file and it is not a write contention.
+   */
+  readonly liveOpaqueCalls: number;
   readonly truncated: number;
   readonly logicalPath: string | null;
   /** Files observed changing in the window at all, so "none" can be told from "nothing seen". */
@@ -180,27 +192,38 @@ function payloadOf(event: ProtocolEvent): Record<string, unknown> {
  * throws would take down the historical answer beside it, which is the more established of the
  * two.
  *
- * Only calls whose host tool names a path are considered. ~90% of recorded `Bash` calls carry
+ * Only calls whose host tool names a path become `live`. ~90% of recorded `Bash` calls carry
  * no path, and recovering one from command text is the inference this project bans, so an
- * opaque call is left out rather than reported against a file it may not touch.
+ * opaque call is left out of that list rather than reported against a file it may not touch --
+ * but it is counted in the returned `opaque`, because invisible is not the same as absent. A
+ * call with a known file that simply is not a write (an in-flight `Read`) is neither: it does
+ * not hold the file, and its file being known means it is not opaque, so it stays uncounted.
  */
 function liveContentionFrom(
   options: OverlapOptions,
   now: Date,
   changedByWorker: ReadonlyMap<string, ReadonlySet<string>>,
-): readonly LiveContention[] {
+): { live: readonly LiveContention[]; opaque: number } {
   let inFlight;
   try {
     inFlight = readInFlightCalls({ worktreeRoot: options.worktreeRoot, now: () => now });
   } catch {
-    return [];
+    return { live: [], opaque: 0 };
   }
 
   const live: LiveContention[] = [];
+  let opaque = 0;
   const seen = new Set<string>();
   for (const call of inFlight) {
-    const path = call.operation;
-    if (path === null || !PATHED_HOST_TOOLS.has(call.hostToolName)) continue;
+    // Opaque is precise: a call whose file is unknown because nothing in its input named one.
+    if (call.filePath === null) {
+      opaque += 1;
+      continue;
+    }
+    // A known file held by a tool that cannot write it -- a Read in flight -- is neither a
+    // contention nor an unknown: it is irrelevant to this answer.
+    if (!PATHED_HOST_TOOLS.has(call.hostToolName)) continue;
+    const path = call.filePath;
     if (seen.has(path)) continue;
     seen.add(path);
 
@@ -219,7 +242,7 @@ function liveContentionFrom(
       alsoChangedRecently: others,
     });
   }
-  return live;
+  return { live, opaque };
 }
 
 /**
@@ -242,6 +265,7 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
     return {
       overlaps: [],
       live: [],
+      liveOpaqueCalls: 0,
       truncated: 0,
       logicalPath: null,
       filesObserved: 0,
@@ -341,13 +365,16 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
       changedByWorker.set(task.agentId, paths);
     }
   }
-  const live = liveContentionFrom(options, now, changedByWorker).filter(
+  const { live: liveAll, opaque } = liveContentionFrom(options, now, changedByWorker);
+  const live = liveAll.filter(
     (item) => requestedPath === null || item.logicalPath === requestedPath,
   );
-
+  // Opaque calls carry no path, so a path-scoped question cannot exclude them and they are
+  // counted whatever the scope.
   return {
     overlaps,
     live,
+    liveOpaqueCalls: opaque,
     truncated: all.length - overlaps.length,
     logicalPath: requestedPath,
     filesObserved: byResource.size,
@@ -522,21 +549,30 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
     ...result.live.flatMap((item) => (item.agentId === null ? [] : [item.agentId])),
     ...result.live.flatMap((item) => [...item.alsoChangedRecently]),
   ]);
+  const liveLines: string[] = [];
+  if (result.live.length > 0) {
+    liveLines.push(`${result.live.length} file(s) are open right now, by a worker that has not finished:`);
+    liveLines.push(
+      ...result.live.map((item) => {
+        const who = item.agentId === null ? "an unidentified worker" : liveShort(item.agentId);
+        const seconds = Math.max(Math.round(item.runningForMs / 1000), 0);
+        const alsoLine =
+          item.alsoChangedRecently.length === 0
+            ? ""
+            : `\n    also changed in this window by: ${item.alsoChangedRecently.map(liveShort).join(", ")}`;
+        return `- \`${item.logicalPath}\` — ${who} (${item.hostToolName}, running ${seconds}s)${alsoLine}`;
+      }),
+    );
+  }
+  // Appended whenever there are any, including when no pathed call made the list above: a
+  // shell-only moment would otherwise render as "nothing open", which it is not.
+  if (result.liveOpaqueCalls > 0) {
+    liveLines.push(`(${result.liveOpaqueCalls} shell call(s) in flight nearby - which files they touch is unknown.)`);
+  }
   const liveSection =
-    result.live.length === 0
+    liveLines.length === 0
       ? ""
-      : `${result.live.length} file(s) are open right now, by a worker that has not finished:\n`
-        + result.live
-          .map((item) => {
-            const who = item.agentId === null ? "an unidentified worker" : liveShort(item.agentId);
-            const seconds = Math.max(Math.round(item.runningForMs / 1000), 0);
-            const alsoLine =
-              item.alsoChangedRecently.length === 0
-                ? ""
-                : `\n    also changed in this window by: ${item.alsoChangedRecently.map(liveShort).join(", ")}`;
-            return `- \`${item.logicalPath}\` — ${who} (${item.hostToolName}, running ${seconds}s)${alsoLine}`;
-          })
-          .join("\n")
+      : liveLines.join("\n")
         + "\nThis is read from the journal, not the ledger, so it is what is happening rather than "
         + "what happened. A call in flight is not a write: it may not change this file at all.\n\n";
 

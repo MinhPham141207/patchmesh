@@ -30,6 +30,9 @@ test("a start with no completion is running; one with a completion is not", () =
     assert.equal(live.length, 1);
     assert.equal(live[0]!.hostToolName, "Bash");
     assert.equal(live[0]!.operation, "pnpm check");
+    // Taken from tool_input.file_path directly, never from operation: command text is not a
+    // file claim, so a Bash call has none even when its command mentions a path.
+    assert.equal(live[0]!.filePath, null);
     // The host's own tool_use_id pairs them; nothing is inferred from ordering or timing.
     assert.equal(live[0]!.runningForMs, 20_000);
     assert.ok(live[0]!.agentId?.startsWith("agent_"));
