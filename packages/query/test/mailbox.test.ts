@@ -3,11 +3,16 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { AgentMessageSentEvent, ProtocolEvent } from "patchmesh-protocol";
+import type {
+  AgentMessageDeliveredEvent,
+  AgentMessageSentEvent,
+  ProtocolEvent,
+} from "patchmesh-protocol";
 import { clearEventCache, SqliteEventStore } from "patchmesh-storage";
 import {
   acknowledgeMessage,
   MAILBOX_DEFAULT_TTL_DAYS,
+  markDelivered,
   readInbox,
   sendMail,
   undeliveredCount,
@@ -657,6 +662,79 @@ test("undeliveredCount counts unexpired messages with no delivery of any recipie
     assert.equal(undeliveredCount(ledgerPath, now), 1);
   } finally {
     clearEventCache();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("markDelivered appends one delivered event per message attributed to the recipient", () => {
+  const { root, ledgerPath } = workspace();
+  try {
+    const first = "msg_" + "b1".repeat(16);
+    const second = "msg_" + "b2".repeat(16);
+    markDelivered({
+      worktreeRoot: root,
+      ledgerPath,
+      byAgentId: "agent_bob",
+      channel: "mcp_pull",
+      messageIds: [first, second],
+      now,
+    });
+    clearEventCache();
+    const store = SqliteEventStore.open(ledgerPath);
+    try {
+      const events = store.read({
+        eventTypes: ["agent.message.delivered"],
+      }) as readonly AgentMessageDeliveredEvent[];
+      assert.equal(events.length, 2, "exactly one delivered event per returned row");
+      assert.deepEqual(
+        events.map((event) => event.payload.messageId).sort(),
+        [first, second],
+      );
+      for (const event of events) {
+        assert.equal(event.agentId, "agent_bob");
+        assert.equal(event.payload.channel, "mcp_pull");
+      }
+    } finally {
+      store.close();
+    }
+  } finally {
+    clearEventCache();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("markDelivered validates recipient and ids, and no-ops on an empty answer", () => {
+  const { root, ledgerPath } = workspace();
+  try {
+    usageError(() =>
+      markDelivered({
+        worktreeRoot: root,
+        ledgerPath,
+        byAgentId: "bob",
+        channel: "mcp_pull",
+        messageIds: ["msg_" + "c1".repeat(16)],
+        now,
+      }));
+    usageError(() =>
+      markDelivered({
+        worktreeRoot: root,
+        ledgerPath,
+        byAgentId: "agent_bob",
+        channel: "mcp_pull",
+        messageIds: ["not-a-message-id"],
+        now,
+      }));
+    // A broadcast-only pull returns rows but has nobody to attribute delivery to; an empty
+    // id list must append nothing rather than minting a pointless identity resolution.
+    markDelivered({
+      worktreeRoot: root,
+      ledgerPath,
+      byAgentId: "agent_bob",
+      channel: "session_start",
+      messageIds: [],
+      now,
+    });
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

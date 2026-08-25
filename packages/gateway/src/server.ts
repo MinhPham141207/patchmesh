@@ -2,7 +2,19 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { ActiveWork, ActiveWorkOptions, OverlapOptions, OverlapResult, RecapOptions, RecapResult } from "patchmesh-query";
+import type {
+  ActiveWork,
+  ActiveWorkOptions,
+  AcknowledgeMessageOptions,
+  InboxOptions,
+  InboxResult,
+  MarkDeliveredOptions,
+  OverlapOptions,
+  OverlapResult,
+  RecapOptions,
+  RecapResult,
+  SendMailOptions,
+} from "patchmesh-query";
 import type { RecallOptions, RecallResult } from "./recall.js";
 
 export interface GatewayOptions {
@@ -58,6 +70,12 @@ let heavy:
       readonly renderRecap: (result: RecapResult, agent: string | undefined) => string;
       readonly readActiveWork: (options: ActiveWorkOptions) => ActiveWork;
       readonly renderActiveWork: (result: ActiveWork) => string;
+      readonly sendMail: (options: SendMailOptions) => { readonly messageId: string };
+      readonly readInbox: (options: InboxOptions) => InboxResult;
+      readonly markDelivered: (options: MarkDeliveredOptions) => void;
+      readonly acknowledgeMessage: (
+        options: AcknowledgeMessageOptions,
+      ) => { readonly ok: boolean; readonly reason?: string };
     }>
   | undefined;
 
@@ -79,6 +97,10 @@ function loadHeavy(): NonNullable<typeof heavy> {
     renderRecap: query.renderRecap,
     readActiveWork: query.readActiveWork,
     renderActiveWork: query.renderActiveWork,
+    sendMail: query.sendMail,
+    readInbox: query.readInbox,
+    markDelivered: query.markDelivered,
+    acknowledgeMessage: query.acknowledgeMessage,
   }));
   return heavy;
 }
@@ -294,5 +316,197 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
     },
   );
 
+  server.registerTool(
+    "patchmesh_send",
+    {
+      title: "Send a mailbox message",
+      description:
+        "Send a message to another agent working in this repository, or broadcast one to all " +
+        "of them. Messages live in the PatchMesh ledger: the recipient sees them on session " +
+        "start or via `patchmesh_inbox`, they expire after `expiresAt` (7 days by default), " +
+        "and they can be answered with `patchmesh_ack`. Validation rejects rather than clamps " +
+        "- an error result here means your mail was **not** sent, so fix the named field and " +
+        "resend. The server cannot know who is calling, so `from` is required.",
+      inputSchema: {
+        to: z
+          .string()
+          .describe('Recipient: an `agent_<id>`, or the literal `broadcast` for every agent.'),
+        kind: z
+          .enum(["notice", "handoff", "question", "claim"])
+          .describe("What the message is: a notice, a handoff, a question, or a claim of ownership."),
+        subject: z
+          .string()
+          .describe("Subject line. Required, trimmed non-empty, at most 200 characters."),
+        body: z.string().describe("Message body, plain text, at most 2048 characters."),
+        refs: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Repository-relative paths this message is about; at most 20, duplicates rejected. " +
+              "Absolute paths and traversal are rejected.",
+          ),
+        expiresAt: z
+          .string()
+          .optional()
+          .describe("ISO timestamp after which the message expires. Must be in the future; defaults to now plus 7 days."),
+        from: z
+          .string()
+          .describe("Your agent id as the session-start context named it."),
+      },
+    },
+    async ({ to, kind, subject, body, refs, expiresAt, from }) => {
+      try {
+        const modules = await loadHeavy();
+        const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        const { messageId } = modules.sendMail({
+          worktreeRoot: options.worktreeRoot,
+          ledgerPath,
+          from,
+          to,
+          kind,
+          subject,
+          body,
+          refs,
+          expiresAt,
+        });
+        return { content: [{ type: "text" as const, text: `Message ${messageId} recorded in the PatchMesh ledger.` }] };
+      } catch (error) {
+        // A caller must learn its mail was not sent: validation failures come back as error
+        // results naming the rejected field, never as an advisory "no ledger" notice.
+        return errorResult(`Message not sent: ${failureReason(error)}`);
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_inbox",
+    {
+      title: "Read your mailbox",
+      description:
+        "Read mail addressed to you - direct messages and broadcasts - from other agents in " +
+        "this repository. Newest first, capped at 20 with a withheld count; expired mail is " +
+        "hidden. Every returned row is marked delivered to you (`mcp_pull`), so the next pull " +
+        "returns only new mail - save anything you still need. Omit `agent` to see broadcasts " +
+        "only. Answer a message with `patchmesh_ack`.",
+      inputSchema: {
+        agent: z
+          .string()
+          .optional()
+          .describe(
+            "Your agent id as the session-start context named it. Omit for broadcasts-only " +
+              "audience; delivery cannot be attributed without it.",
+          ),
+      },
+    },
+    async ({ agent }) => {
+      try {
+        const modules = await loadHeavy();
+        const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        await modules.freshenLedger({ worktreeRoot: options.worktreeRoot, ledgerPath });
+        // No agent means broadcast-only audience: readInbox matches direct mail by equality.
+        const result = modules.readInbox({
+          worktreeRoot: options.worktreeRoot,
+          ledgerPath,
+          agent: agent ?? "",
+        });
+        if (agent !== undefined && result.rows.length > 0) {
+          try {
+            modules.markDelivered({
+              worktreeRoot: options.worktreeRoot,
+              ledgerPath,
+              byAgentId: agent,
+              channel: "mcp_pull",
+              messageIds: result.rows.map((row) => row.messageId),
+            });
+          } catch {
+            // Mark-after-answer is at-least-once: a failed mark redelivers next pull, which
+            // beats losing mail, so the built answer returns regardless.
+          }
+        }
+        return { content: [{ type: "text" as const, text: renderInbox(result) }] };
+      } catch (error) {
+        // Advisory tools fail soft. An inbox that cannot answer must not become an error the
+        // calling agent has to reason about - it just means it learned nothing this time.
+        return errorResult(`No PatchMesh ledger available (${failureReason(error)}).`, false);
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_ack",
+    {
+      title: "Acknowledge a message",
+      description:
+        "Tell the sender what you did about a mailbox message: `read` (you saw it - having " +
+        "seen a message is not agreeing to it), `accepted`, or `declined`. The message must " +
+        "exist and be unexpired; acknowledging again appends another event rather than " +
+        "updating anything. The server cannot know who is calling, so `from` is required.",
+      inputSchema: {
+        messageId: z
+          .string()
+          .describe("The `msg_` id from the inbox row you are answering."),
+        disposition: z
+          .enum(["read", "accepted", "declined"])
+          .describe("`read` if you only saw it; `accepted` or `declined` for a handoff or request."),
+        note: z.string().optional().describe("Optional note to the sender, at most 512 characters."),
+        from: z
+          .string()
+          .describe("Your agent id as the session-start context named it."),
+      },
+    },
+    async ({ messageId, disposition, note, from }) => {
+      try {
+        const modules = await loadHeavy();
+        const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        await modules.freshenLedger({ worktreeRoot: options.worktreeRoot, ledgerPath });
+        const result = modules.acknowledgeMessage({
+          worktreeRoot: options.worktreeRoot,
+          ledgerPath,
+          byAgentId: from,
+          messageId,
+          disposition,
+          note,
+        });
+        if (!result.ok) {
+          // A refused ack must reach the caller as an error: acknowledging nothing would
+          // forge agreement out of a typo.
+          return errorResult(`Acknowledgement refused: ${result.reason}`);
+        }
+        return {
+          content: [{ type: "text" as const, text: `Message ${messageId} acknowledged (${disposition}).` }],
+        };
+      } catch (error) {
+        return errorResult(`Acknowledgement failed: ${failureReason(error)}`);
+      }
+    },
+  );
+
   return server;
+}
+
+function failureReason(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown failure";
+}
+
+function errorResult(text: string, isError = true): {
+  content: { type: "text"; text: string }[];
+  isError: boolean;
+} {
+  return { content: [{ type: "text", text }], isError };
+}
+
+function renderInbox(result: InboxResult): string {
+  const header =
+    `${result.rows.length} message(s); ${result.withheld} withheld, ${result.expired} expired.`;
+  if (result.rows.length === 0) return header;
+  const blocks = result.rows.map((row) => {
+    const lines = [
+      `${row.messageId} from ${row.fromAgentId ?? "unknown"} (${row.kind}, ${row.broadcast ? "broadcast" : "direct"})`,
+      `Subject: ${row.subject}`,
+      ...row.body.split("\n").map((line) => `  ${line}`),
+    ];
+    if (row.refs.length > 0) lines.push(`Refs: ${row.refs.join(", ")}`);
+    return lines.join("\n");
+  });
+  return [header, ...blocks].join("\n\n");
 }

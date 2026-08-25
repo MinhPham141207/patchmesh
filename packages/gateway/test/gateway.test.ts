@@ -162,6 +162,9 @@ test("the server answers over stdio as a real MCP client sees it", async () => {
         "patchmesh_active_work",
         "patchmesh_overlapping_work",
         "patchmesh_recap",
+        "patchmesh_send",
+        "patchmesh_inbox",
+        "patchmesh_ack",
       ]);
 
       const called = await client.callTool({

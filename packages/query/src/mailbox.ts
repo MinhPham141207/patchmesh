@@ -8,6 +8,7 @@ import type {
   AgentMessageSentEvent,
   EventId,
   MessageAudience,
+  MessageChannel,
   MessageId,
   ProtocolEvent,
   Source,
@@ -394,6 +395,57 @@ export function acknowledgeMessage(
   };
   appendEvents(options.ledgerPath, [event], options.append);
   return { ok: true };
+}
+
+export interface MarkDeliveredOptions {
+  readonly worktreeRoot: string;
+  readonly ledgerPath: string;
+  /** The recipient the delivery is attributed to; the envelope's own agentId. */
+  readonly byAgentId: string;
+  readonly channel: MessageChannel;
+  readonly messageIds: readonly string[];
+  readonly now?: (() => Date) | undefined;
+  readonly append?: ((events: readonly ProtocolEvent[]) => void) | undefined;
+}
+
+/**
+ * Mark-after-answer, shared by every pull surface (MCP inbox today, session-start delivery
+ * next): one `agent.message.delivered` per message per recipient, appended only after the
+ * answer was actually built. At-least-once by construction -- a crash between building and
+ * marking redelivers next pull, which the design accepts; silently losing mail does not.
+ * Callers that cannot attribute a recipient (a broadcast-only pull with no requesting agent)
+ * pass no ids at all rather than forging one.
+ */
+export function markDelivered(options: MarkDeliveredOptions): void {
+  if (!AGENT_ID_PATTERN.test(options.byAgentId)) {
+    throw new ReadServiceError("usage", "byAgentId must be an agent_<id>");
+  }
+  for (const messageId of options.messageIds) {
+    if (!MESSAGE_ID_PATTERN.test(messageId)) {
+      throw new ReadServiceError("usage", "each messageId must be msg_ followed by 32 hex characters");
+    }
+  }
+  if (options.messageIds.length === 0) return;
+
+  const nowMs = (options.now ?? (() => new Date()))().getTime();
+  const identity = resolveRepositoryIdentity(options.worktreeRoot);
+  const events: AgentMessageDeliveredEvent[] = options.messageIds.map((messageId) => ({
+    schemaVersion: 1,
+    eventId: `evt_${randomHex(32)}` as EventId,
+    eventType: "agent.message.delivered",
+    source: mailboxSource(identity.repositoryId),
+    timestamp: new Date(nowMs).toISOString(),
+    repositoryId: identity.repositoryId,
+    workspaceId: identity.workspaceId,
+    worktreeId: identity.worktreeId,
+    agentId: options.byAgentId as AgentId,
+    taskId: null,
+    correlationId: createCorrelationId(),
+    causationId: null,
+    sourceSequence: null,
+    payload: { messageId: messageId as MessageId, channel: options.channel },
+  }));
+  appendEvents(options.ledgerPath, events, options.append);
 }
 
 /**

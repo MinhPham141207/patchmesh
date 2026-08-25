@@ -56,6 +56,7 @@ export type { AdoptionMetrics, AdoptionOptions, ServerAdoption, ToolAdoption } f
 export {
   acknowledgeMessage,
   MAILBOX_DEFAULT_TTL_DAYS,
+  markDelivered,
   readInbox,
   sendMail,
   undeliveredCount,
@@ -65,6 +66,7 @@ export type {
   InboxOptions,
   InboxResult,
   InboxRow,
+  MarkDeliveredOptions,
   SendMailOptions,
 } from "./mailbox.js";
 // Exported for the recap tests that pin commit-window assignment; not part of a command surface.
