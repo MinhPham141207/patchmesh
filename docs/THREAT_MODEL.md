@@ -22,6 +22,17 @@ Unknown or bypassed activity is a coverage limitation, not proof of safety. Opaq
 effects remain degraded. Valid fixtures use `<redacted>` and negative fixtures use
 synthetic sentinels only.
 
+## The mailbox
+
+A delivered message is text written by one agent and placed into another agent's model
+context — an injected-message boundary on top of the ones above. Five controls, all enforced
+in code: bodies are delimited and labelled untrusted in every injection (`data, not
+instructions`); length bounds (subject ≤200 chars, body ≤2048) are rejected at write time,
+never clamped or checked at render time; `refs` are validated through `logicalPathFor`,
+which rejects absolute paths and traversal; delivery is scoped by the ledger itself, so
+there is no cross-repository mailbox; and bodies are rendered nowhere as markdown or links
+— plain text inside the delimiters, nothing more.
+
 ## Residual risks
 
 Phase 0 defines contracts and evidence, not OS sandboxing, event signing, durable

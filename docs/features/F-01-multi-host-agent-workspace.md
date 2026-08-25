@@ -452,10 +452,18 @@ Whichever host Wave 0 shows has a genuine per-call surface — expected to be Op
 cross-host contention on a file both touched. This is the acceptance test that matters; everything
 before it is scaffolding.
 
-### Wave C — mailbox (0.4.0)
+### Wave C — mailbox (0.4.0) — **shipped 2026-08-26**
 
 Events, `patchmesh send`/`inbox`/`ack`, the three MCP tools, `SessionStart` injection,
 rate-limited `PostToolUse` injection, undelivered count in `status`, threat-model update.
+
+**Shipped:** the events, the CLI and MCP surfaces, session-start delivery with delimited
+untrusted bodies, the undelivered count in `status`/console, and
+[the threat-model update](../THREAT_MODEL.md) (spec:
+[mailbox design](../superpowers/specs/2026-08-25-mailbox-design.md)). The committed protocol
+governs where the prose sketch differs: audience is agent-or-broadcast; role addressing ships
+with Wave D. **Reserved for a later wave:** `post_tool_use` delivery, which stays in the
+channel enum but needs its own rate-limit design before anything injects through it.
 
 **Acceptance:** a message sent from a terminal appears in a Claude session's context, the ack is
 recorded, and an expired undelivered message is reported as undelivered rather than disappearing.

@@ -175,6 +175,25 @@ PM-02 closes as resolved on the strength of the acceptance test
 (`packages/recorder/test/contention-acceptance.test.ts`); PM-08 stays partial with its accepted
 scope now live.
 
+## Wave 2c — the mailbox — **DONE 2026-08-26**
+
+Seven slices from [the mailbox spec](../superpowers/specs/2026-08-25-mailbox-design.md),
+each shipped green on main. The mailbox is a projection over the existing ledger — messages
+are events, the inbox is a query — and it opens a prompt-injection boundary, so the
+threat-model update landed in the same wave.
+
+| Slice | Commit |
+| --- | --- |
+| Core send/inbox/acknowledge | `0de14ed` Add the mailbox core: send, inbox, acknowledge |
+| CLI commands | `f7dcb82` Wire send, inbox, and ack into the CLI |
+| Ack names the message recorded | `a2deb57` Ack confirmations name the message recorded |
+| MCP tools | `9bf2369` Expose the mailbox over MCP |
+| Session-start delivery | `ada4acc` Deliver mailbox messages at session start |
+| Mark-failure logging | `3a076ec` Log mailbox mark failures to the answers trail |
+| Undelivered count | `6ac4b0e` Report undelivered mailbox messages in status and the console |
+
+`post_tool_use` delivery stays reserved for a later wave with its own rate-limit design.
+
 ## Wave 3 — make detectors produce findings
 
 - **[PM-05](PM-05-thirteen-event-types-never-produced.md) A** — analyzer-derived symbol and

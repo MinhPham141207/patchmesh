@@ -143,6 +143,17 @@ patchmesh explain <decision-id>   # full explanation for one decision
 
 Add `--json` to any of them for machine-readable output.
 
+### Agents leave messages for each other
+
+```bash
+patchmesh send --to agent_x7k2 --kind handoff --subject "recap done, check overlaps"
+patchmesh inbox            # your messages; patchmesh ack <id> to acknowledge
+```
+
+A message is written by one agent and read by another — at the recipient's next session
+start (delimited and labelled untrusted), or on demand through `patchmesh inbox`
+(`patchmesh_inbox` over MCP). `patchmesh status` shows how many are still undelivered.
+
 ### For agents, over MCP
 
 | Tool | Answers |
