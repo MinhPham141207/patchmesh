@@ -505,3 +505,98 @@ test("projection event types expose rebuildable Phase 2 view containers", () => 
   assert.equal(snapshot.findings.length, 1);
   assert.equal(snapshot.decisions.length, 1);
 });
+
+/**
+ * A ledger of `count` intercepted calls, each with its completion, plus an observed read bound
+ * to every fourth one so `toolCoverage` has evidence to gather.
+ *
+ * Deliberately uniform. This exists to measure how cost scales with size, so the events must
+ * differ only in identity and order.
+ */
+function syntheticCalls(count: number): readonly ProtocolEvent[] {
+  const events: ProtocolEvent[] = [];
+  const gateway = {
+    kind: "gateway",
+    sourceId: "source_gateway",
+    instanceId: "11111111-1111-4111-8111-111111111111",
+  } as const;
+  const id = (prefix: string, index: number): string => `${prefix}_${String(index).padStart(32, "0")}`;
+  let sequence = 0;
+
+  for (let index = 0; index < count; index += 1) {
+    const requestEventId = id("evt", index * 3) as EventId;
+    const completionEventId = id("evt", index * 3 + 1) as EventId;
+    const correlationId = id("corr", index) as ProtocolEvent["correlationId"];
+    const at = new Date(Date.parse("2026-08-08T00:00:00.000Z") + index * 1000).toISOString();
+
+    const request: ToolRequestedEvent = {
+      ...baseEvent(requestEventId, correlationId),
+      source: gateway,
+      sourceSequence: sequence,
+      timestamp: at,
+      eventType: "tool.requested",
+      payload: { toolName: "edit_file", operation: `edit src/f${index}.ts`, targetResourceId: resourceId, opaque: false },
+    };
+    sequence += 1;
+
+    const completion: ToolCompletedEvent = {
+      ...baseEvent(completionEventId, correlationId),
+      source: gateway,
+      sourceSequence: sequence,
+      timestamp: at,
+      causationId: requestEventId,
+      eventType: "tool.completed",
+      payload: { requestEventId, outcome: "succeeded", effectEventIds: [] },
+    };
+    sequence += 1;
+
+    events.push(request, completion);
+
+    if (index % 4 === 0) {
+      const read: FileReadEvent = {
+        ...baseEvent(id("evt", index * 3 + 2) as EventId, correlationId),
+        timestamp: at,
+        causationId: requestEventId,
+        eventType: "file.read",
+        payload: { resource, version: contentVersion(resourceId, `v${index}`, requestEventId), access: "read" },
+      };
+      events.push(read);
+    }
+  }
+  return events;
+}
+
+function bestOfThree(events: readonly ProtocolEvent[]): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const started = performance.now();
+    projectWorkGraph(events);
+    best = Math.min(best, performance.now() - started);
+  }
+  return best;
+}
+
+test("projection cost stays near-linear in the size of the ledger", () => {
+  // This guards a bug that was fixed once and came back. `toolCoverage` looked up the reads
+  // belonging to a call by filtering *every event in the ledger*, once per call, which made the
+  // whole projection O(requests x events); a second, smaller one re-sorted a node's entire
+  // evidence list on every touch, which is O(k^2 log k) on the nodes touched most.
+  //
+  // Measured on this repository's real 8,931-event ledger, cost rose 4x for every doubling:
+  // 227ms at 1,000 events, 902ms at 2,000, 3,365ms at 4,000, 14,047ms at 8,000. `patchmesh
+  // status` took 41 seconds. Every fixture-sized test passed throughout, which is exactly why
+  // it survived twice -- a few dozen events cannot tell the two curves apart.
+  //
+  // Asserted as a ratio rather than a wall-clock budget, so it means the same thing on a fast
+  // machine and a loaded one. Quadratic predicts ~16x for a 4x larger input; linear predicts 4x.
+  // The bound sits between them with room for noise, and each side takes the best of three.
+  const small = bestOfThree(syntheticCalls(400));
+  const large = bestOfThree(syntheticCalls(1600));
+
+  const ratio = large / Math.max(small, 1);
+  assert.ok(
+    ratio < 9,
+    `projecting 4x the events took ${ratio.toFixed(1)}x the time (${small.toFixed(0)}ms -> ${large.toFixed(0)}ms); `
+      + "linear is ~4x and quadratic is ~16x, so this reads as a scan-per-event that should be an index",
+  );
+});

@@ -61,8 +61,22 @@ function eventEvidence(node: GraphNode | GraphEdge): readonly EventId[] {
   return node.evidenceEventIds;
 }
 
+/**
+ * Accumulate evidence without sorting it, because the snapshot sorts it anyway.
+ *
+ * A hot node - the repository, an agent, a long-lived task - is touched by a large share of
+ * all events, so its evidence list grows with the ledger: measured at 569 entries after 2,000
+ * events and 1,639 after 8,931. Re-deriving `sortedUnique` on every touch therefore sorted a
+ * list of length k on each of k touches, which is O(k^2 log k) on the busiest nodes and was
+ * the second-largest cost in the projection after the coverage scan.
+ *
+ * Nothing needed it. `snapshotFromState` already applies `sortedUnique` to every node's and
+ * edge's evidence on the way out, and no node or edge id is derived from this array -- they
+ * come from the agent, task, resource or version they name. `coverageId` does hash evidence,
+ * and sorts its own input. So the intermediate order was never observable.
+ */
 function mergeEvidence<T extends GraphNode | GraphEdge>(value: T, eventIds: readonly EventId[]): T {
-  return { ...value, evidenceEventIds: sortedUnique([...eventEvidence(value), ...eventIds]) } as T;
+  return { ...value, evidenceEventIds: [...eventEvidence(value), ...eventIds] } as T;
 }
 
 function upsertNode(nodes: Map<string, GraphNode>, node: GraphNode): void {
