@@ -1,6 +1,7 @@
 import type { ProtocolEvent } from "patchmesh-protocol";
 import { ignoredByRepository } from "patchmesh-recorder";
 import { commitsWithin, describeWindow, readCommitsSince } from "./label.js";
+import { IDLE_GAP_MINUTES } from "./overlap.js";
 import { idShortener } from "./short-id.js";
 import { readWindowCached } from "patchmesh-storage";
 
@@ -30,6 +31,8 @@ export interface RecappedTask {
   readonly moreChanged: number;
   /** Subjects of commits that landed while this task was running. See `label.ts`. */
   readonly commits: readonly string[];
+  /** True while the task's last observed event is inside the idle gap. */
+  readonly active: boolean;
 }
 
 export interface RecapOptions {
@@ -49,6 +52,8 @@ export interface RecapResult {
   readonly unattributedCalls: number;
   /** The window this answer covers, in minutes, so the answer can say what it looked at. */
   readonly withinMinutes: number;
+  /** When the recap was taken; rendering needs it to say how long ago the last activity was. */
+  readonly nowIso?: string | undefined;
 }
 
 /** A recap looks further back than recall: its subject is the last session, not the last minutes. */
@@ -148,6 +153,9 @@ export function recapRecentWork(options: RecapOptions): RecapResult {
   // One git call for the whole window, not one per task.
   const commits = readCommitsSince(options.worktreeRoot, since);
 
+  // Same idle rule as overlap: a task whose last observed event is inside the gap may still
+  // be running, and closing its range would tell a resuming agent their current work is done.
+  const activeMs = IDLE_GAP_MINUTES * 60_000;
   const all: RecappedTask[] = [...tasks.entries()].map(([taskId, accumulator]) => {
     const paths = [...accumulator.changedPaths].filter((path) => !ignored.has(path)).sort();
     return {
@@ -160,12 +168,13 @@ export function recapRecentWork(options: RecapOptions): RecapResult {
       changedPaths: paths.slice(0, MAX_PATHS_PER_TASK),
       moreChanged: Math.max(paths.length - MAX_PATHS_PER_TASK, 0),
       commits: commitsWithin(commits, accumulator.startedAt, accumulator.endedAt),
+      active: now.getTime() - new Date(accumulator.endedAt).getTime() <= activeMs,
     };
   });
 
   all.sort((left, right) => right.endedAt.localeCompare(left.endedAt));
   const selected = all.slice(0, limit);
-  return { tasks: selected, truncated: all.length - selected.length, unattributedCalls, withinMinutes };
+  return { tasks: selected, truncated: all.length - selected.length, unattributedCalls, withinMinutes, nowIso: now.toISOString() };
 }
 
 /** Render a recap as the compact text an agent reads before deciding where to start. */
@@ -207,7 +216,13 @@ export function renderRecap(result: RecapResult, agent: string | undefined): str
     // "committed", not "did": the commit landed while this task was running, which is an
     // observation about timing rather than a statement of what the task was for.
     const committed = task.commits.length === 0 ? "" : `\n  committed: ${task.commits.join(" | ")}`;
-    return `- ${short(task.taskId)}\n  ${who}, ${task.startedAt} to ${task.endedAt}, ${task.calls} call(s)${failed}\n${files}${committed}`;
+    // An active task is not a closed range: it may still be running, and reading "X to Y"
+    // would tell the resuming agent their current work is finished.
+    const nowMs = result.nowIso === undefined ? Date.now() : Date.parse(result.nowIso);
+    const span = task.active
+      ? `${task.startedAt} · last activity ${Math.max(1, Math.round((nowMs - Date.parse(task.endedAt)) / 60_000))} min ago (may still be running)`
+      : `${task.startedAt} to ${task.endedAt}`;
+    return `- ${short(task.taskId)}\n  ${who}, ${span}, ${task.calls} call(s)${failed}\n${files}${committed}`;
   });
 
   const header = `${result.tasks.length} task(s) in ${scope} in the last ${window}, most recent first:`;

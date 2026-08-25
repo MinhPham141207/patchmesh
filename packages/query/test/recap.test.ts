@@ -113,6 +113,42 @@ test("tasks are listed newest first and the count is bounded", async () => {
   }
 });
 
+test("a task whose last activity is inside the idle gap is active, not finished", async () => {
+  const repo = repository();
+  try {
+    writeFileSync(join(repo.root, "seed.ts"), "seed\n", "utf8");
+    await baseline(repo);
+    await runTurn(repo, "2026-08-21T12:00:00.000Z", [{ tool_name: "Read", tool_input: { file_path: "seed.ts" }, tool_response: {} }], () => {});
+
+    // Ten minutes after the seed: inside `IDLE_GAP_MINUTES`, so the task may still be running.
+    const tenMinutesLater = () => new Date(Date.parse("2026-08-21T12:10:00.000Z"));
+    const result = recapRecentWork({ worktreeRoot: repo.root, ledgerPath: repo.ledgerPath, now: tenMinutesLater });
+    const task = result.tasks[0]!;
+    assert.equal(task.active, true);
+    assert.ok(task.endedAt !== undefined);
+
+    // The rendered line must not read as a closed range while the task may be running.
+    assert.match(renderRecap(result, undefined), /last activity \d+ min ago \(may still be running\)/u);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test("a task idle longer than IDLE_GAP_MINUTES renders closed", async () => {
+  const repo = repository();
+  try {
+    writeFileSync(join(repo.root, "seed.ts"), "seed\n", "utf8");
+    await baseline(repo);
+    await runTurn(repo, "2026-08-21T12:00:00.000Z", [{ tool_name: "Read", tool_input: { file_path: "seed.ts" }, tool_response: {} }], () => {});
+
+    // NOW is an hour after the seed: past the idle gap, so the task is closed.
+    const result = recapRecentWork({ worktreeRoot: repo.root, ledgerPath: repo.ledgerPath, now: NOW });
+    assert.equal(result.tasks.every((task) => task.active === false), true);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
 test("work with no task is counted and declared, never folded into someone else's", async () => {
   const repo = repository();
   try {
