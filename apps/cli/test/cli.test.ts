@@ -832,3 +832,101 @@ test("a first report on a fresh install drains the journal instead of saying not
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/** A checkout laid out like this monorepo, so `init` takes its `checkout` branch. */
+function monorepoCheckout(): string {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-checkout-"));
+  for (const owner of ["recorder", "gateway"]) {
+    mkdirSync(join(root, "packages", owner, "dist"), { recursive: true });
+  }
+  for (const [owner, binary] of [
+    ["recorder", "bin.js"], ["recorder", "ingest-bin.js"],
+    ["gateway", "session-start-bin.js"], ["gateway", "bin.js"],
+  ] as const) {
+    writeFileSync(join(root, "packages", owner, "dist", binary), "// stub\n", "utf8");
+  }
+  return root;
+}
+
+test("init wires a checkout against the repository, not against the machine it ran on", () => {
+  // `.claude/settings.local.json` and `.mcp.json` are both tracked in this repository, so an
+  // absolute path in either is per-developer churn that breaks for every other clone. The path
+  // had been deleted by hand twice and come back both times, because only the file was ever
+  // fixed and the writer that produces it was not.
+  const root = monorepoCheckout();
+  try {
+    initializeRepository({ worktreeRoot: root, packageRoot: root });
+
+    const settings = JSON.parse(readFileSync(join(root, ".claude", "settings.local.json"), "utf8")) as {
+      hooks: Record<string, readonly { hooks: readonly { command: string }[] }[]>;
+    };
+    const commands = Object.values(settings.hooks).flatMap((groups) =>
+      groups.flatMap((group) => group.hooks.map((hook) => hook.command)));
+
+    assert.ok(commands.length > 0);
+    for (const command of commands) {
+      assert.ok(
+        command.includes("$CLAUDE_PROJECT_DIR"),
+        `hook command names the machine instead of the repository: ${command}`,
+      );
+      assert.ok(!/^[A-Za-z]:[\/]/u.test(command.replace(/^node "/u, "")), `absolute path in: ${command}`);
+    }
+
+    const mcp = JSON.parse(readFileSync(join(root, ".mcp.json"), "utf8")) as
+      { mcpServers: Record<string, { args: readonly string[] }> };
+    assert.deepEqual(mcp.mcpServers["patchmesh"]!.args, ["packages/gateway/dist/bin.js"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init keeps the absolute path when the checkout is wiring some other repository", () => {
+  // The one case where naming the machine is right: `$CLAUDE_PROJECT_DIR` points at the
+  // repository being wired, and PatchMesh does not live inside it, so nothing
+  // repository-relative resolves.
+  const checkout = monorepoCheckout();
+  const target = mkdtempSync(join(tmpdir(), "patchmesh-target-"));
+  try {
+    initializeRepository({ worktreeRoot: target, packageRoot: checkout });
+
+    const settings = JSON.parse(readFileSync(join(target, ".claude", "settings.local.json"), "utf8")) as {
+      hooks: Record<string, readonly { hooks: readonly { command: string }[] }[]>;
+    };
+    const commands = Object.values(settings.hooks).flatMap((groups) =>
+      groups.flatMap((group) => group.hooks.map((hook) => hook.command)));
+
+    assert.ok(commands.length > 0);
+    assert.ok(
+      commands.every((command) => command.includes(checkout) && !command.includes("$CLAUDE_PROJECT_DIR")),
+      "a checkout outside the repository being wired has to name itself",
+    );
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test("init --force replaces PatchMesh's wiring without discarding the rest of the entry", () => {
+  // `--force` means "replace PatchMesh's own wiring", not "drop whatever else is configured
+  // here". Re-running it in this repository silently removed `"tools": ["*"]` from PatchMesh's
+  // own MCP entry - the additive rule this module opens with, broken by the one branch that
+  // rewrites instead of merging.
+  const root = monorepoCheckout();
+  try {
+    initializeRepository({ worktreeRoot: root, packageRoot: root });
+    const configPath = join(root, ".mcp.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as
+      { mcpServers: Record<string, Record<string, unknown>> };
+    config.mcpServers["patchmesh"]!["tools"] = ["*"];
+    writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+
+    initializeRepository({ worktreeRoot: root, packageRoot: root, force: true });
+
+    const after = JSON.parse(readFileSync(configPath, "utf8")) as
+      { mcpServers: Record<string, Record<string, unknown>> };
+    assert.deepEqual(after.mcpServers["patchmesh"]!["tools"], ["*"], "a key init does not manage must survive");
+    assert.deepEqual(after.mcpServers["patchmesh"]!["args"], ["packages/gateway/dist/bin.js"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

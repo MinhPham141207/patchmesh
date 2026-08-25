@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { delimiter, dirname, join, relative } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -114,8 +114,11 @@ function defaultPackageRoot(): string {
  *   is correct for anyone who has run an install. This is the only form safe to commit.
  * - `global` - installed on the PATH, so the bin names alone are correct and no path exists
  *   that would be right for someone else.
- * - `checkout` - running from a clone of this monorepo, where the absolute path is the only
- *   thing that resolves. Kept last because it is the developer case, not the user case.
+ * - `checkout` - running from a clone of this monorepo. Written against `$CLAUDE_PROJECT_DIR`
+ *   when that clone *is* the repository being wired, which is the contributor case and the
+ *   only one this branch normally sees; an absolute path only when PatchMesh is being run from
+ *   somewhere else to wire a different repository, where nothing repository-relative resolves.
+ *   Kept last because it is the developer case, not the user case.
  */
 type InstallKind = "dependency" | "global" | "checkout";
 
@@ -135,6 +138,18 @@ const HOOK_PACKAGE_NAMES: Readonly<Record<HookPackage, string>> = {
 /** Forward slashes even on Windows: these strings land in JSON other people read and commit. */
 function posix(path: string): string {
   return path.replaceAll("\\", "/");
+}
+
+/**
+ * Is the PatchMesh checkout inside the repository being wired?
+ *
+ * Decides whether a path can be written against the repository or has to name this machine.
+ * `relative` returns `""` for the same directory, a `..`-prefixed path for one above, and - on
+ * Windows, across drives - an absolute path it cannot express as a relative one at all.
+ */
+function isInsideWorktree(worktreeRoot: string, packageRoot: string): boolean {
+  const rel = relative(worktreeRoot, packageRoot);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 /**
@@ -192,10 +207,33 @@ function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
     };
   }
   if (existsSync(join(packageRoot, "packages", "recorder", "dist", "bin.js"))) {
+    // Written against the repository rather than against this machine whenever the checkout
+    // being wired *is* the checkout PatchMesh is running from - which is the whole contributor
+    // case, and the only one that produced the bug.
+    //
+    // `.claude/settings.local.json` and `.mcp.json` are both tracked here, so an absolute path
+    // in either is per-developer churn that breaks for every other clone. It has already been
+    // removed by hand twice and come back, because only the file was fixed and the writer that
+    // produces it was not.
+    //
+    // The portable form was always supported on the way back in: `resolveHookTarget` expands
+    // `$CLAUDE_PROJECT_DIR` before checking the file, so `doctor` verifies these hooks rather
+    // than reporting them `unknown` - the reader understood the spelling before the writer
+    // emitted it, and the recorder hooks in that file have been in this form all along.
+    //
+    // The absolute path stays for the case where it really is the only thing that resolves: a
+    // clone of this monorepo used to wire some *other* repository, where `$CLAUDE_PROJECT_DIR`
+    // points at that repository and not at wherever PatchMesh lives.
+    const inside = isInsideWorktree(worktreeRoot, packageRoot);
+    const within = (...segments: readonly string[]): string => posix(join(relative(worktreeRoot, packageRoot), ...segments));
     return {
       kind: "checkout",
-      hook: (owner, binary) => `node "${join(packageRoot, "packages", owner, "dist", binary)}"`,
-      server: { command: "node", args: [join(packageRoot, "packages", "gateway", "dist", "bin.js")] },
+      hook: (owner, binary) => inside
+        ? `node "$CLAUDE_PROJECT_DIR/${within("packages", owner, "dist", binary)}"`
+        : `node "${join(packageRoot, "packages", owner, "dist", binary)}"`,
+      server: inside
+        ? { command: "node", args: [within("packages", "gateway", "dist", "bin.js")] }
+        : { command: "node", args: [join(packageRoot, "packages", "gateway", "dist", "bin.js")] },
     };
   }
   // A global install. Bare names are preferred when the siblings really are on the PATH,
@@ -362,7 +400,19 @@ function registerServer(worktreeRoot: string, binaries: Binaries, force: boolean
   if (servers[OWNED] !== undefined && !force) {
     return { outcome: "unchanged", detail: "MCP server already registered" };
   }
-  servers[OWNED] = { type: "stdio", command: binaries.server.command, args: [...binaries.server.args] };
+  // Only the three fields this command actually owns are overwritten; anything else already on
+  // the entry is carried through. `--force` means "replace PatchMesh's own wiring", not "discard
+  // whatever else is configured here" - and a host or a user may have added keys this tool has
+  // no model for. Re-running `init --force` in this repository silently dropped `"tools": ["*"]`
+  // from its own entry, which is the additive rule at the top of this file being broken by the
+  // one branch that rewrites rather than merges.
+  const existing = isRecord(servers[OWNED]) ? servers[OWNED] : {};
+  servers[OWNED] = {
+    ...existing,
+    type: "stdio",
+    command: binaries.server.command,
+    args: [...binaries.server.args],
+  };
   writeJson(configPath, { ...config, mcpServers: servers });
   return { outcome: existed ? "updated" : "created", detail: `MCP server in ${relative(worktreeRoot, configPath)}` };
 }
