@@ -4,13 +4,16 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDaemon, type PatchMeshDaemon } from "patchmesh-daemon";
 import {
+  acknowledgeMessage,
   findOverlappingWork,
   measureAdoption,
   measureTimeToResume,
   ReadServiceError,
+  readInbox,
   recapRecentWork,
   renderAdoption,
   renderResumeMetrics,
+  sendMail,
   treatmentBoundaryFrom,
   type OverlapOptions,
   type OverlapResult,
@@ -27,6 +30,7 @@ import { collapseEvents } from "./console-model.js";
 import { diagnose, renderDoctor } from "./doctor.js";
 import { initializeRepository, renderInit } from "./init.js";
 import {
+  renderAckResponse,
   renderAgents,
   renderDecisionExplanation,
   renderDetectorUnavailable,
@@ -37,6 +41,8 @@ import {
   renderFeedbackResponse,
   renderFindings,
   renderGraph,
+  renderInbox,
+  renderMessageSent,
   renderOverlaps,
   renderPrune,
   renderRecap,
@@ -69,6 +75,30 @@ export interface CliDependencies {
    * port without the command reaching for the user's browser.
    */
   readonly serveGraph?: (options: GraphServerOptions) => Promise<GraphServer>;
+  /**
+   * Reads a piped message body for `send`. Injected like the readers above so tests never
+   * touch the process's own stdin. The default reads stdin only when it is not a TTY, so an
+   * interactive `send` that forgot `--body` fails fast instead of hanging on an EOF that
+   * will never come.
+   */
+  readonly readStdin?: () => Promise<string>;
+}
+
+/** The default body reader: piped stdin verbatim; an interactive terminal reads as empty. */
+function readPipedStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) {
+      resolve("");
+      return;
+    }
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk: string) => {
+      data += chunk;
+    });
+    process.stdin.once("end", () => resolve(data));
+    process.stdin.once("error", () => resolve(data));
+  });
 }
 
 export interface CliResult {
@@ -89,6 +119,11 @@ function stopOnAbort(signal: AbortSignal, server: GraphServer): Promise<void> {
     if (signal.aborted) { server.close(); resolve(); return; }
     signal.addEventListener("abort", () => { server.close(); resolve(); }, { once: true });
   });
+}
+
+/** Drop the one newline a shell pipe appends, so `echo hi | send --body-stdin` sends "hi". */
+function trimTrailingNewline(text: string): string {
+  return text.replace(/\r?\n$/, "");
 }
 
 function exitCode(error: ReadServiceError): number {
@@ -122,6 +157,7 @@ async function renderCommand(
   worktreeRoot: string | null,
   readOverlaps: (options: OverlapOptions) => OverlapResult,
   readRecap: (options: RecapOptions) => RecapResult,
+  readStdin: () => Promise<string>,
   signal?: AbortSignal,
 ): Promise<string> {
   if (parsed.command === "help") return `${usageText()}\n`;
@@ -236,6 +272,62 @@ async function renderCommand(
     const result = deliveryWriter.respondToDecisionDelivery(delivery);
     return renderDeliveryResponse(result, delivery.decisionId, delivery.state, parsed.json);
   }
+  if (parsed.command === "send") {
+    if (worktreeRoot === null) {
+      throw new ReadServiceError("unavailable", "send needs a git worktree; run it inside the repository the ledger describes");
+    }
+    const send = parsed.send!;
+    // No `--body` means the body arrives on stdin -- piped only. A terminal reads as empty,
+    // and sendMail rejects the empty body rather than sending blank mail.
+    const body = send.body ?? trimTrailingNewline(await readStdin());
+    const result = sendMail({
+      worktreeRoot,
+      ledgerPath: parsed.databasePath ?? "",
+      from: send.from ?? parsed.agentFilters.agentId ?? null,
+      to: send.to,
+      kind: send.kind,
+      subject: send.subject,
+      body,
+      ...(send.refs.length === 0 ? {} : { refs: send.refs }),
+      ...(send.expiresAt === null ? {} : { expiresAt: send.expiresAt }),
+    });
+    return renderMessageSent(result, { to: send.to, kind: send.kind, subject: send.subject }, parsed.json);
+  }
+  if (parsed.command === "inbox") {
+    // No `--agent` is a real audience here, not a missing argument: it asks for broadcasts
+    // only, which is what a person with no session identity can still usefully read.
+    const inbox = parsed.inbox!;
+    const result = readInbox({
+      worktreeRoot: worktreeRoot ?? "",
+      ledgerPath: parsed.databasePath ?? "",
+      agent: parsed.agentFilters.agentId ?? "",
+      includeDelivered: inbox.includeDelivered,
+    });
+    return renderInbox(result, parsed.agentFilters.agentId, parsed.json);
+  }
+  if (parsed.command === "ack") {
+    if (worktreeRoot === null) {
+      throw new ReadServiceError("unavailable", "ack needs a git worktree; run it inside the repository the ledger describes");
+    }
+    const ack = parsed.ack!;
+    const byAgentId = ack.from ?? parsed.agentFilters.agentId;
+    if (byAgentId === null || byAgentId === undefined) {
+      throw new ReadServiceError("usage", "ack requires attribution; pass --from <agent-id>");
+    }
+    const disposition = ack.disposition ?? "read";
+    const result = acknowledgeMessage({
+      worktreeRoot,
+      ledgerPath: parsed.databasePath ?? "",
+      byAgentId,
+      messageId: ack.messageId,
+      disposition,
+      ...(ack.note === null ? {} : { note: ack.note }),
+    });
+    if (!result.ok) {
+      throw new ReadServiceError("usage", result.reason ?? "the message could not be acknowledged");
+    }
+    return renderAckResponse(ack.messageId, disposition, parsed.json);
+  }
   // The default text mode answers with calls, not records: bounded, newest first, readable.
   // `--raw` and `--json` keep the per-event page, which is what scripts and follow read.
   if (!parsed.follow) {
@@ -308,6 +400,7 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
         worktreeRoot,
         dependencies.readOverlaps ?? findOverlappingWork,
         dependencies.readRecap ?? recapRecentWork,
+        dependencies.readStdin ?? readPipedStdin,
         dependencies.signal,
       ),
       stderr: "",

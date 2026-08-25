@@ -7,6 +7,7 @@ import type {
   FindingsView,
   GraphNode,
   GraphView,
+  InboxResult,
   OverlapResult,
   RecapResult,
   StatusView,
@@ -117,6 +118,66 @@ export function renderDeliveryResponse(
     `Decision: ${decisionId}`,
     `State: ${state}`,
   ], json);
+}
+
+/** Structural shape of what `sendMail` returns, declared locally like `AppendResult`. */
+interface MessageSentResult {
+  readonly messageId: string;
+}
+
+export function renderMessageSent(
+  result: MessageSentResult,
+  input: { readonly to: string; readonly kind: string; readonly subject: string },
+  json: boolean,
+): string {
+  if (json) return `${JSON.stringify(result)}\n`;
+  return [
+    "MESSAGE SENT",
+    `To: ${input.to}`,
+    `Kind: ${input.kind}`,
+    `Subject: ${input.subject}`,
+    `Message: ${result.messageId}`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Render an inbox for a person, verdict first.
+ *
+ * The count answers the question the command was asked before any row does -- the same
+ * discipline `agents` and the detectors follow. Rows stay one line each; the body and the
+ * full ids are one `--json` away.
+ */
+export function renderInbox(result: InboxResult, agent: string | undefined, json: boolean): string {
+  if (json) return `${JSON.stringify(result)}\n`;
+  const who = agent === undefined || agent === "" ? "broadcast" : shortId(agent);
+  if (result.rows.length === 0) {
+    const lines = [`No messages waiting for ${who}.`];
+    if (result.expired > 0) lines.push(`${result.expired} expired message(s) not shown.`);
+    return `${lines.join("\n")}\n`;
+  }
+  const lines = [`${result.rows.length} message(s) waiting for ${who}`];
+  for (const row of result.rows) {
+    lines.push([row.fromAgentId ?? "-", row.kind, row.subject, row.refs.join(", ")].join(" · "));
+  }
+  if (result.withheld > 0) lines.push(`(+${result.withheld} more withheld)`);
+  if (result.expired > 0) lines.push(`${result.expired} expired message(s) not shown.`);
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Confirm an acknowledgement. A refused acknowledgement is not rendered here at all: it
+ * becomes a usage error in the main flow, because a person must learn their ack recorded
+ * nothing -- the same rule a send validation failure follows.
+ */
+export function renderAckResponse(messageId: string, disposition: string, json: boolean): string {
+  if (json) return `${JSON.stringify({ ok: true })}\n`;
+  return [
+    "MESSAGE ACKNOWLEDGED",
+    `Message: ${messageId}`,
+    `Disposition: ${disposition}`,
+    "",
+  ].join("\n");
 }
 
 /**

@@ -1,7 +1,7 @@
 import type { DecisionDelivery, DecisionId, EventType, FindingId, FindingFeedback } from "patchmesh-protocol";
-import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters } from "patchmesh-query";
+import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters, type SendMailOptions } from "patchmesh-query";
 
-export type CommandName = "init" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "console" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "help";
+export type CommandName = "init" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "console" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "send" | "inbox" | "ack" | "help";
 
 export interface ParsedArgs {
   readonly command: CommandName;
@@ -45,9 +45,30 @@ export interface ParsedArgs {
     readonly decisionId: DecisionId;
     readonly state: DecisionDelivery["state"];
   } | null;
+  /**
+   * The body is null when no `--body` was given: the main flow then reads stdin, and only
+   * when stdin actually delivers something -- an interactive terminal is never read.
+   */
+  readonly send: {
+    readonly to: string;
+    readonly kind: SendMailOptions["kind"];
+    readonly subject: string;
+    readonly body: string | null;
+    readonly refs: readonly string[];
+    readonly expiresAt: string | null;
+    readonly from: string | null;
+  } | null;
+  /** Who the inbox is for rides in `agentFilters.agentId`; absent means broadcasts only. */
+  readonly inbox: { readonly includeDelivered: boolean } | null;
+  readonly ack: {
+    readonly messageId: string;
+    readonly disposition: "accepted" | "declined" | null;
+    readonly note: string | null;
+    readonly from: string | null;
+  } | null;
 }
 
-export const commands = new Set<CommandName>(["init", "doctor", "prune", "status", "recap", "agents", "events", "console", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "help"]);
+export const commands = new Set<CommandName>(["init", "doctor", "prune", "status", "recap", "agents", "events", "console", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "send", "inbox", "ack", "help"]);
 const eventTypes = new Set<EventType>([
   "tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read",
   "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected",
@@ -56,6 +77,7 @@ const eventTypes = new Set<EventType>([
 ]);
 const dispositions = new Set<FindingFeedback["disposition"]>(["dismissed", "acknowledged", "not_affected", "already_handled", "needs_more_information"]);
 const deliveryStates = new Set<DecisionDelivery["state"]>(["pending", "delivered", "acknowledged", "failed"]);
+const messageKinds = new Set<SendMailOptions["kind"]>(["notice", "handoff", "question", "claim"]);
 
 export function usageText(): string {
   return [
@@ -91,6 +113,15 @@ export function usageText(): string {
     "  feedback <finding-id> --disposition <d> [--decision <id>] [--useful true|false]",
     "                             [--reason <text>]",
     "  delivery <decision-id> --state <pending|delivered|acknowledged|failed>",
+    "",
+    "Mailbox:",
+    "  send --to <agent|broadcast> --kind <notice|handoff|question|claim>",
+    "                             --subject <text> [--body <text> | body on stdin]",
+    "                             [--ref <path>]... [--expires <iso>] [--from <agent-id>]",
+    "  inbox                      Messages waiting for an agent (--agent <id>,",
+    "                             --include-delivered; no --agent means broadcasts only)",
+    "  ack <message-id>           Acknowledge a message ([--accept | --decline], --note,",
+    "                             --from <agent-id>)",
     "",
     "Common options:",
     "  --database <path>          Event store to read (defaults to .patchmesh/ledger.db",
@@ -156,6 +187,9 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       decisionId: null,
       feedback: null,
       delivery: null,
+      send: null,
+      inbox: null,
+      ack: null,
     };
   }
   let databasePath: string | null = null;
@@ -187,6 +221,16 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let reason: string | null = null;
   let deliveryDecisionId: DecisionId | null = null;
   let deliveryState: DecisionDelivery["state"] | null = null;
+  let sendTo: string | null = null;
+  let sendKind: SendMailOptions["kind"] | null = null;
+  let sendSubject: string | null = null;
+  let sendBody: string | null = null;
+  const sendRefs: string[] = [];
+  let sendExpiresAt: string | null = null;
+  let senderId: string | null = null;
+  let includeDelivered = false;
+  let ackMessageId: string | null = null;  let ackDisposition: "accepted" | "declined" | null = null;
+  let ackNote: string | null = null;
 
   for (let index = 1; index < argv.length; index += 1) {
     const option = argv[index];
@@ -201,6 +245,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     }
     if (command === "delivery" && index === 1 && !option.startsWith("--")) {
       deliveryDecisionId = option as DecisionId;
+      continue;
+    }
+    if (command === "ack" && index === 1 && !option.startsWith("--")) {
+      ackMessageId = option;
       continue;
     }
     if (option === "--json") { json = true; continue; }
@@ -263,6 +311,35 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       index += 1;
       continue;
     }
+    if (option === "--to" && command === "send") { sendTo = value(argv, index, option); index += 1; continue; }
+    if (option === "--kind" && command === "send") {
+      const valueForOption = value(argv, index, option) as SendMailOptions["kind"];
+      if (!messageKinds.has(valueForOption)) throw new ReadServiceError("usage", "kind must be notice, handoff, question, or claim");
+      sendKind = valueForOption;
+      index += 1;
+      continue;
+    }
+    if (option === "--subject" && command === "send") { sendSubject = value(argv, index, option); index += 1; continue; }
+    if (option === "--body" && command === "send") { sendBody = value(argv, index, option); index += 1; continue; }
+    if (option === "--ref" && command === "send") { sendRefs.push(value(argv, index, option)); index += 1; continue; }
+    if (option === "--expires" && command === "send") { sendExpiresAt = value(argv, index, option); index += 1; continue; }
+    if (option === "--from" && (command === "send" || command === "ack")) {
+      senderId = value(argv, index, option);
+      index += 1;
+      continue;
+    }
+    if (option === "--accept" && command === "ack") {
+      if (ackDisposition !== null) throw new ReadServiceError("usage", "--accept and --decline are mutually exclusive");
+      ackDisposition = "accepted";
+      continue;
+    }
+    if (option === "--decline" && command === "ack") {
+      if (ackDisposition !== null) throw new ReadServiceError("usage", "--accept and --decline are mutually exclusive");
+      ackDisposition = "declined";
+      continue;
+    }
+    if (option === "--note" && command === "ack") { ackNote = value(argv, index, option); index += 1; continue; }
+    if (option === "--include-delivered" && command === "inbox") { includeDelivered = true; continue; }
     if (option === "--type" && command === "events") {
       const type = value(argv, index, option);
       if (!eventTypes.has(type as EventType)) throw new ReadServiceError("usage", `unknown event type: ${type}`);
@@ -312,6 +389,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   if (command === "feedback" && disposition === null) throw new ReadServiceError("usage", "feedback requires a disposition");
   if (command === "delivery" && deliveryDecisionId === null) throw new ReadServiceError("usage", "delivery requires a decision ID");
   if (command === "delivery" && deliveryState === null) throw new ReadServiceError("usage", "delivery requires a state");
+  if (command === "send" && sendTo === null) throw new ReadServiceError("usage", "send requires --to <agent|broadcast>");
+  if (command === "send" && sendKind === null) throw new ReadServiceError("usage", "send requires --kind <notice|handoff|question|claim>");
+  if (command === "send" && sendSubject === null) throw new ReadServiceError("usage", "send requires --subject");
+  if (command === "ack" && ackMessageId === null) throw new ReadServiceError("usage", "ack requires a message ID");
   if (command === "recap" && !recapMetrics && (since !== undefined || until !== undefined)) {
     throw new ReadServiceError("usage", "--since and --until apply to recap --metrics; use --within for a recap");
   }
@@ -360,5 +441,21 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       reason,
     } : null,
     delivery: command === "delivery" ? { decisionId: deliveryDecisionId!, state: deliveryState! } : null,
+    send: command === "send" ? {
+      to: sendTo!,
+      kind: sendKind!,
+      subject: sendSubject!,
+      body: sendBody,
+      refs: [...sendRefs],
+      expiresAt: sendExpiresAt,
+      from: senderId,
+    } : null,
+    inbox: command === "inbox" ? { includeDelivered } : null,
+    ack: command === "ack" ? {
+      messageId: ackMessageId!,
+      disposition: ackDisposition,
+      note: ackNote,
+      from: senderId,
+    } : null,
   };
 }
