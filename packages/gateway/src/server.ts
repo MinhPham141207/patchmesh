@@ -49,6 +49,7 @@ function serverVersion(): string {
 let heavy:
   | Promise<{
       readonly ledgerPathFor: (worktreeRoot: string) => string;
+      readonly freshenLedger: (options: { worktreeRoot: string; ledgerPath: string }) => Promise<unknown>;
       readonly recallRecentActivity: (options: RecallOptions) => RecallResult;
       readonly renderRecall: (result: RecallResult, requestedPath: string | undefined) => string;
       readonly findOverlappingWork: (options: OverlapOptions) => OverlapResult;
@@ -67,6 +68,9 @@ function loadHeavy(): NonNullable<typeof heavy> {
     import("./recall.js"),
   ]).then(([recorder, query, recall]) => ({
     ledgerPathFor: recorder.ledgerPathFor,
+    // Every tool drains the journal before reading. Free when there is nothing waiting; see
+    // `freshenLedger` for why a report answers about now rather than about the last Stop.
+    freshenLedger: recorder.freshenLedger,
     recallRecentActivity: recall.recallRecentActivity,
     renderRecall: recall.renderRecall,
     findOverlappingWork: query.findOverlappingWork,
@@ -119,6 +123,7 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       try {
         const modules = await loadHeavy();
         const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        await modules.freshenLedger({ worktreeRoot: options.worktreeRoot, ledgerPath });
         const result = modules.recallRecentActivity({
           worktreeRoot: options.worktreeRoot,
           ledgerPath,
@@ -171,6 +176,7 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       try {
         const modules = await loadHeavy();
         const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        await modules.freshenLedger({ worktreeRoot: options.worktreeRoot, ledgerPath });
         const result = modules.readActiveWork({
           worktreeRoot: options.worktreeRoot,
           ledgerPath,
@@ -222,6 +228,7 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       try {
         const modules = await loadHeavy();
         const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        await modules.freshenLedger({ worktreeRoot: options.worktreeRoot, ledgerPath });
         const result = modules.findOverlappingWork({
           worktreeRoot: options.worktreeRoot,
           ledgerPath,
@@ -269,6 +276,7 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       try {
         const modules = await loadHeavy();
         const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        await modules.freshenLedger({ worktreeRoot: options.worktreeRoot, ledgerPath });
         const result = modules.recapRecentWork({
           worktreeRoot: options.worktreeRoot,
           ledgerPath,

@@ -16,6 +16,8 @@ export {
 } from "./identity.js";
 export type { RepositoryIdentity } from "./identity.js";
 export { ingestJournal, recordTurnEffects } from "./ingest.js";
+export { freshenLedger, FRESHEN_MAX_ENTRIES } from "./freshen.js";
+export type { FreshenLedgerOptions, FreshenOutcome, FreshenResult } from "./freshen.js";
 export { attributionFieldsOf, resolveAttribution, SPAWN_TOOL_NAMES } from "./attribution.js";
 export type { AttributionInput, CallAttribution } from "./attribution.js";
 export type {

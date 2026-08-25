@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
-import { agentIdForSession, findWorktreeRoot, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
+import { agentIdForSession, findWorktreeRoot, freshenLedger, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
 import { findOverlappingWork, recapRecentWork, renderOverlap, renderRecap } from "patchmesh-query";
 import { measurementPathFor, recordAnswer } from "./measure.js";
 import { claimInjection, injectionStatePathFor } from "./injection-state.js";
@@ -202,6 +202,13 @@ export async function main(): Promise<number> {
       debug("no git worktree found for hook cwd");
       return 0;
     }
+
+    // Drained before the recap is built, not after. This is the surface that actually reaches
+    // agents -- measured adoption of the pull tools is one call per 183 -- so a session-start
+    // recap that omits the previous session's last turn is the failure that matters most. A
+    // `SessionStart` hook is also the one moment where the previous session has certainly
+    // stopped, so the journal it left behind is complete rather than mid-turn.
+    await freshenLedger({ worktreeRoot, ledgerPath: ledgerPathFor(worktreeRoot) });
 
     const result = recapRecentWork({
       worktreeRoot,

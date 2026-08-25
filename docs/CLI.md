@@ -990,6 +990,11 @@ of those states the repository is in.
 It never requires, and never creates, the ledger it is diagnosing - the most useful moment to
 run it is before one exists.
 
+Alone among the read commands, `doctor` does **not** drain the journal before it answers. Every
+report freshens first so it describes now rather than the last time a session stopped; `doctor`
+is the one whose subject *is* the undrained journal, and freshening would erase the backlog it
+exists to report.
+
 ### Usage
 
 ```bash
@@ -1005,7 +1010,9 @@ hooks       PatchMesh's hooks are present in .claude/settings.local.json
 recorder    The binaries those hooks name actually resolve on this machine
 mcp         The patchmesh MCP server is registered in .mcp.json
 gitignore   .patchmesh/ is kept out of version control
-ledger      The ledger exists, how many events it holds, and how recent they are
+ledger      The ledger exists, how many events it holds, how large it is, and how recent
+            they are. Warns past 64MiB: nothing prunes on its own, and the fix is named
+            rather than taken, because retention deletes history and history is the product
 journal     Entries waiting to be drained, interrupted drains, unrepresentable entries
 ```
 
@@ -1021,7 +1028,7 @@ reinstall something that was never wrong.
 [OK] hooks: all 5 hooks installed
 [OK] mcp: MCP server registered in .mcp.json
 [OK] gitignore: .patchmesh/ is ignored
-[OK] ledger: 3241 event(s) in D:\patchmesh\.patchmesh\ledger.db, latest 2026-08-23T03:17:28.865Z
+[OK] ledger: 3241 event(s) in D:\patchmesh\.patchmesh\ledger.db, 7.4MB, latest 2026-08-23T03:17:28.865Z
 [OK] journal: 108 entr(ies) waiting for the next drain
 
 PatchMesh is recording.

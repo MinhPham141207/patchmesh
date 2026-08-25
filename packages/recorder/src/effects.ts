@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   diffSnapshots,
@@ -82,7 +82,23 @@ export function writeSnapshot(snapshotPath: string, snapshot: ObservationSnapsho
     files: [...snapshot.files.entries()],
   };
   mkdirSync(dirname(snapshotPath), { recursive: true });
-  writeFileSync(snapshotPath, JSON.stringify(stored), "utf8");
+  // Written aside and renamed into place, because the snapshot now has more than one writer.
+  // Draining on the read path means a report and the Stop hook can capture at the same moment,
+  // and a torn snapshot does not fail loudly - `readSnapshot` treats an unparseable file as no
+  // baseline at all, which reports every file in the checkout as newly created. Rename is
+  // atomic, so a concurrent reader sees either the old snapshot or the new one.
+  const temporaryPath = `${snapshotPath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporaryPath, JSON.stringify(stored), "utf8");
+    renameSync(temporaryPath, snapshotPath);
+  } catch (error) {
+    try {
+      rmSync(temporaryPath, { force: true });
+    } catch {
+      // Nothing further to do: the temporary is inert, and the real failure is the one below.
+    }
+    throw error;
+  }
 }
 
 /**
