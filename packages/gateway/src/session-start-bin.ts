@@ -4,6 +4,11 @@ import { agentIdForSession, findWorktreeRoot, freshenLedger, ledgerPathFor, LEDG
 import { findOverlappingWork, recapRecentWork, renderOverlap, renderRecap } from "patchmesh-query";
 import { measurementPathFor, recordAnswer } from "./measure.js";
 import { claimInjection, injectionStatePathFor } from "./injection-state.js";
+import {
+  buildMailboxBlock,
+  markSessionStartDelivered,
+  readSessionStartMail,
+} from "./mailbox-inject.js";
 
 /**
  * The read side of the loop: a `SessionStart` hook that hands a new session what the last one
@@ -216,20 +221,36 @@ export async function main(): Promise<number> {
       withinMinutes: RECAP_WITHIN_MINUTES,
       limit: RECAP_LIMIT,
     });
-    // Nothing recorded yet is the common case on a fresh install. Injecting "no recent work"
-    // into every session would be pure cost for no answer, so say nothing at all.
-    if (result.tasks.length === 0) {
-      debug("no recent work to report");
-      return 0;
-    }
 
-    const contention = contentionNotice(worktreeRoot);
     // The host declares the session; the agent id is derived from it exactly as the recorder
     // derives it, so what the agent is told to pass is what the ledger recorded it under.
+    // Derived before anything is built because mail is addressed to this id, not to the recap.
     const sessionId = isRecord(payload) && typeof payload["session_id"] === "string" ? payload["session_id"] : null;
     const agentId = sessionId === null ? null : agentIdForSession(sessionId);
+
+    // Nothing recorded yet is the common case on a fresh install. Injecting "no recent work"
+    // into every session would be pure cost for no answer, so say nothing at all -- unless
+    // mail is waiting, which is an answer even in a repository with no history.
+    const contention = result.tasks.length === 0 ? null : contentionNotice(worktreeRoot);
+    const recapContext = result.tasks.length === 0
+      ? null
+      : withinBudget(asAdditionalContext(renderRecap(result, undefined), contention?.text, agentId));
+
+    // Mail leads the injection, oldest first, inside whatever budget the recap leaves. Built
+    // before the claim (the claimed bytes include it) and marked only after the claim wins --
+    // marking first would let one suppressed burst fire consume mail nobody ever saw.
+    const mailRows = readSessionStartMail({ worktreeRoot, ledgerPath: ledgerPathFor(worktreeRoot), agentId });
+    let mailbox = { block: "", includedMessageIds: [] as readonly string[] };
+    if (mailRows.length > 0) {
+      const recapShare = recapContext === null ? 0 : Buffer.byteLength(recapContext, "utf8") + 2;
+      mailbox = buildMailboxBlock(mailRows, MAX_CONTEXT_BYTES - recapShare);
+    }
+    if (recapContext === null && mailbox.block === "") {
+      debug("no recent work and no waiting mail to report");
+      return 0;
+    }
     const context = withinBudget(
-      asAdditionalContext(renderRecap(result, undefined), contention?.text, agentId),
+      recapContext === null ? mailbox.block : mailbox.block === "" ? recapContext : `${mailbox.block}\n\n${recapContext}`,
     );
 
     // Which of startup, resume, clear or compact fired this. Recorded rather than acted on:
@@ -255,7 +276,7 @@ export async function main(): Promise<number> {
       agentId,
       trigger,
       answerBytes: Buffer.byteLength(context, "utf8"),
-      items: result.tasks.length + (contention?.files ?? 0),
+      items: result.tasks.length + (contention?.files ?? 0) + mailbox.includedMessageIds.length,
       withheld: result.truncated,
     });
 
@@ -265,6 +286,18 @@ export async function main(): Promise<number> {
         additionalContext: context,
       },
     })}\n`);
+
+    // Only now that the bytes are claimed and written is a message delivered. With no session
+    // identity there is no recipient to attribute delivery to, so unattributable broadcast
+    // mail stays undelivered rather than being forged as someone's read.
+    if (agentId !== null) {
+      markSessionStartDelivered({
+        worktreeRoot,
+        ledgerPath: ledgerPathFor(worktreeRoot),
+        byAgentId: agentId,
+        messageIds: mailbox.includedMessageIds,
+      });
+    }
     return 0;
   } catch (error) {
     // Same contract as the recorder: a read-side hook must never be able to fail a session.
