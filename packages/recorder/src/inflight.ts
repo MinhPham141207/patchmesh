@@ -51,7 +51,7 @@ function stringField(payload: Record<string, unknown>, key: string): string | nu
 }
 
 /** Every journal file that may hold live entries: the open one, plus any claim being drained. */
-function journalFilesFor(journalPath: string): readonly string[] {
+export function journalFilesFor(journalPath: string): readonly string[] {
   const files = [journalPath];
   const directory = dirname(journalPath);
   const prefix = `${basename(journalPath)}.`;
