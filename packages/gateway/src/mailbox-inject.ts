@@ -1,5 +1,6 @@
 import type { InboxRow } from "patchmesh-query";
 import { idShortener, markDelivered, readInbox } from "patchmesh-query";
+import { recordAnswer } from "./measure.js";
 
 /**
  * The delivery half of the mailbox: undelivered mail placed ahead of the recap a
@@ -17,6 +18,12 @@ import { idShortener, markDelivered, readInbox } from "patchmesh-query";
  */
 
 export const SESSION_START_CHANNEL = "session_start";
+
+function debug(message: string): void {
+  if (process.env["PATCHMESH_RECORDER_DEBUG"] !== undefined) {
+    process.stderr.write(`patchmesh-session-start: ${message}\n`);
+  }
+}
 
 export interface MailboxBuild {
   /** The delimited block to lead the injection with; empty when nothing fit or nothing waited. */
@@ -56,7 +63,7 @@ export function buildMailboxBlock(rows: readonly InboxRow[], budgetBytes: number
   let size = 0;
   for (const row of oldestFirst) {
     const part = renderUntrustedMessage(row, shorten(row.fromAgentId ?? "unknown"));
-    // Two separator bytes between blocks, one trailing newline when the recap follows.
+    // Two separator bytes between blocks; the recap seam adds its own when it follows.
     const cost = Buffer.byteLength(part, "utf8") + (parts.length === 0 ? 0 : 2);
     if (size + cost > budgetBytes) break;
     parts.push(part);
@@ -91,11 +98,14 @@ export function readSessionStartMail(options: {
  * Called only after the injection was claimed and written. At-least-once by construction: a
  * crash between writing and marking redelivers next session, which costs one repeat and not
  * a lost message. Never throws -- the answer already went out, so a mark failure must cost
- * at most that repeat.
+ * at most that repeat -- but it is not silent: the failure lands in `answers.ndjson`, the one
+ * trail this binary writes, so a ledger that stops accepting marks is diagnosable from its rows.
  */
 export function markSessionStartDelivered(options: {
   readonly worktreeRoot: string;
   readonly ledgerPath: string;
+  /** Where `answers.ndjson` lives; the bin already computes it for its own measurement row. */
+  readonly answersPath: string;
   readonly byAgentId: string;
   readonly messageIds: readonly string[];
 }): void {
@@ -108,7 +118,18 @@ export function markSessionStartDelivered(options: {
       channel: SESSION_START_CHANNEL,
       messageIds: options.messageIds,
     });
-  } catch {
+  } catch (error) {
     // Redelivery next session is the recovery path; nothing here may fail the hook.
+    const message = error instanceof Error ? error.message : "unknown mailbox mark failure";
+    debug(`marking ${options.messageIds.length} message(s) delivered failed: ${message}`);
+    recordAnswer(options.answersPath, {
+      tool: "mailbox_mark_failed",
+      source: "session_start",
+      ok: false,
+      agentId: options.byAgentId,
+      answerBytes: 0,
+      items: options.messageIds.length,
+      withheld: options.messageIds.length,
+    });
   }
 }

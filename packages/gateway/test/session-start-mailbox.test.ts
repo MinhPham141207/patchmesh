@@ -14,6 +14,7 @@ import {
 } from "patchmesh-recorder";
 import { sendMail } from "patchmesh-query";
 import { SqliteEventStore } from "patchmesh-storage";
+import { MAX_CONTEXT_BYTES } from "../src/session-start-bin.js";
 
 const SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
 const SENDER = "agent_peer";
@@ -159,8 +160,8 @@ test("an oversize message is dropped from the injection and NOT marked delivered
     assert.equal(result.status, 0);
     const context = injectedContext(result.stdout);
     // The shared 4 KB budget holds even with mail leading the recap.
-    assert.equal(Buffer.byteLength(context, "utf8") <= 4000, true);
-    assert.match(context, /fits subject alpha/u, "the newest-first cap keeps room for at least one message");
+    assert.equal(Buffer.byteLength(context, "utf8") <= MAX_CONTEXT_BYTES, true);
+    assert.match(context, /fits subject alpha/u, "the oldest-first fill keeps room for at least one message");
 
     const delivered = readDelivered(join(root, ".patchmesh", "ledger.db"));
     for (const [index, messageId] of messageIds.entries()) {

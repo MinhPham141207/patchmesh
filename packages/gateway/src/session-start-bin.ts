@@ -41,7 +41,7 @@ const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
  * re-reading the code -- so the budget is part of the claim, not a safety valve. Roughly four
  * bytes per token puts this near 1,000 tokens, against a measured recap of about 435.
  */
-const MAX_CONTEXT_BYTES = 4_000;
+export const MAX_CONTEXT_BYTES = 4_000;
 
 /** Tasks to describe. Bounded twice, in count and in bytes, for the same reason. */
 const RECAP_LIMIT = 5;
@@ -294,6 +294,7 @@ export async function main(): Promise<number> {
       markSessionStartDelivered({
         worktreeRoot,
         ledgerPath: ledgerPathFor(worktreeRoot),
+        answersPath: measurementPathFor(worktreeRoot, LEDGER_DIRECTORY),
         byAgentId: agentId,
         messageIds: mailbox.includedMessageIds,
       });
