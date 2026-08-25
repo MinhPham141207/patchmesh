@@ -254,7 +254,9 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
     // `doctor`, which is the one command whose subject *is* the undrained journal: freshening
     // first would erase the backlog it exists to report.
     if (worktreeRoot !== null && REPORT_ONLY.has(parsed.command) && ownsLedger(worktreeRoot, parsed.databasePath)) {
-      await freshenLedger({ worktreeRoot, ledgerPath: ledgerPathFor(worktreeRoot) });
+      // Effects observed too: a person asking `overlaps` once wants the filesystem walked,
+      // and can afford it. The MCP tools deliberately do not - see `freshenLedger`.
+      await freshenLedger({ worktreeRoot, ledgerPath: ledgerPathFor(worktreeRoot), observeEffects: true });
     }
     // Serving is handled before `renderCommand` because it is the one command that outlives
     // its own output: it returns a handle the caller has to hold, not a rendered string.
