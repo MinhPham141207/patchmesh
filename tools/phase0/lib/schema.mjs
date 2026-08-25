@@ -4,8 +4,8 @@ import { diagnostic, sortDiagnostics } from './diagnostics.mjs';
 const DIALECT = 'https://json-schema.org/draft/2020-12/schema';
 const SUPPORTED = new Set([
   '$schema', '$id', '$ref', '$defs', 'type', 'properties', 'required',
-  'additionalProperties', 'items', 'minItems', 'uniqueItems', 'enum', 'const',
-  'oneOf', 'format', 'pattern', 'minimum',
+  'additionalProperties', 'items', 'minItems', 'maxItems', 'uniqueItems', 'enum', 'const',
+  'oneOf', 'format', 'pattern', 'minimum', 'maxLength',
 ]);
 
 const pointerSegment = (value) => value.replaceAll('~', '~0').replaceAll('/', '~1');
@@ -107,6 +107,7 @@ function instance(schema, value, context, at, currentId, stack) {
   if ('const' in schema && canonicalize(value) !== canonicalize(schema.const)) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'value does not match const'));
   if (Array.isArray(schema.enum) && !schema.enum.some((item) => canonicalize(item) === canonicalize(value))) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'value is outside enum'));
   if (typeof value === 'string' && schema.pattern && !new RegExp(schema.pattern, 'u').test(value)) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'string does not match pattern'));
+  if (typeof value === 'string' && schema.maxLength !== undefined && value.length > schema.maxLength) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'string is longer than maxLength'));
   if (typeof value === 'string' && schema.format === 'uuid' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'string must be a lowercase UUID'));
   if (typeof value === 'string' && schema.format === 'date-time' && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u.test(value) || Number.isNaN(Date.parse(value)))) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'string must be RFC 3339 UTC'));
   if (typeof value === 'number' && schema.minimum !== undefined && value < schema.minimum) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'number is below minimum'));
@@ -120,6 +121,7 @@ function instance(schema, value, context, at, currentId, stack) {
   }
   if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'array has too few items'));
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'array has too many items'));
     if (schema.uniqueItems === true && new Set(value.map(canonicalize)).size !== value.length) diagnostics.push(diagnostic('PHASE0_SCHEMA_INVALID', context.path, at, 'array items must be unique'));
     if (schema.items) value.forEach((item, index) => diagnostics.push(...instance(schema.items, item, context, `${at}/${index}`, currentId, new Set(stack))));
   }

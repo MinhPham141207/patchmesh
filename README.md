@@ -207,10 +207,14 @@ Stated plainly, because a green test suite is not evidence that a product works:
 ## Documentation
 
 - [Delivery plan](docs/implementation/DELIVERY_PLAN.md) — what is built, in what order, and why
+- [Features](docs/features/) — proposed capabilities, designed and sequenced but not yet built
+- [Problems](docs/problems/) — what is wrong now, with status, evidence and solution options
 - [CLI reference](docs/CLI.md) — every command and flag
 - [Architecture](docs/ARCHITECTURE.md) · [Terminology](docs/TERMINOLOGY.md) ·
   [Threat model](docs/THREAT_MODEL.md)
-- [Protocol](docs/protocol/) — events, identities, evidence and coverage, replay equivalence
+- [Protocol](docs/protocol/) — [events](docs/protocol/events.md),
+  [identities](docs/protocol/identities.md), [evidence and coverage](docs/protocol/evidence-and-coverage.md),
+  [replay equivalence](docs/protocol/replay-equivalence.md)
 - [Host adapter boundary](docs/HOST_ADAPTER_BOUNDARY.md) — the non-hook recording path
 
 ## Development
@@ -221,7 +225,8 @@ corepack pnpm check     # build, typecheck, tests, Phase 0 corpus, evidence trac
 ```
 
 `pnpm check` is the single definition of correctness; CI runs that same command rather than a
-parallel definition of its own.
+parallel definition of its own. The event protocol carries its own contract corpus —
+`node tools/phase0/validate.mjs` checks every fixture against the schemas, with no runtime involved.
 
 ### Before pushing, run it on Linux too
 
