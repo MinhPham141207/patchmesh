@@ -54,13 +54,15 @@ export function recognizesClaudeHostTool(hostToolName: string): boolean {
 
 /**
  * Reads exactly the fields today's `HookPayload` relies on from a Claude Code `PostToolUse`
- * envelope. An envelope without `hook_event_name`, or whose `tool_name` is not a non-empty
- * string, is not one this adapter can own - returning null lets the caller decide what an
- * unclaimed envelope means rather than recording a half-understood call.
+ * envelope. An envelope whose `tool_name` is not a non-empty string is not one this adapter
+ * can own - returning null lets the caller decide what an unclaimed envelope means rather
+ * than recording a half-understood call.
+ *
+ * `hook_event_name` is deliberately not required: the redactor journals it only when the host
+ * sends it, so older journalled entries reach ingest without it and must keep ingesting.
  */
 export function parseClaudeEnvelope(envelope: unknown): HostRecord | null {
   if (!isRecord(envelope)) return null;
-  if (envelope["hook_event_name"] === undefined) return null;
   const rawToolName = envelope["tool_name"];
   const hostToolName = typeof rawToolName === "string" ? rawToolName.trim() : "";
   if (hostToolName === "") return null;
@@ -72,6 +74,7 @@ export function parseClaudeEnvelope(envelope: unknown): HostRecord | null {
     response: envelope["tool_response"],
     delegateId: stringOrNull(envelope["tool_use_id"]),
     delegateType: stringOrNull(envelope["agent_type"]),
+    subagentId: stringOrNull(envelope["agent_id"]),
   };
 }
 

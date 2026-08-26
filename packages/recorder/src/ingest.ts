@@ -319,10 +319,11 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
     }
 
     try {
+      const journalPayload = entry.payload as HookPayload;
       const sessionId = sessionIdOf(entry.payload);
       if (sessionId !== null) activeSessions.add(sessionId);
       const { requested, completed } = buildHookEvents({
-        payload: entry.payload as HookPayload,
+        payload: journalPayload,
         worktreeRoot,
         now: () => entry.at,
         turnTaskId: sessionId === null ? null : ((turnTasks.get(sessionId)?.taskId ?? null) as TaskId | null),
@@ -339,7 +340,11 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
         completedAtMs: new Date(entry.at).getTime(),
         // What the call's own input declared, normalized as a change's path is, so a change
         // can name this call even where the mtime join is ambiguous or unanswerable.
-        declaredPath: declaredLogicalPath(worktreeRoot, entry.payload as HookPayload),
+        declaredPath: declaredLogicalPath(
+          worktreeRoot,
+          typeof journalPayload.tool_name === "string" ? journalPayload.tool_name : "",
+          journalPayload.tool_input,
+        ),
       });
       ingested += 1;
     } catch {

@@ -1,0 +1,77 @@
+[
+  {
+    "session_id": "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+    "cwd": "/repo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_01frozenbash",
+    "transcript_path": "/repo/.claude/transcripts/frozen.jsonl",
+    "tool_input": { "command": "corepack pnpm --filter patchmesh-recorder test", "description": "run recorder suite" },
+    "tool_response": { "exit_code": 0 }
+  },
+  {
+    "session_id": "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+    "cwd": "/repo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Edit",
+    "tool_use_id": "toolu_01frozenedit",
+    "tool_input": { "file_path": "packages/recorder/src/hook.ts", "old_string": "const a = 1", "new_string": "const a = 2" },
+    "tool_response": { "exit_code": 0 }
+  },
+  {
+    "session_id": "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+    "cwd": "/repo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Read",
+    "tool_use_id": "toolu_01frozenread",
+    "tool_input": { "file_path": "README.md" },
+    "tool_response": {}
+  },
+  {
+    "session_id": "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+    "cwd": "/repo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "NotebookEdit",
+    "tool_use_id": "toolu_01frozennotebook",
+    "tool_input": { "notebook_path": "notes/scratch.ipynb", "new_source": "{}" },
+    "tool_response": { "exit_code": 0 }
+  },
+  {
+    "session_id": "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+    "cwd": "/repo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_01frozensubagentcall",
+    "agent_id": "agent_9f2c41de",
+    "agent_type": "Explore",
+    "tool_input": { "command": "git status --short" },
+    "tool_response": { "exit_code": 0 }
+  },
+  {
+    "session_id": "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+    "cwd": "/repo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Agent",
+    "tool_use_id": "toolu_01frozenspawn",
+    "tool_input": { "description": "explore host adapters", "subagent_type": "Explore", "prompt": "survey the hosts directory" },
+    "tool_response": { "agentId": "agent_9f2c41de", "agentType": "Explore" }
+  },
+  {
+    "session_id": "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+    "cwd": "/repo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "WebFetch",
+    "tool_use_id": "toolu_01frozenunknown",
+    "tool_input": { "url": "https://example.com/hosts" },
+    "tool_response": { "exit_code": 0 }
+  },
+  {
+    "session_id": "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+    "cwd": "/repo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_01frozenfailure",
+    "tool_input": { "command": "pnpm --filter missing-package build" },
+    "tool_response": { "exit_code": 1, "is_error": true }
+  }
+]

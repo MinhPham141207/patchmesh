@@ -1,0 +1,426 @@
+[
+  {
+    "requested": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000001",
+      "eventType": "tool.requested",
+      "causationId": null,
+      "payload": {
+        "toolName": "run_shell",
+        "hostToolName": "Bash",
+        "operation": "Bash corepack pnpm --filter patchmesh-recorder test",
+        "targetResourceId": null,
+        "opaque": true
+      }
+    },
+    "completed": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000002",
+      "eventType": "tool.completed",
+      "causationId": "evt_00000000000000000000000000000001",
+      "payload": {
+        "requestEventId": "evt_00000000000000000000000000000001",
+        "outcome": "succeeded",
+        "exitCode": 0,
+        "effectEventIds": []
+      }
+    }
+  },
+  {
+    "requested": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000003",
+      "eventType": "tool.requested",
+      "causationId": null,
+      "payload": {
+        "toolName": "edit_file",
+        "hostToolName": "Edit",
+        "operation": "Edit packages/recorder/src/hook.ts",
+        "targetResourceId": "res_FROZEN",
+        "opaque": false
+      }
+    },
+    "completed": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000004",
+      "eventType": "tool.completed",
+      "causationId": "evt_00000000000000000000000000000003",
+      "payload": {
+        "requestEventId": "evt_00000000000000000000000000000003",
+        "outcome": "succeeded",
+        "exitCode": 0,
+        "effectEventIds": []
+      }
+    }
+  },
+  {
+    "requested": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000005",
+      "eventType": "tool.requested",
+      "causationId": null,
+      "payload": {
+        "toolName": "read_file",
+        "hostToolName": "Read",
+        "operation": "Read README.md",
+        "targetResourceId": "res_FROZEN",
+        "opaque": false
+      }
+    },
+    "completed": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000006",
+      "eventType": "tool.completed",
+      "causationId": "evt_00000000000000000000000000000005",
+      "payload": {
+        "requestEventId": "evt_00000000000000000000000000000005",
+        "outcome": "succeeded",
+        "exitCode": null,
+        "effectEventIds": []
+      }
+    }
+  },
+  {
+    "requested": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000007",
+      "eventType": "tool.requested",
+      "causationId": null,
+      "payload": {
+        "toolName": "edit_file",
+        "hostToolName": "NotebookEdit",
+        "operation": "NotebookEdit notes/scratch.ipynb",
+        "targetResourceId": "res_FROZEN",
+        "opaque": false
+      }
+    },
+    "completed": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000008",
+      "eventType": "tool.completed",
+      "causationId": "evt_00000000000000000000000000000007",
+      "payload": {
+        "requestEventId": "evt_00000000000000000000000000000007",
+        "outcome": "succeeded",
+        "exitCode": 0,
+        "effectEventIds": []
+      }
+    }
+  },
+  {
+    "requested": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c.sub.agent_9f2c41de",
+      "taskId": "task_agent_9f2c41de",
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000009",
+      "eventType": "tool.requested",
+      "causationId": null,
+      "payload": {
+        "toolName": "run_shell",
+        "hostToolName": "Bash",
+        "operation": "Bash git status --short",
+        "targetResourceId": null,
+        "opaque": true
+      }
+    },
+    "completed": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c.sub.agent_9f2c41de",
+      "taskId": "task_agent_9f2c41de",
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_0000000000000000000000000000000a",
+      "eventType": "tool.completed",
+      "causationId": "evt_00000000000000000000000000000009",
+      "payload": {
+        "requestEventId": "evt_00000000000000000000000000000009",
+        "outcome": "succeeded",
+        "exitCode": 0,
+        "effectEventIds": []
+      }
+    }
+  },
+  {
+    "requested": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": "task_agent_9f2c41de",
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_0000000000000000000000000000000b",
+      "eventType": "tool.requested",
+      "causationId": null,
+      "payload": {
+        "toolName": "spawn_subagent",
+        "hostToolName": "Agent",
+        "operation": "Agent",
+        "targetResourceId": null,
+        "opaque": true
+      }
+    },
+    "completed": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": "task_agent_9f2c41de",
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_0000000000000000000000000000000c",
+      "eventType": "tool.completed",
+      "causationId": "evt_0000000000000000000000000000000b",
+      "payload": {
+        "requestEventId": "evt_0000000000000000000000000000000b",
+        "outcome": "succeeded",
+        "exitCode": null,
+        "effectEventIds": []
+      }
+    }
+  },
+  {
+    "requested": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_0000000000000000000000000000000d",
+      "eventType": "tool.requested",
+      "causationId": null,
+      "payload": {
+        "toolName": "other",
+        "hostToolName": "WebFetch",
+        "operation": "WebFetch",
+        "targetResourceId": null,
+        "opaque": true
+      }
+    },
+    "completed": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_0000000000000000000000000000000e",
+      "eventType": "tool.completed",
+      "causationId": "evt_0000000000000000000000000000000d",
+      "payload": {
+        "requestEventId": "evt_0000000000000000000000000000000d",
+        "outcome": "succeeded",
+        "exitCode": 0,
+        "effectEventIds": []
+      }
+    }
+  },
+  {
+    "requested": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_0000000000000000000000000000000f",
+      "eventType": "tool.requested",
+      "causationId": null,
+      "payload": {
+        "toolName": "run_shell",
+        "hostToolName": "Bash",
+        "operation": "Bash pnpm --filter missing-package build",
+        "targetResourceId": null,
+        "opaque": true
+      }
+    },
+    "completed": {
+      "schemaVersion": 1,
+      "source": {
+        "kind": "gateway",
+        "sourceId": "source_claude_code_hook",
+        "instanceId": "80d97f96-b9f0-5a06-a8a3-af5a3f3bb5c0"
+      },
+      "timestamp": "2026-08-26T00:00:00.000Z",
+      "repositoryId": "repo_FROZEN",
+      "workspaceId": "ws_FROZEN",
+      "worktreeId": "wt_FROZEN",
+      "agentId": "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17",
+      "taskId": null,
+      "correlationId": "corr_FROZEN",
+      "sourceSequence": null,
+      "eventId": "evt_00000000000000000000000000000010",
+      "eventType": "tool.completed",
+      "causationId": "evt_0000000000000000000000000000000f",
+      "payload": {
+        "requestEventId": "evt_0000000000000000000000000000000f",
+        "outcome": "failed",
+        "exitCode": 1,
+        "effectEventIds": []
+      }
+    }
+  }
+]

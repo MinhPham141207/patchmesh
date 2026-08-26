@@ -10,6 +10,7 @@ import {
   deterministicUuid,
 } from "./identity.js";
 import { normalizeTool } from "./tool-mapping.js";
+import { resolveHostAdapter } from "./hosts/index.js";
 import { resolveSourceHost, sourceIdForHost } from "./source.js";
 
 /** The subset of a Claude Code `PostToolUse` hook payload the recorder relies on. */
@@ -99,14 +100,13 @@ function pathFrom(toolInput: unknown, property: string | null): string | null {
  * none.
  *
  * Shared between the recorded pair and effect attribution so both read the same declaration
- * the same way -- including which `tool_input` property counts (a notebook edit declares
+ * the same way -- including which input property counts (a notebook edit declares
  * `notebook_path`, not `file_path`). Normalized by `logicalPathFor`, so a declared path and
  * an observed change's path compare equal.
  */
-export function declaredLogicalPath(worktreeRoot: string, payload: HookPayload): string | null {
-  const hostToolName = typeof payload.tool_name === "string" ? payload.tool_name.trim() : "";
-  const normalized = normalizeTool(hostToolName, commandOf(payload.tool_input));
-  const rawPath = pathFrom(payload.tool_input, normalized.pathProperty);
+export function declaredLogicalPath(worktreeRoot: string, hostToolName: string, toolInput: unknown): string | null {
+  const normalized = normalizeTool(hostToolName.trim(), commandOf(toolInput));
+  const rawPath = pathFrom(toolInput, normalized.pathProperty);
   return rawPath === null ? null : logicalPathFor(worktreeRoot, rawPath);
 }
 
@@ -138,21 +138,23 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
   const now = options.now ?? (() => new Date().toISOString());
   const nextEventId = options.nextEventId ?? createEventId;
 
-  const hostToolName = typeof payload.tool_name === "string" ? payload.tool_name.trim() : "";
-  if (hostToolName === "") throw new HookRecordingError("hook payload has no tool_name");
+  const adapter = resolveHostAdapter(resolveSourceHost());
+  const record = adapter.parse(payload);
+  if (record === null) throw new HookRecordingError("payload matched no installed host adapter");
 
-  const sessionId = typeof payload.session_id === "string" ? payload.session_id : "";
+  const hostToolName = record.hostToolName;
+  const sessionId = record.sessionId;
   const identity = resolveRepositoryIdentity(worktreeRoot);
-  const normalized = normalizeTool(hostToolName, commandOf(payload.tool_input));
-  // Both halves of the link are declared by the host: a subagent's calls carry `agent_id`,
+  const normalized = normalizeTool(hostToolName, commandOf(record.input));
+  // Both halves of the link are declared by the host: a subagent's calls carry its own id,
   // and the spawn's response carries that same id. Nothing here is inferred.
-  const fields = attributionFieldsOf(payload);
+  const fields = attributionFieldsOf(record);
   const attribution =
     options.attribution ??
     resolveAttribution({ sessionId, hostToolName, ...fields, turnTaskId: options.turnTaskId ?? null });
   const agentId: AgentId | null = attribution.agentId;
   const taskId: TaskId | null = attribution.taskId;
-  const logicalPath = declaredLogicalPath(identity.worktreeRoot, payload);
+  const logicalPath = declaredLogicalPath(identity.worktreeRoot, hostToolName, record.input);
   const targetResourceId =
     logicalPath === null ? null : resourceIdForPath(identity.repositoryId, logicalPath);
 
@@ -179,7 +181,7 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
     sourceSequence: null,
   };
 
-  const { outcome, exitCode } = outcomeOf(payload.tool_response);
+  const { outcome, exitCode } = outcomeOf(record.response);
 
   const requested = {
     ...envelope,
@@ -189,7 +191,7 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
     payload: {
       toolName: normalized.toolName,
       hostToolName,
-      operation: describedOperation(hostToolName, payload.tool_input, logicalPath),
+      operation: describedOperation(hostToolName, record.input, logicalPath),
       targetResourceId,
       // A resolvable in-repository path is the only thing that makes a call non-opaque.
       opaque: normalized.opaque || targetResourceId === null,

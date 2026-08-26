@@ -79,10 +79,20 @@ export function resolveAttribution(input: AttributionInput): CallAttribution {
   return { agentId: sessionAgentId, taskId: input.turnTaskId ?? null };
 }
 
-/** Read the attribution fields out of a redacted hook payload. */
-export function attributionFieldsOf(payload: unknown): { agentId: string | null; spawnedAgentId: string | null } {
+/** The normalized host-record shape attribution is read from. */
+export interface AttributionFieldsSource {
+  /** The delegate that made this call, when the host named one (Claude's `agent_id`). */
+  readonly subagentId?: unknown;
+  readonly response?: unknown;
+}
+
+/**
+ * Read the attribution fields out of a normalized host record: the subagent that made this
+ * call, and the delegate a spawn's response says it created.
+ */
+export function attributionFieldsOf(record: AttributionFieldsSource): { agentId: string | null; spawnedAgentId: string | null } {
   return {
-    agentId: stringField(payload, "agent_id"),
-    spawnedAgentId: stringField(isRecord(payload) ? payload["tool_response"] : null, "agentId"),
+    agentId: typeof record.subagentId === "string" && record.subagentId !== "" ? record.subagentId : null,
+    spawnedAgentId: stringField(record.response, "agentId"),
   };
 }

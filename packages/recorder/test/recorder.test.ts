@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseEvent, validateEventSet } from "patchmesh-protocol";
+import { parseEvent, validateEventSet, type EventId } from "patchmesh-protocol";
 import { SqliteEventStore } from "patchmesh-storage";
 import {
   appendJournalEntry,
@@ -22,6 +22,7 @@ import {
   resolveRepositoryIdentity,
   resolveSourceHost,
 } from "../src/index.js";
+import type { HookPayload } from "../src/index.js";
 
 function withPatchMeshHost<T>(value: string | undefined, run: () => T): T {
   const previous = process.env.PATCHMESH_HOST;
@@ -493,4 +494,59 @@ test("a file that no longer matches the version observed is not analyzed as that
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// The committed envelopes below are real-shaped Claude Code `PostToolUse` payloads (secret-free,
+// reduced to the fields the recorder reads) covering a shell call, an edit, a read, a notebook
+// edit, a subagent's own call, the spawn that created it, an unmapped tool, and a failure. They
+// are replayed through `buildHookEvents` and compared field-for-field against events captured
+// from the pre-adapter implementation, so the HostRecord refactor is proven not to move a byte.
+const FROZEN_ENVELOPES = JSON.parse(
+  readFileSync(new URL("./fixtures/claude-frozen-envelopes.json", import.meta.url), "utf8"),
+) as readonly Record<string, unknown>[];
+const FROZEN_EVENTS = JSON.parse(
+  readFileSync(new URL("./fixtures/claude-frozen-events.json", import.meta.url), "utf8"),
+) as readonly unknown[];
+
+// Path-hashed identities differ per checkout and correlation ids are random per call, so those
+// alone are frozen to tokens; every other field must match the capture exactly.
+const UUID_LIKE = /^(?:repo|ws|wt)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+function frozenView(value: unknown): unknown {
+  if (typeof value === "string") {
+    if (/^corr_[0-9a-f]{32}$/u.test(value)) return "corr_FROZEN";
+    if (/^res_[0-9a-f]{64}$/u.test(value)) return "res_FROZEN";
+    if (UUID_LIKE.test(value)) return `${value.slice(0, value.indexOf("_"))}_FROZEN`;
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(frozenView);
+  if (value !== null && typeof value === "object") {
+    const copy: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) copy[key] = frozenView((value as Record<string, unknown>)[key]);
+    return copy;
+  }
+  return value;
+}
+
+test("the host-record refactor leaves event construction identical on frozen envelopes", () => {
+  withPatchMeshHost(undefined, () => {
+    const root = temporaryWorktree();
+    try {
+      const now = (): string => "2026-08-26T00:00:00.000Z";
+      let counter = 0;
+      const nextEventId = (): EventId => `evt_${(++counter).toString(16).padStart(32, "0")}`;
+      FROZEN_ENVELOPES.forEach((envelope, index) => {
+        const actual = buildHookEvents({
+          payload: envelope as HookPayload,
+          worktreeRoot: root,
+          now,
+          nextEventId,
+        });
+        assert.match(actual.requested.correlationId, /^corr_[0-9a-f]{32}$/u);
+        assert.equal(actual.completed.correlationId, actual.requested.correlationId);
+        assert.deepEqual(frozenView(JSON.parse(JSON.stringify(actual))), FROZEN_EVENTS[index]);
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
