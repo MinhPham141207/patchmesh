@@ -84,7 +84,9 @@ Found by re-judging the product against the live ledger rather than against its 
 
 | Item | What landed |
 | --- | --- |
-| [Projection checkpoint](../superpowers/specs/2026-08-26-projection-checkpoint-design.md) | Read commands serve graph projections from a persisted, hash-checked checkpoint and apply only new events. Full replay remains available via `patchmesh status --verify` and runs on every `doctor`. |
+| [Projection checkpoint](../superpowers/specs/2026-08-26-projection-checkpoint-design.md) | `status` and `agents` serve graph projections from a persisted, hash-checked checkpoint and apply only new events. Full replay remains available via `patchmesh status --verify` and runs on every `doctor`. |
+
+Measured honestly: on the live ledger, warm `status` went 3,498ms -> 1,495ms, and what remains is dominated by module load plus journal-freshen delta application during active work. The zero-delta serve on an idle ledger is the fast path the checkpoint buys; reads taken mid-work pay the drain-and-delta cost.
 
 ## Closed, recorded so they are not re-litigated
 
