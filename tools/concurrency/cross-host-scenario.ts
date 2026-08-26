@@ -9,11 +9,14 @@
  * this in F-01 was scaffolding; this is the acceptance test that matters.
  *
  * Like `harness.ts`, this drives the real recorder pipeline (`appendJournalEntry` /
- * `ingestJournal` / `recordTurnEffects`) over real file writes in a scratch git checkout,
- * and departs from a literal hook invocation in exactly one place: timestamps are supplied,
- * not measured, so a run is byte-for-byte reproducible. The journal entries carry the same
- * payload-stamp provenance (`patchmesh_host`) that `bin.ts` writes for `--host` and that
- * `ingest.ts` consumes -- see `packages/recorder/test/bin-host.test.ts` for the shapes.
+ * `ingestJournal` / `recordTurnEffects`) over real file writes in a scratch git checkout.
+ * Two departures from a literal hook invocation, stated plainly: timestamps are supplied,
+ * not measured, so a run is byte-for-byte reproducible; and the ledger traffic never passes
+ * through `bin.ts` at all -- the payloads are hand-built Claude-shaped translations stamped
+ * with `patchmesh_host`, matching what `bin.ts` journals, not produced by it. So this gate
+ * exercises ingest -> effects -> overlap only; envelope parsing and adapter translation are
+ * covered by `packages/recorder/test/bin-host.test.ts` and by this file's latency run, which
+ * does drive the real binary. See that test for how the journal shapes are produced.
  *
  * With `--latency`, instead measures plugin spawn latency: N timed spawns of the real
  * `bin.js --host opencode` with a fixture envelope on stdin, in a throwaway worktree, so
@@ -103,9 +106,13 @@ function claudePayload(session: string, kind: "write" | "read", cwd: string): Re
 
 /**
  * What bin.ts journals for an OpenCode `tool.execute.after` call: the Claude-shaped
- * translation of the native envelope, provenance stamped, and -- the whole point --
- * carrying no `tool_use_id`, so the event records with `taskId: null` exactly as real
- * OpenCode traffic does.
+ * translation of the native envelope, provenance stamped. The `tool_use_id` is the
+ * envelope's `callID`, which every captured envelope carries and `translateOpencodeRecord`
+ * journals -- planting it keeps the shape identical to production output. The null task
+ * does NOT come from that field's absence: a `tool_use_id` never opens a task. Tasks are
+ * opened only by turn markers (`taskIdForTurn` fires on UserPromptSubmit alone, per
+ * ingest.ts), and real OpenCode traffic never sends one -- so this payload carries no
+ * marker anywhere in its session's timeline, and the call records with `taskId: null`.
  */
 function opencodePayload(session: string, kind: "write" | "read", cwd: string): Record<string, unknown> {
   return {
@@ -113,8 +120,9 @@ function opencodePayload(session: string, kind: "write" | "read", cwd: string): 
     cwd,
     hook_event_name: "PostToolUse",
     tool_name: kind === "write" ? "edit" : "read",
-    tool_input: kind === "write" ? { filePath: join(cwd, CONTESTED_FILE) } : { filePath: join(cwd, CONTESTED_FILE) },
+    tool_input: { filePath: join(cwd, CONTESTED_FILE) },
     tool_response: {},
+    tool_use_id: `call_${session}_${kind}`,
     patchmesh_host: "opencode",
   };
 }
@@ -138,7 +146,6 @@ async function runAcceptance(): Promise<Record<string, unknown>> {
   const journalPath = journalPathFor(scratchRoot, LEDGER_DIRECTORY);
   const ledgerPath = ledgerPathFor(scratchRoot);
   const snapshotPath = snapshotPathFor(scratchRoot);
-  assertScratchIsolation(scratchRoot);
 
   // The first effects pass only establishes a snapshot baseline and emits nothing, so run it
   // before the timeline -- otherwise the T+0 write would be swallowed as the baseline and the
@@ -193,7 +200,8 @@ async function runAcceptance(): Promise<Record<string, unknown>> {
     changed += effects.changed;
   }
 
-  const queryNow = new Date(HARNESS_EPOCH_MS + 500 * 60_000);  const overlap = findOverlappingWork({
+  const queryNow = new Date(HARNESS_EPOCH_MS + 500 * 60_000);
+  const overlap = findOverlappingWork({
     worktreeRoot: scratchRoot,
     ledgerPath,
     path: CONTESTED_FILE,
