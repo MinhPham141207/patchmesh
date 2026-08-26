@@ -6,9 +6,11 @@ import { normalizeOpencodeTool, opencodeAdapter } from "./opencode.js";
 import type { CoverageTier, HostAdapter, HostId, HostProvenance, HostRecord } from "./types.js";
 
 /**
- * The hosts this recorder knows how to parse. Adapters join as their tasks land; an
- * envelope from a host that is not listed here is not silently dropped - resolution falls
- * back to Claude Code, which is the only envelope shape recorded so far.
+ * The hosts this recorder knows how to parse. Three adapters are registered here. An
+ * envelope whose `--host` id is not one of them is not silently dropped: resolution falls
+ * back to the Claude Code adapter only for UNKNOWN host ids, while `parseForHost`
+ * dispatches on the envelope's own shape across adapters, so an observed-tier host's
+ * translated payloads are recorded by whichever adapter claims them.
  */
 const HOST_ADAPTERS: readonly HostAdapter[] = [claudeCodeAdapter, opencodeAdapter, genericMcpAdapter];
 

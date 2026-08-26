@@ -178,6 +178,29 @@ test("an OpenCode record with status error completes as failed", () => {
   }
 });
 
+test("a before-stage relay journals nothing while the after-stage equivalent still does", () => {
+  const root = temporaryWorktree();
+  try {
+    // What an older generated plugin sends before the call runs: the same envelope shape
+    // the after-relay uses, carrying `stage: "before"`. Recording it would fabricate a
+    // successful completion ahead of the call and double-record everything.
+    const before = { stage: "before", tool: "edit", sessionID: "s1", callID: "c1", input: { filePath: "a.ts" } };
+    const skipped = withoutHostEnv(() => runBinary(root, [], before));
+    assert.equal(skipped.status, 0);
+    assert.equal(existsSync(journalPathFor(root, LEDGER_DIRECTORY)), false, "a before-relay records nothing");
+
+    const after = { stage: "after", tool: "edit", sessionID: "s1", callID: "c1", input: { filePath: "a.ts" }, output: "ok" };
+    const recorded = withoutHostEnv(() => runBinary(root, [], after));
+    assert.equal(recorded.status, 0);
+    assert.equal(existsSync(journalPathFor(root, LEDGER_DIRECTORY)), true);
+
+    const ingest = withoutHostEnv(() => ingestInto(root));
+    assert.equal(ingest.ingested, 1, "exactly one call is recorded for the pair");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("buildHookEvents derives failed from an adapter's explicit error signal alone", () => {
   const root = temporaryWorktree();
   try {

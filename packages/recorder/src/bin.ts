@@ -225,6 +225,16 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       return 0;
     }
     const payload: unknown = JSON.parse(raw);
+    // A `stage: "before"` relay is OpenCode's pre-call notification. Recording one would
+    // journal a full completion-shaped payload BEFORE the call has run, so every call would
+    // be recorded twice once its after-relay landed too. The gate reads the raw parsed
+    // object because redaction whitelists field names and strips `stage` before anything
+    // downstream could see it. Nothing is journaled and the process still exits 0 - the same
+    // always-exit-0 discipline as every other failure here.
+    if (isRecord(payload) && payload["stage"] === "before") {
+      debug("before-stage relay: nothing recorded");
+      return 0;
+    }
     const cwd = isRecord(payload) && typeof payload["cwd"] === "string" ? payload["cwd"] : process.cwd();
     const worktreeRoot = findWorktreeRoot(cwd);
     if (worktreeRoot === null) {

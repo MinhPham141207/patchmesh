@@ -467,6 +467,11 @@ function registerServer(worktreeRoot: string, binaries: Binaries, force: boolean
  * plugin is code that has to run the recorder itself - and it swallows every error, because
  * recording may cost time but must never break a tool call.
  *
+ * Only `tool.execute.after` is relayed. A `tool.execute.before` relay would journal a full
+ * completion-shaped payload before the call has run, double-recording every call; the
+ * recorder also drops such payloads defensively, but an installed plugin predating that fix
+ * is the only thing that still needs the guard.
+ *
  * The recorder reference is baked in at write time in one of the three shapes
  * `resolveBinaries` produces. A repo-relative path is resolved by the plugin itself against
  * the repository root derived from its own location (`<root>/.opencode/plugins/`), which is
@@ -494,7 +499,7 @@ export function opencodePluginSource(recorder: RecorderBinary): string {
     '  return fileURLToPath(new URL("../..", import.meta.url));',
     "}",
     "",
-    "function record(stage) {",
+    "function record() {",
     "  return (input) => {",
     "    try {",
     "      const bin = RECORDER_RELATIVE ? join(repoRoot(), RECORDER_BIN) : RECORDER_BIN;",
@@ -506,7 +511,7 @@ export function opencodePluginSource(recorder: RecorderBinary): string {
     "        command,",
     '        [...recorderArgs, "--host", "opencode"],',
     "        {",
-    '          input: JSON.stringify({ stage, ...(input ?? {}) }),',
+    "          input: JSON.stringify(input ?? {}),",
     '          stdio: ["pipe", "ignore", "ignore"],',
     "          timeout: 10000,",
     "          shell: false,",
@@ -518,9 +523,9 @@ export function opencodePluginSource(recorder: RecorderBinary): string {
     "  };",
     "}",
     "",
+    "// Only the after-stage is relayed: a before-relay would record every call twice.",
     "export const PatchMeshPlugin = async () => ({",
-    '  "tool.execute.before": record("before"),',
-    '  "tool.execute.after": record("after"),',
+    '  "tool.execute.after": record(),',
     "});",
     "",
   ];

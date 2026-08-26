@@ -467,6 +467,9 @@ test("the generated plugin spawns the resolved recorder binary", () => {
     // though the recorder's default is Claude Code.
     assert.match(plugin, /--host opencode/);
     assert.match(plugin, /bin\.js/, "the recorder reference must name a dist binary");
+    // Only the after-stage is relayed: a before-relay journals a fabricated completion
+    // before the call runs and double-records every call.
+    assert.doesNotMatch(plugin, /tool\.execute\.before/u);
     // OpenCode loads plugins under Bun and Node alike, so nothing beyond node builtins may
     // be assumed - not even this repository's own packages.
     for (const specifier of [...plugin.matchAll(/^import .* from "(.+?)";$/gmu)].map((match) => match[1]!)) {
@@ -503,7 +506,7 @@ test("the generated plugin resolves repo-relative binaries against the repositor
     const hooks = (await plugin.PatchMeshPlugin()) as Record<string, (input: unknown) => void>;
     const marker = join(root, "marker.txt");
     process.env[markerEnv] = marker;
-    hooks["tool.execute.before"]({ tool: "probe" });
+    hooks["tool.execute.after"]({ tool: "probe" });
 
     assert.equal(existsSync(marker), true, "the plugin must reach the recorder relative to the repository root");
   } finally {
