@@ -16,6 +16,14 @@ export { clearEventCache, eventCacheStats, readEventsCached, readWindowCached } 
 export { replayEvents } from "./replay.js";
 export type { ReplayReducer, ReplayResult, SourceSequenceGap } from "./replay.js";
 export { SqliteEventStore } from "./event-store.js";
+export {
+  PROJECTOR_VERSION,
+  checkpointRecordHash,
+  clearProjectionCheckpoint,
+  loadProjectionCheckpoint,
+  saveProjectionCheckpoint,
+  type ProjectionCheckpointRecord,
+} from "./projection-checkpoint.js";
 export { WorkGraphProjector, projectWorkGraph } from "./work-graph.js";
 export type {
   AgentNode,

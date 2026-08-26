@@ -17,6 +17,10 @@ const migrations = [
     id: "003_recall_indexes",
     path: new URL("./migrations/003_recall_indexes.sql", import.meta.url),
   },
+  {
+    id: "004_projection_checkpoint",
+    path: new URL("./migrations/004_projection_checkpoint.sql", import.meta.url),
+  },
 ] as const;
 
 function migrationSql(path: URL): string {
