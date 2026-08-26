@@ -9,9 +9,8 @@ import {
   resourceIdForPath,
   deterministicUuid,
 } from "./identity.js";
-import { normalizeTool } from "./tool-mapping.js";
-import { parseForHost } from "./hosts/index.js";
-import { resolveSourceHost, sourceIdForHost } from "./source.js";
+import { normalizeToolFor, parseForHost } from "./hosts/index.js";
+import { resolveProvenanceHost, sourceIdForHost } from "./source.js";
 
 /** The subset of a Claude Code `PostToolUse` hook payload the recorder relies on. */
 export interface HookPayload {
@@ -32,6 +31,14 @@ export interface HookPayload {
   /** Present only on a call a subagent made: the host's id for that delegate. */
   readonly agent_id?: unknown;
   readonly agent_type?: unknown;
+  /**
+   * Per-payload provenance stamp journalled by the hook binary from its `--host` flag or
+   * from recognizing a native envelope. It decides both the source id and which host's
+   * tool table normalizes the call, so a drained journal reads as the host that recorded
+   * it, not the one draining it. Absent means decide from the environment, which keeps
+   * older journals and direct `recordHook` callers exactly where they were.
+   */
+  readonly patchmesh_host?: unknown;
 }
 
 export interface RecordedPair {
@@ -74,14 +81,17 @@ function describedOperation(hostToolName: string, toolInput: unknown, logicalPat
 
 /**
  * Hosts report failure inconsistently across tools, so only an explicit signal is read as
- * failure. An unreadable response is recorded as succeeded with a null exit code rather
- * than inventing an outcome; coverage, not the outcome field, carries that uncertainty.
+ * failure - either the response's own error markers or the adapter's, extracted from a
+ * field the host declares for exactly this (OpenCode's `status: "error"`). An unreadable
+ * response is recorded as succeeded with a null exit code rather than inventing an outcome;
+ * coverage, not the outcome field, carries that uncertainty.
  */
-function outcomeOf(toolResponse: unknown): { outcome: "succeeded" | "failed"; exitCode: number | null } {
-  if (!isRecord(toolResponse)) return { outcome: "succeeded", exitCode: null };
+function outcomeOf(toolResponse: unknown, adapterSignalledError: boolean): { outcome: "succeeded" | "failed"; exitCode: number | null } {
+  if (!isRecord(toolResponse)) return { outcome: adapterSignalledError ? "failed" : "succeeded", exitCode: null };
   const rawExit = toolResponse["exit_code"] ?? toolResponse["exitCode"];
   const exitCode = typeof rawExit === "number" && Number.isInteger(rawExit) ? rawExit : null;
   const errored =
+    adapterSignalledError ||
     toolResponse["is_error"] === true ||
     toolResponse["isError"] === true ||
     typeof toolResponse["error"] === "string" ||
@@ -104,8 +114,8 @@ function pathFrom(toolInput: unknown, property: string | null): string | null {
  * `notebook_path`, not `file_path`). Normalized by `logicalPathFor`, so a declared path and
  * an observed change's path compare equal.
  */
-export function declaredLogicalPath(worktreeRoot: string, hostToolName: string, toolInput: unknown): string | null {
-  const normalized = normalizeTool(hostToolName.trim(), commandOf(toolInput));
+export function declaredLogicalPath(worktreeRoot: string, hostId: string, hostToolName: string, toolInput: unknown): string | null {
+  const normalized = normalizeToolFor(hostId, hostToolName.trim(), commandOf(toolInput));
   const rawPath = pathFrom(toolInput, normalized.pathProperty);
   return rawPath === null ? null : logicalPathFor(worktreeRoot, rawPath);
 }
@@ -138,13 +148,20 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
   const now = options.now ?? (() => new Date().toISOString());
   const nextEventId = options.nextEventId ?? createEventId;
 
-  const record = parseForHost(resolveSourceHost(), payload);
+  // Provenance is per payload first: a stamp the hook binary journalled travels with the
+  // entry, so draining later - in another environment, on another host - cannot re-decide
+  // which host recorded this call. Parsing still follows envelope shape via `parseForHost`.
+  const hostId = resolveProvenanceHost(payload.patchmesh_host);
+  const record = parseForHost(hostId, payload);
   if (record === null) throw new HookRecordingError("payload matched no installed host adapter");
 
   const hostToolName = record.hostToolName;
   const sessionId = record.sessionId;
   const identity = resolveRepositoryIdentity(worktreeRoot);
-  const normalized = normalizeTool(hostToolName, commandOf(record.input));
+  // The tool table follows provenance, not envelope shape: an OpenCode call that arrives
+  // translated into Claude's field names keeps its own lowercase name (`edit`), and only
+  // OpenCode's table knows what to do with it.
+  const normalized = normalizeToolFor(hostId, hostToolName, commandOf(record.input));
   // Both halves of the link are declared by the host: a subagent's calls carry its own id,
   // and the spawn's response carries that same id. Nothing here is inferred.
   const fields = attributionFieldsOf(record);
@@ -153,13 +170,13 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
     resolveAttribution({ sessionId, hostToolName, ...fields, turnTaskId: options.turnTaskId ?? null });
   const agentId: AgentId | null = attribution.agentId;
   const taskId: TaskId | null = attribution.taskId;
-  const logicalPath = declaredLogicalPath(identity.worktreeRoot, hostToolName, record.input);
+  const logicalPath = declaredLogicalPath(identity.worktreeRoot, hostId, hostToolName, record.input);
   const targetResourceId =
     logicalPath === null ? null : resourceIdForPath(identity.repositoryId, logicalPath);
 
   const source: Source = {
     kind: "gateway",
-    sourceId: sourceIdForHost(resolveSourceHost()),
+    sourceId: sourceIdForHost(hostId),
     // Stable per session so one agent session is one producer stream.
     instanceId: deterministicUuid("patchmesh:recorder-instance", sessionId),
   };
@@ -180,7 +197,7 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
     sourceSequence: null,
   };
 
-  const { outcome, exitCode } = outcomeOf(record.response);
+  const { outcome, exitCode } = outcomeOf(record.response, record.errored === true);
 
   const requested = {
     ...envelope,

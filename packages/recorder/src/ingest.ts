@@ -18,6 +18,7 @@ import { agentIdForSession, createEventId, resolveRepositoryIdentity, taskIdForT
 import { deriveAnalysisEvents, latestSymbolVersions } from "./symbols.js";
 import { ABANDONED_AFTER_MS } from "./inflight.js";
 import { appendJournalEntry, parseJournalLine, type JournalEntry } from "./journal.js";
+import { resolveProvenanceHost } from "./source.js";
 import {
   isCallStart,
   isTurnMarker,
@@ -342,6 +343,7 @@ function drainClaim(options: DrainClaimOptions): { ingested: number; skipped: nu
         // can name this call even where the mtime join is ambiguous or unanswerable.
         declaredPath: declaredLogicalPath(
           worktreeRoot,
+          resolveProvenanceHost(journalPayload.patchmesh_host),
           typeof journalPayload.tool_name === "string" ? journalPayload.tool_name : "",
           journalPayload.tool_input,
         ),

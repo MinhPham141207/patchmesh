@@ -62,6 +62,28 @@ export function parseOpencodeEnvelope(envelope: unknown): HostRecord | null {
     // stay unset rather than guessed from fields no envelope has been seen to carry.
     delegateType: null,
     subagentId: null,
+    // Only an explicit failure signal is read as one, mirroring how the Claude response
+    // fields are read; every other status value stays unreported.
+    ...(envelope["status"] === "error" ? { errored: true } : {}),
+  };
+}
+
+/**
+ * Renders a parsed record in the Claude hook field names so it can travel the same journal
+ * and redaction path as every other payload. The host's own tool name and argument keys are
+ * kept verbatim (`edit`, `filePath`) - mapping them onto the closed vocabulary is the per-
+ * host tool table's job at ingest, keyed by provenance. The error signal survives as the
+ * Claude-shaped `is_error` flag; the output body does not survive redaction anyway.
+ */
+export function translateOpencodeRecord(record: HostRecord): Record<string, unknown> {
+  const response = isRecord(record.response) ? record.response : {};
+  return {
+    session_id: record.sessionId,
+    hook_event_name: "PostToolUse",
+    tool_name: record.hostToolName,
+    ...(record.delegateId !== null ? { tool_use_id: record.delegateId } : {}),
+    tool_input: isRecord(record.input) ? record.input : {},
+    ...(record.errored === true ? { tool_response: { ...response, is_error: true } } : { tool_response: response }),
   };
 }
 

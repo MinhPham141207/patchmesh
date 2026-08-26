@@ -14,6 +14,17 @@ export function resolveSourceHost(env: NodeJS.ProcessEnv = process.env): string 
 }
 
 /**
+ * Provenance for one recorded payload: an explicit per-payload stamp wins over the
+ * environment. The hook binary journals `patchmesh_host` from its `--host` flag or from
+ * recognizing a native envelope, because the process that later drains the journal runs in
+ * a different environment than the one that recorded - without the stamp, draining would
+ * re-decide provenance by wherever ingest happens to run.
+ */
+export function resolveProvenanceHost(stamped: unknown, env: NodeJS.ProcessEnv = process.env): string {
+  return typeof stamped === "string" && SOURCE_ID_PATTERN.test(stamped) ? stamped : resolveSourceHost(env);
+}
+
+/**
  * The `source_<host>_hook` provenance stamped onto every recorded event. Host names use
  * dashes (`claude-code`), source ids historically used underscores, so the default maps back
  * to `source_claude_code_hook`: a Claude-only install keeps emitting exactly what it always

@@ -31,6 +31,9 @@ const KNOWN_PAYLOAD_KEYS = new Set([
   "duration_ms",
   "agent_id",
   "agent_type",
+  // Per-payload provenance the hook binary stamps from `--host` or native-envelope
+  // recognition; it decides source id and tool table at ingest.
+  "patchmesh_host",
 ]);
 
 const SECRET_NAME =
@@ -66,11 +69,21 @@ function textField(source: Record<string, unknown>, key: string): string | undef
  *
  * `file_path` and `notebook_path` name the resource a call acts on; `command` decides
  * `run_shell` versus `git_commit` and describes the operation; `description` and
- * `subagent_type` name a delegated task. Everything else - `content`, `old_string`,
- * `new_string`, `prompt` - is the payload's bulk and its risk, and is dropped. A file's
- * contents are never what the ledger needed.
+ * `subagent_type` name a delegated task. OpenCode envelopes keep their own argument keys
+ * (`filePath`, `path`) even when translated into Claude's field names - the per-host tool
+ * tables read those at ingest, so dropping them would make every OpenCode call opaque.
+ * Everything else - `content`, `old_string`, `new_string`, `prompt` - is the payload's bulk
+ * and its risk, and is dropped. A file's contents are never what the ledger needed.
  */
-const INPUT_TEXT_KEYS = ["file_path", "notebook_path", "command", "description", "subagent_type"] as const;
+const INPUT_TEXT_KEYS = [
+  "file_path",
+  "notebook_path",
+  "command",
+  "description",
+  "subagent_type",
+  "filePath",
+  "path",
+] as const;
 
 function redactToolInput(toolInput: unknown): Record<string, unknown> | undefined {
   if (!isRecord(toolInput)) return undefined;
@@ -133,6 +146,8 @@ export function redactHookPayload(payload: unknown): Record<string, unknown> | n
     // Present on a turn boundary: the host's opaque name for the request that opened it.
     // The prompt text itself is not whitelisted and never reaches disk.
     "prompt_id",
+    // Provenance stamp: an opaque host identifier, like `session_id`.
+    "patchmesh_host",
   ]) {
     const value = payload[key];
     if (typeof value === "string") safe[key] = value;

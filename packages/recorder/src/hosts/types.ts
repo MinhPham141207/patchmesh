@@ -18,6 +18,12 @@ export interface HostRecord {
   readonly delegateType: string | null;
   /** Present only on a call a subagent made (Claude's `agent_id`). */
   readonly subagentId?: string | null;
+  /**
+   * True only when the envelope itself signalled failure (OpenCode's `status: "error"`).
+   * Hosts report failure inconsistently, so absence means nothing either way - an unset
+   * field is never read as success by the outcome derivation, merely as unreported.
+   */
+  readonly errored?: boolean;
 }
 
 export interface HostAdapter {

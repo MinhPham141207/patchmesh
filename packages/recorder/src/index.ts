@@ -42,7 +42,7 @@ export {
 } from "./journal.js";
 export type { JournalEntry } from "./journal.js";
 export { redactHookPayload, redactText } from "./redact.js";
-export { resolveSourceHost, sourceIdForHost } from "./source.js";
+export { resolveProvenanceHost, resolveSourceHost, sourceIdForHost } from "./source.js";
 export { hostForSourceId, resolveHostAdapter, tierForSourceId } from "./hosts/index.js";
 export type { CoverageTier, HostId, HostProvenance } from "./hosts/index.js";
 export {

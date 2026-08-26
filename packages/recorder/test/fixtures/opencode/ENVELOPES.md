@@ -16,7 +16,7 @@ pre-call shape) is still unverified; what is evidenced is every field the adapte
 | Tool vocabulary | Lowercase built-ins observed: `bash`, `edit`, `write`, `read`, `grep`, `glob` |
 | Session identity | Every record carries `sessionID` (`ses_…`) — per-call attribution exists |
 | Call identity | Every record carries a `callID`, unique per call |
-| Arguments | `state.input`: bash → `{command}`, edit → `{filePath, oldString, newString}`, write → `{filePath, content}`, read → `{filePath, offset?, limit?}` |
+| Arguments | `state.input`: bash → `{command}`, edit → `{filePath, oldString, newString}`, write → `{filePath, content}`, read → `{filePath, offset?, limit?}`, grep → `{pattern, path?, include?}` (all three captures carry `path`), glob → `{pattern}` only — no capture shows glob carrying `path`, so its `path`-property mapping in the tool table is plausible-but-unverified |
 | Outcomes | `state.status`: `completed` (also `error` possible per docs) |
 | Path property for edits/writes | `filePath` |
 | Subagent/delegate naming | NOT answered by this capture — no delegate id appears in tool parts. F-01 §10 question 2 stays open at the adapter level |
@@ -24,6 +24,9 @@ pre-call shape) is still unverified; what is evidenced is every field the adapte
 ## Consequences for the adapter
 
 - Tier: **observed** stands — per-tool-call interception with session identity.
-- Tool table: lowercase names; file tools key on `filePath`; unrecognized → `other` opaque.
+- Tool table: lowercase names; file tools key on `filePath`; grep keys on its optional
+  `path`; glob is tabled with the same optional `path`, but no capture evidences one -
+  plausible-but-unverified, revisit if a glob capture ever carries it. Unrecognized →
+  `other` opaque.
 - Subagent calls cannot be named yet; all work attributes to the session agent. Recorded
   as residual risk, not papered over.

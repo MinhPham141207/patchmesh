@@ -11,19 +11,45 @@ import { findWorktreeRoot } from "./identity.js";
 import { appendJournalEntry, journalPathFor } from "./journal.js";
 import { redactHookPayload } from "./redact.js";
 import { advanceWatermark } from "./recent-writes.js";
+import { claudeCodeAdapter, isKnownHost, opencodeAdapter, translateOpencodeRecord } from "./hosts/index.js";
 
 /**
  * Hook entry point, on the agent's critical path.
  *
- * It imports only `./advisory.js`, `./identity.js`, `./journal.js`, and `./redact.js`, none of
- * which pull anything beyond Node builtins and each other. Importing `patchmesh-protocol` or
- * `patchmesh-storage` here would add roughly 400ms of Ajv import and schema compilation to
- * every single tool call; that work belongs in `patchmesh-ingest`, which pays it once. Keep
- * this module's import graph flat.
+ * It imports only `./advisory.js`, `./identity.js`, `./journal.js`, `./redact.js`, and
+ * `./hosts/index.js`, none of which pull anything beyond Node builtins and each other.
+ * Importing `patchmesh-protocol` or `patchmesh-storage` here would add roughly 400ms of Ajv
+ * import and schema compilation to every single tool call; that work belongs in
+ * `patchmesh-ingest`, which pays it once. Keep this module's import graph flat.
  */
 
 const LEDGER_DIRECTORY = ".patchmesh";
 const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The provenance for this invocation: the `--host <id>` the plugin passes, when it passes
+ * one. An unknown value is a wiring mistake that would otherwise stamp every call with a
+ * source id no query could group on, so nothing is recorded and the process still exits 0 -
+ * the same always-exit-0 discipline as every other failure here, discoverable under
+ * PATCHMESH_RECORDER_DEBUG.
+ */
+function requestedHost(argv: readonly string[]): string | null {
+  let host: string | null = null;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--host") {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith("--")) throw new Error("--host requires a value");
+      host = value;
+      index += 1;
+    } else if (argument !== undefined && argument.startsWith("--host=")) {
+      host = argument.slice("--host=".length);
+    } else {
+      throw new Error(`unsupported argument: ${String(argument)}`);
+    }
+  }
+  return host;
+}
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -179,8 +205,20 @@ export function emitTurnStartAdvisory(
  * able to fail the call it is observing: a recorder that can break the agent gets
  * uninstalled after one incident. Failures surface only under PATCHMESH_RECORDER_DEBUG.
  */
-export async function main(): Promise<number> {
+export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
   try {
+    let hostFlag: string | null = null;
+    try {
+      hostFlag = requestedHost(argv);
+    } catch (error) {
+      debug(error instanceof Error ? error.message : "unknown argument failure");
+      return 0;
+    }
+    if (hostFlag !== null && !isKnownHost(hostFlag)) {
+      debug(`unsupported host: ${hostFlag} (known: claude-code, opencode, generic-mcp)`);
+      return 0;
+    }
+
     const raw = await readStdin();
     if (raw.trim() === "") {
       debug("empty hook payload");
@@ -193,9 +231,22 @@ export async function main(): Promise<number> {
       debug("no git worktree found for hook cwd");
       return 0;
     }
+    // A native OpenCode envelope is journaled as its Claude-shaped translation with the
+    // provenance stamped on, whether or not `--host` was passed - the envelope's own shape
+    // is evidence of where it came from, and the redactor only whitelists the translated
+    // field names, so journaling the raw envelope would strip everything worth keeping.
+    // Provenance rides on the payload (`patchmesh_host`) rather than this process's
+    // environment because draining happens later, in a different process.
+    const nativeOpencode =
+      opencodeAdapter.parse(payload) !== null && claudeCodeAdapter.parse(payload) === null;
+    const toJournal = nativeOpencode
+      ? { ...translateOpencodeRecord(opencodeAdapter.parse(payload)!), patchmesh_host: "opencode" }
+      : hostFlag !== null
+        ? { ...(payload as Record<string, unknown>), patchmesh_host: hostFlag }
+        : payload;
     // Redaction happens before the first disk write, not at ingest: anything written raw
     // has already leaked, and the journal is a plain file that survives until a session ends.
-    const safe = redactHookPayload(payload);
+    const safe = redactHookPayload(toJournal);
     if (safe === null) {
       debug("hook payload was not an object");
       return 0;

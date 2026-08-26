@@ -16,6 +16,11 @@ export function resolveHostAdapter(host: string): HostAdapter {
   return HOST_ADAPTERS.find((adapter) => adapter.id === host) ?? claudeCodeAdapter;
 }
 
+/** Whether `--host <id>` names an adapter this build actually ships. */
+export function isKnownHost(host: string): boolean {
+  return HOST_ADAPTERS.some((adapter) => adapter.id === host);
+}
+
 /**
  * Parses an envelope for the named host, keeping provenance (which host's source id the
  * call carries) separate from envelope shape (who can actually read it). An observed-tier
@@ -67,3 +72,5 @@ export function tierForSourceId(sourceId: string): CoverageTier | null {
 }
 
 export type { CoverageTier, HostAdapter, HostId, HostProvenance, HostRecord } from "./types.js";
+export { claudeCodeAdapter, normalizeClaudeTool } from "./claude-code.js";
+export { normalizeOpencodeTool, opencodeAdapter, translateOpencodeRecord } from "./opencode.js";
