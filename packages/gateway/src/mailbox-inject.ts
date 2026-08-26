@@ -1,5 +1,6 @@
 import type { InboxRow } from "patchmesh-query";
 import { idShortener, markDelivered, readInbox } from "patchmesh-query";
+import type { AnswerSource } from "./measure.js";
 import { recordAnswer } from "./measure.js";
 
 /**
@@ -93,6 +94,31 @@ export function readSessionStartMail(options: {
 }
 
 /**
+ * Append the one `mailbox_mark_failed` row a failed delivery marking leaves behind.
+ *
+ * Shared by every pull surface: session-start injection and the MCP inbox both answer first and
+ * mark after, so a mark that fails must never fail the answer -- but neither may it be silent.
+ * The row lands in `answers.ndjson`, the trail this package writes, so a ledger that stops
+ * accepting marks is diagnosable from its rows while redelivery stays the recovery path.
+ */
+export function recordMailboxMarkFailure(options: {
+  readonly answersPath: string;
+  readonly source: AnswerSource;
+  readonly agentId: string;
+  readonly messageIds: readonly string[];
+}): void {
+  recordAnswer(options.answersPath, {
+    tool: "mailbox_mark_failed",
+    source: options.source,
+    ok: false,
+    agentId: options.agentId,
+    answerBytes: 0,
+    items: options.messageIds.length,
+    withheld: options.messageIds.length,
+  });
+}
+
+/**
  * Append one `delivered(channel: "session_start")` per message, attributed to the recipient.
  *
  * Called only after the injection was claimed and written. At-least-once by construction: a
@@ -122,14 +148,11 @@ export function markSessionStartDelivered(options: {
     // Redelivery next session is the recovery path; nothing here may fail the hook.
     const message = error instanceof Error ? error.message : "unknown mailbox mark failure";
     debug(`marking ${options.messageIds.length} message(s) delivered failed: ${message}`);
-    recordAnswer(options.answersPath, {
-      tool: "mailbox_mark_failed",
+    recordMailboxMarkFailure({
+      answersPath: options.answersPath,
       source: "session_start",
-      ok: false,
       agentId: options.byAgentId,
-      answerBytes: 0,
-      items: options.messageIds.length,
-      withheld: options.messageIds.length,
+      messageIds: options.messageIds,
     });
   }
 }

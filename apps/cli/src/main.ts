@@ -87,7 +87,7 @@ export interface CliDependencies {
 
 /** The default body reader: piped stdin verbatim; an interactive terminal reads as empty. */
 function readPipedStdin(): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (process.stdin.isTTY) {
       resolve("");
       return;
@@ -98,7 +98,11 @@ function readPipedStdin(): Promise<string> {
       data += chunk;
     });
     process.stdin.once("end", () => resolve(data));
-    process.stdin.once("error", () => resolve(data));
+    // A partial read is not a body: sending half a handoff would read as sent while meaning
+    // something else, so the error surfaces as a usage failure instead.
+    process.stdin.once("error", (error) => {
+      reject(new ReadServiceError("usage", `could not read the piped message body: ${String(error)}`));
+    });
   });
 }
 

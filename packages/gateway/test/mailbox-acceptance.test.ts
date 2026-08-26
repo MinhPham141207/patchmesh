@@ -131,7 +131,7 @@ test("a handoff lands, is seen, and is answered", async () => {
     // 3. A second burst must not repeat the delivery. With no recap of its own to give, the
     // hook answers with silence once the mail has been delivered.
     const secondStart = runHook({ cwd: root, hook_event_name: "SessionStart", session_id: SESSION_B });
-    assert.equal(secondStart.status, 0, `stderr: ${secondStart.stderr}`);
+    assert.equal(secondStart.status, 0);
     assert.equal(injectedContextOrEmpty(secondStart.stdout).includes("UNTRUSTED MESSAGE"), false);
 
     // 4. B acknowledges acceptance over the MCP ack tool.

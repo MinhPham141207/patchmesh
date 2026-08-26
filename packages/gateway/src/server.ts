@@ -8,6 +8,7 @@ import type {
   AcknowledgeMessageOptions,
   InboxOptions,
   InboxResult,
+  InboxRow,
   MarkDeliveredOptions,
   OverlapOptions,
   OverlapResult,
@@ -16,6 +17,7 @@ import type {
   SendMailOptions,
 } from "patchmesh-query";
 import type { RecallOptions, RecallResult } from "./recall.js";
+import { measurementPathFor } from "./measure.js";
 
 export interface GatewayOptions {
   readonly worktreeRoot: string;
@@ -61,6 +63,7 @@ function serverVersion(): string {
 let heavy:
   | Promise<{
       readonly ledgerPathFor: (worktreeRoot: string) => string;
+      readonly ledgerDirectory: string;
       readonly freshenLedger: (options: { worktreeRoot: string; ledgerPath: string }) => Promise<unknown>;
       readonly recallRecentActivity: (options: RecallOptions) => RecallResult;
       readonly renderRecall: (result: RecallResult, requestedPath: string | undefined) => string;
@@ -72,7 +75,15 @@ let heavy:
       readonly renderActiveWork: (result: ActiveWork) => string;
       readonly sendMail: (options: SendMailOptions) => { readonly messageId: string };
       readonly readInbox: (options: InboxOptions) => InboxResult;
+      readonly idShortener: (ids: Iterable<string>) => (id: string) => string;
       readonly markDelivered: (options: MarkDeliveredOptions) => void;
+      readonly renderUntrustedMessage: (row: InboxRow, shortFrom: string) => string;
+      readonly recordMailboxMarkFailure: (options: {
+        readonly answersPath: string;
+        readonly source: "session_start" | "mcp";
+        readonly agentId: string;
+        readonly messageIds: readonly string[];
+      }) => void;
       readonly acknowledgeMessage: (
         options: AcknowledgeMessageOptions,
       ) => { readonly ok: boolean; readonly reason?: string };
@@ -84,8 +95,10 @@ function loadHeavy(): NonNullable<typeof heavy> {
     import("patchmesh-recorder"),
     import("patchmesh-query"),
     import("./recall.js"),
-  ]).then(([recorder, query, recall]) => ({
+    import("./mailbox-inject.js"),
+  ]).then(([recorder, query, recall, mailboxInject]) => ({
     ledgerPathFor: recorder.ledgerPathFor,
+    ledgerDirectory: recorder.LEDGER_DIRECTORY,
     // Every tool drains the journal before reading. Free when there is nothing waiting; see
     // `freshenLedger` for why a report answers about now rather than about the last Stop.
     freshenLedger: recorder.freshenLedger,
@@ -99,7 +112,10 @@ function loadHeavy(): NonNullable<typeof heavy> {
     renderActiveWork: query.renderActiveWork,
     sendMail: query.sendMail,
     readInbox: query.readInbox,
+    idShortener: query.idShortener,
     markDelivered: query.markDelivered,
+    renderUntrustedMessage: mailboxInject.renderUntrustedMessage,
+    recordMailboxMarkFailure: mailboxInject.recordMailboxMarkFailure,
     acknowledgeMessage: query.acknowledgeMessage,
   }));
   return heavy;
@@ -391,6 +407,7 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       inputSchema: {
         agent: z
           .string()
+          .min(1)
           .optional()
           .describe(
             "Your agent id as the session-start context named it. Omit for broadcasts-only " +
@@ -418,12 +435,25 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
               channel: "mcp_pull",
               messageIds: result.rows.map((row) => row.messageId),
             });
-          } catch {
+          } catch (error) {
             // Mark-after-answer is at-least-once: a failed mark redelivers next pull, which
-            // beats losing mail, so the built answer returns regardless.
+            // beats losing mail, so the built answer returns regardless -- but the failure is
+            // not silent. Same trail the session-start path writes, same tool name.
+            modules.recordMailboxMarkFailure({
+              answersPath: measurementPathFor(options.worktreeRoot, modules.ledgerDirectory),
+              source: "mcp",
+              agentId: agent,
+              messageIds: result.rows.map((row) => row.messageId),
+            });
           }
         }
-        return { content: [{ type: "text" as const, text: renderInbox(result) }] };
+        const shorten = modules.idShortener(result.rows.map((row) => row.fromAgentId ?? "unknown"));
+        return {
+          content: [{
+            type: "text" as const,
+            text: renderInbox(result, shorten, modules.renderUntrustedMessage),
+          }],
+        };
       } catch (error) {
         // Advisory tools fail soft. An inbox that cannot answer must not become an error the
         // calling agent has to reason about - it just means it learned nothing this time.
@@ -495,15 +525,27 @@ function errorResult(text: string, isError = true): {
   return { content: [{ type: "text", text }], isError };
 }
 
-function renderInbox(result: InboxResult): string {
+/**
+ * One row per message, its body wrapped in the same untrusted-message delimiters the
+ * session-start injection uses.
+ *
+ * The wrapping is not decoration: a message body is other-agent text, and without the delimiters
+ * it reaches the calling agent's context indistinguishable from tool output -- a forged
+ * "--- end untrusted message" line inside a body could end the trust boundary early. The same
+ * `renderUntrustedMessage` builds both surfaces, so the format cannot drift between them.
+ */
+function renderInbox(
+  result: InboxResult,
+  shorten: (id: string) => string,
+  renderUntrusted: (row: InboxRow, shortFrom: string) => string,
+): string {
   const header =
     `${result.rows.length} message(s); ${result.withheld} withheld, ${result.expired} expired.`;
   if (result.rows.length === 0) return header;
   const blocks = result.rows.map((row) => {
     const lines = [
-      `${row.messageId} from ${row.fromAgentId ?? "unknown"} (${row.kind}, ${row.broadcast ? "broadcast" : "direct"})`,
-      `Subject: ${row.subject}`,
-      ...row.body.split("\n").map((line) => `  ${line}`),
+      `${row.messageId} (${row.broadcast ? "broadcast" : "direct"})`,
+      renderUntrusted(row, shorten(row.fromAgentId ?? "unknown")),
     ];
     if (row.refs.length > 0) lines.push(`Refs: ${row.refs.join(", ")}`);
     return lines.join("\n");

@@ -38,16 +38,18 @@ const MEASUREMENT_VERSION = 2;
 const MAX_MEASUREMENT_BYTES = 4 * 1024 * 1024;
 
 /**
- * Narrowed to the one source `recordAnswer` can still tell the truth about.
+ * The sources that can still tell the truth about themselves.
  *
  * This used to be `"mcp" | "session_start" | "cli" | "probe"`. `"cli"` was never produced by
  * anything; `"mcp"` and `"probe"` could never be told apart because the MCP protocol carries no
  * caller identity, so any stdio client -- a real agent or a benchmark script -- produced the
- * same shape of row. The only caller left is the `SessionStart` hook, which derives a real
- * agent id from the host's session id, so a type of one value documents that this file no
- * longer claims to count calls it cannot attribute.
+ * same shape of row. Adoption therefore moved to the ledger's attributed `tool.requested` rows.
+ *
+ * `"mcp"` returns for exactly one row the protocol *can* attribute: a failed inbox mark, where
+ * the caller supplied its own agent id and no benchmark writes `mailbox_mark_failed`. It exists
+ * so that failure is diagnosable from the file rather than silently swallowed.
  */
-export type AnswerSource = "session_start";
+export type AnswerSource = "session_start" | "mcp";
 
 export interface AnswerMeasurement {
   readonly tool: string;

@@ -96,7 +96,20 @@ export function sendMail(options: SendMailOptions): { messageId: string } {
   if (subject.length > SUBJECT_MAX_CHARS) {
     throw new ReadServiceError("usage", `subject exceeds ${SUBJECT_MAX_CHARS} characters`);
   }
+  // A subject renders as one line inside the untrusted-message delimiters, and a body line
+  // beginning with "--- " is exactly how the wrapper closes. Either embedded at write time
+  // would let one message forge its way out of the trust boundary, so both are rejected
+  // outright rather than escaped on render -- a sender told "no" knows to rewrite.
+  if (/[\n\r]/u.test(subject)) {
+    throw new ReadServiceError("usage", "subject must be a single line without newlines");
+  }
   if (typeof options.body !== "string") throw new ReadServiceError("usage", "body is required");
+  if (/^--- /mu.test(subject) || /^--- /mu.test(options.body)) {
+    throw new ReadServiceError(
+      "usage",
+      'no line may begin with "--- ", which is the message delimiter',
+    );
+  }
   if (options.body.length > BODY_MAX_CHARS) {
     throw new ReadServiceError("usage", `body exceeds ${BODY_MAX_CHARS} characters`);
   }
