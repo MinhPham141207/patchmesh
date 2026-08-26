@@ -152,6 +152,10 @@ export interface ReadServices {
 
 export interface ReadServiceOptions {
   readonly reader: EventReader;
+  /** Set by hosts reading a real ledger file, enabling the persisted projection checkpoint. */
+  readonly ledgerPath?: string;
+  /** Force full validated replay even when a checkpoint is available. */
+  readonly verifyReplay?: boolean;
   readonly now?: () => number;
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   readonly pollIntervalMs?: number;

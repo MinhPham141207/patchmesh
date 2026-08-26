@@ -4,7 +4,7 @@ import type {
   ProtocolEvent,
   TaskId,
 } from "patchmesh-protocol";
-import { projectWorkGraph } from "patchmesh-storage";
+import { projectWorkGraph, projectWorkGraphCached, type WorkGraphReplayResult } from "patchmesh-storage";
 import { redactEvent } from "./redaction.js";
 import { parseTimeBound } from "./time.js";
 import {
@@ -69,6 +69,13 @@ function readEvents(options: ReadServiceOptions): readonly ProtocolEvent[] {
   }
 }
 
+function projectGraph(options: ReadServiceOptions): WorkGraphReplayResult {
+  if (options.ledgerPath !== undefined && options.verifyReplay !== true) {
+    return projectWorkGraphCached(options.ledgerPath);
+  }
+  return projectWorkGraph(readEvents(options));
+}
+
 function withCorrectedAttribution(events: readonly ProtocolEvent[]): readonly ProtocolEvent[] {
   const corrections = new Map<ProtocolEvent["eventId"], {
     readonly agentId: ProtocolEvent["agentId"];
@@ -98,8 +105,9 @@ function withCorrectedAttribution(events: readonly ProtocolEvent[]): readonly Pr
  * whether it moves; what they cannot act on is a constant. `observational` is the honest name
  * for "some scopes are seen, some are not, and that is the design".
  */
-function aggregateCoverage(events: readonly ProtocolEvent[]): StatusView["coverage"] {
-  const snapshot = projectWorkGraph(events).snapshot;
+function aggregateCoverage(events: readonly ProtocolEvent[], options: ReadServiceOptions): StatusView["coverage"] {
+  void events;
+  const snapshot = projectGraph(options).snapshot;
   const modes = sortedUnique(snapshot.coverage.flatMap((coverage) => coverage.modes));
   const gaps = snapshot.coverage.flatMap((coverage) => coverage.gaps);
   const total = snapshot.coverage.length;
@@ -191,7 +199,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
   const getStatus = (): StatusView => {
     try {
       const events = readEvents(options);
-      const replay = projectWorkGraph(events);
+      const replay = projectGraph(options);
       const attributedEvents = withCorrectedAttribution(events);
       const eventTypeCounts = emptyEventTypeCounts();
       const agentIds = new Set<AgentId>();
@@ -205,7 +213,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
         if (event.agentId !== null) agentIds.add(event.agentId);
         if (event.taskId !== null) taskIds.add(event.taskId);
       }
-      const coverage = aggregateCoverage(events);
+      const coverage = aggregateCoverage(events, options);
       return {
         // Health is about the recorder, not about how much of the world it can see. A missing
         // source sequence means events were lost, which is a fault; an opaque shell read means
@@ -247,7 +255,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
       current.push(event);
       byAgent.set(event.agentId, current);
     }
-    const graph = projectWorkGraph(events).snapshot;
+    const graph = projectGraph(options).snapshot;
     return {
       agents: [...byAgent.entries()].sort(([left], [right]) => compareStrings(left, right)).map(([agentId, agentEvents]) => {
         const taskIds = sortedUnique(agentEvents.map((event) => event.taskId ?? "")).map((task) => task === "" ? null : task as TaskId);
@@ -267,7 +275,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
 
   const getGraph = (filters: GraphFilters = {}): GraphView => {
     const events = readEvents(options);
-    const snapshot = projectWorkGraph(events).snapshot;
+    const snapshot = projectGraph(options).snapshot;
     const filtered = filterGraph(snapshot, filters);
     return {
       snapshot: filtered,
@@ -277,7 +285,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
   };
 
   const listFindings = (query: FindingListQuery = {}): FindingsView => {
-    const snapshot = projectWorkGraph(readEvents(options)).snapshot;
+    const snapshot = projectGraph(options).snapshot;
     const findings = snapshot.findings.filter((view) => (
       (query.findingType === undefined || view.finding.findingType === query.findingType)
       && (query.status === undefined || view.status === query.status)
@@ -289,7 +297,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
   };
 
   const explainDecision = (decisionId: import("patchmesh-protocol").DecisionId): DecisionExplanation => {
-    const snapshot = projectWorkGraph(readEvents(options)).snapshot;
+    const snapshot = projectGraph(options).snapshot;
     const decision = snapshot.decisions.find((view) => view.decision.decisionId === decisionId);
     if (decision === undefined) throw new ReadServiceError("cursor", "decision was not found");
     return {
