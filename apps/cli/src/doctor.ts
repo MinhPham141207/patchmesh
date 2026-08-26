@@ -274,6 +274,22 @@ function checkOpencodePlugin(worktreeRoot: string): DoctorCheck {
     };
 }
 
+/**
+ * Nothing about a generic MCP host can be checked, because there is nothing to install:
+ * its calls are recorded by whatever gateway it dispatches through, not by wiring on disk
+ * this command could inspect. Said anyway, and always `ok`, so a user reading coverage
+ * output that counts `declared` participation knows where those rows come from - and that
+ * self-reported participation is never evidence of observed effects.
+ */
+function checkGenericMcp(): DoctorCheck {
+  return {
+    name: "generic-mcp",
+    status: "ok",
+    detail: "generic MCP calls record through their gateway as declared-tier participation"
+      + " (self-reported; no effects are observed at the protocol level)",
+  };
+}
+
 function checkGitignore(worktreeRoot: string, ledgerRoot: string): DoctorCheck {
   const path = join(ledgerRoot, ".gitignore");
   const contents = existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -468,6 +484,7 @@ export function diagnose(options: DoctorOptions): DoctorReport {
   checks.push(...checkHooks(worktreeRoot));
   checks.push(checkServer(worktreeRoot));
   checks.push(checkOpencodePlugin(worktreeRoot));
+  checks.push(checkGenericMcp());
   checks.push(checkGitignore(worktreeRoot, ledgerRoot));
   const ledgerPath = ledgerPathFor(worktreeRoot);
   checks.push(checkLedger(worktreeRoot, ledgerPath, shared, options.largeLedgerBytes ?? LEDGER_LARGE_BYTES));

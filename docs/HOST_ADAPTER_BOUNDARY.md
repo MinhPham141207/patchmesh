@@ -128,6 +128,20 @@ The bridge input is:
 The bridge is integrated at `tools/evidence/record.mjs:21` and implemented by
 `tools/evidence/lib/patchmesh-bridge.mjs`.
 
+## Declared Tier: Gateway-Recorded Participation
+
+MCP-only hosts that have no hook integration still participate in the ledger:
+their tool calls are recorded by the gateway path they dispatch through. That
+participation is **self-participation, not observation**. The host reports its
+own call; PatchMesh never observes the call's effects at the protocol level, so
+every such event carries coverage tier `declared` (source id
+`source_generic_mcp`, display name "Generic MCP"). A declared-tier event
+widens coverage totals only — it is never counted as an observed source and
+never promoted to evidence. Note that the internal `patchmesh-site` gateway
+stamps whatever adapter `sourceId` its host contract declares (for example
+`source_patchmesh_site`); `source_generic_mcp` is the reserved recognition id
+for gateway-recorded participation from hosts with no declared contract.
+
 ## Effect Authority Rules
 
 - `derivedEffect.changedPaths` may contain only locators from persisted,
