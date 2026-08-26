@@ -138,7 +138,7 @@ never rendered as equivalent participation.
 | --- | --- | --- |
 | **0** | Fix the null-task drop in `overlap.ts` (classify contention by distinct `agentId`, keeping the task grouping where tasks exist). Write a throwaway probe plugin, run one real OpenCode session, capture actual `tool.execute.*` envelopes into fixtures. | `overlaps` reports a null-task two-agent contention; fixtures hold real envelopes, not guesses |
 | **A** | `hosts/` registry, `HostAdapter`, `hook.ts` consuming `HostRecord`, Claude tables moved. | Claude Code output is byte-identical to pre-change on a frozen ledger; import-graph test extended over `hosts/` passes |
-| **B** | `hosts/opencode.ts`, generated plugin, `init --host opencode`, per-host `doctor`, read-side tier rendering. | Real traffic from both hosts lands in one ledger and `overlaps` reports cross-host contention on a file both touched |
+| **B** | `hosts/opencode.ts`, generated plugin, `init --host opencode`, per-host `doctor`, read-side tier rendering. | Real traffic from both hosts lands in one ledger and `overlaps` reports cross-host contention on a file both touched — accepted 2026-08-26, commit e1c78e8 (`tools/concurrency/cross-host-scenario.ts`; spawn p50 112 ms / p95 149 ms; live-session dogfood still pending) |
 | **C** | `generic-mcp` floor tools. | An MCP-only client produces declared-tier events visible in `status` |
 
 Wave 0 is worth doing whether or not the rest ships.
