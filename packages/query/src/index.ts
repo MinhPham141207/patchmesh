@@ -26,6 +26,7 @@ export { findOverlappingWork, renderOverlap } from "./overlap.js";
 // See `tools/phase2/overlap-corpus.ts`.
 export {
   contentionAmong,
+  participantKeyFor,
   workerKey,
   workerActivityFrom,
   IDLE_GAP_MINUTES,

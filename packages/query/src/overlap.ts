@@ -32,7 +32,7 @@ import { idShortener } from "./short-id.js";
  * it saves them and teaches them to stop reading it.
  */
 export interface OverlappingTask {
-  readonly taskId: string;
+  readonly taskId: string | null;
   readonly agentId: string | null;
   readonly at: string;
   readonly changeKind: string;
@@ -304,9 +304,12 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
   for (const event of events) {
     if (event.eventType !== "file.changed") continue;
     if (new Date(event.timestamp) < since) continue;
-    // An unattributed change cannot be one side of an overlap: with no task it could equally
-    // be either party, and reporting it as a third would invent a participant.
-    if (event.taskId === null) continue;
+    // A change needs SOME worker identity to be one side of an overlap: a task, or an agent /
+    // worktree. One with none could equally be either party, and reporting it as a third would
+    // invent a participant. Keying null-task entries by worker keeps one agent's own consecutive
+    // writes merged into one participant -- `hasDistinctWorkers` still refuses to call a single
+    // worker contested with itself.
+    if (event.taskId === null && event.agentId === null && event.worktreeId === null) continue;
 
     const payload = payloadOf(event);
     const resource = payload["resource"] as { resourceId?: unknown; locator?: unknown } | undefined;
@@ -315,8 +318,9 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
     if (targetResourceId !== null && resourceId !== targetResourceId) continue;
 
     const entry = byResource.get(resourceId) ?? { locator: String(resource?.locator ?? ""), tasks: new Map() };
-    if (!entry.tasks.has(event.taskId)) {
-      entry.tasks.set(event.taskId, {
+    const participantKey = participantKeyFor(event.taskId, event.agentId ?? null, event.worktreeId ?? null);
+    if (!entry.tasks.has(participantKey)) {
+      entry.tasks.set(participantKey, {
         taskId: event.taskId,
         agentId: event.agentId,
         at: event.timestamp,
@@ -394,6 +398,19 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
  */
 export function workerKey(agentId: string | null, worktreeId: string | null): string {
   return `${agentId ?? ""}\u0000${worktreeId ?? ""}`;
+}
+
+/**
+ * What one participant in an overlap is keyed on: its task when it has one, else its worker
+ * identity. An OpenCode session records with no task by construction, so keying on tasks alone
+ * hides cross-host contention behind exactly the attribution gap a second host widens.
+ */
+export function participantKeyFor(
+  taskId: string | null,
+  agentId: string | null,
+  worktreeId: string | null,
+): string {
+  return taskId ?? `worker:${workerKey(agentId, worktreeId)}`;
 }
 
 /**
@@ -607,7 +624,7 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
   const short = idShortener(
     result.overlaps.flatMap((overlap) => [
       ...overlap.tasks.flatMap((task) => (task.agentId === null ? [] : [task.agentId])),
-      ...overlap.tasks.map((task) => task.taskId),
+      ...overlap.tasks.flatMap((task) => (task.taskId === null ? [] : [task.taskId])),
     ]),
   );
   const name = (agentId: string | null) => (agentId === null ? "unattributed" : short(agentId));
@@ -623,9 +640,12 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
         (task.at === overlap.contention.laterWriteAt &&
           task.agentId === overlap.contention.laterWorkerAgentId),
     );
-    const lines = contending.map(
-      (task) => `    - ${task.at} ${name(task.agentId)} (${short(task.taskId)}) ${task.changeKind}`,
-    );
+    const lines = contending.map((task) => {
+      // A worker-keyed participant always has a non-null `agentId`; worktree-keyed ones keep
+      // rendering via `name()`.
+      const label = task.taskId === null ? short(task.agentId!) : short(task.taskId);
+      return `    - ${task.at} ${name(task.agentId)} (${label}) ${task.changeKind}`;
+    });
     const others = overlap.tasks.length - contending.length;
     const rest =
       others > 0
