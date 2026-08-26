@@ -25,6 +25,11 @@ export interface InitOptions {
   readonly updateGitignore?: boolean;
   /** Replace PatchMesh's own entries rather than leaving existing ones alone. */
   readonly force?: boolean;
+  /**
+   * An additional host to wire beside Claude Code. Only `opencode` is supported today; the
+   * parser rejects anything else rather than writing a plugin no host would load.
+   */
+  readonly host?: "opencode";
   /** Where the recorder and gateway binaries live. Resolved from this package by default. */
   readonly packageRoot?: string;
 }
@@ -127,7 +132,28 @@ interface Binaries {
   /** Hook command for a binary in one of the hook-owning packages, quoted for the host config. */
   readonly hook: (owner: HookPackage, binary: string) => string;
   readonly server: { readonly command: string; readonly args: readonly string[] };
+  /**
+   * Where the recorder binary is, in the one spelling the OpenCode plugin can carry. Unlike a
+   * Claude hook command, a plugin file is read by a runtime that expands nothing, so whatever
+   * goes in has to resolve on its own - which is why the same three install kinds produce
+   * three different shapes here rather than one command string.
+   */
+  readonly recorderBin: RecorderBinary;
 }
+
+/**
+ * One of the three forms the OpenCode plugin's recorder reference can take.
+ *
+ * `repo-relative` is the committed form: resolved by whoever runs the plugin against the
+ * repository root it sits inside, correct for every clone that has run an install or holds
+ * the checkout. `absolute` is baked in at write time and only ever right on this machine.
+ * `on-path` names a bare command and trusts the PATH, the same bet the global hook branch
+ * makes.
+ */
+type RecorderBinary =
+  | { readonly kind: "repo-relative"; readonly path: string }
+  | { readonly kind: "absolute"; readonly path: string }
+  | { readonly kind: "on-path"; readonly command: string };
 
 /** npm package name for a hook owner, used for both dependency paths and Node resolution. */
 const HOOK_PACKAGE_NAMES: Readonly<Record<HookPackage, string>> = {
@@ -166,7 +192,8 @@ function isInsideWorktree(worktreeRoot: string, packageRoot: string): boolean {
  * `init` on a machine whose shell is unknown, and a missing lookup tool must not read as a
  * missing binary. PATHEXT is honoured so the `.cmd` shims npm writes on Windows are found.
  */
-function onPath(command: string): boolean {
+/** Exported for `doctor`, which reuses the same PATH test for the OpenCode plugin's bare form. */
+export function onPath(command: string): boolean {
   const entries = (process.env["PATH"] ?? "").split(delimiter).filter((entry) => entry !== "");
   const extensions = process.platform === "win32"
     ? (process.env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((value) => value !== "")
@@ -204,6 +231,10 @@ function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
       kind: "dependency",
       hook: (owner, binary) => `node "${posix(join("node_modules", HOOK_PACKAGE_NAMES[owner], "dist", binary))}"`,
       server: { command: "node", args: [posix(join("node_modules", "patchmesh-gateway", "dist", "bin.js"))] },
+      recorderBin: {
+        kind: "repo-relative",
+        path: posix(join("node_modules", HOOK_PACKAGE_NAMES.recorder, "dist", "bin.js")),
+      },
     };
   }
   if (existsSync(join(packageRoot, "packages", "recorder", "dist", "bin.js"))) {
@@ -234,6 +265,9 @@ function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
       server: inside
         ? { command: "node", args: [within("packages", "gateway", "dist", "bin.js")] }
         : { command: "node", args: [join(packageRoot, "packages", "gateway", "dist", "bin.js")] },
+      recorderBin: inside
+        ? { kind: "repo-relative", path: within("packages", "recorder", "dist", "bin.js") }
+        : { kind: "absolute", path: posix(join(packageRoot, "packages", "recorder", "dist", "bin.js")) },
     };
   }
   // A global install. Bare names are preferred when the siblings really are on the PATH,
@@ -262,6 +296,13 @@ function resolveBinaries(worktreeRoot: string, packageRoot: string): Binaries {
     server: onPath("patchmesh-mcp") || gatewayDist === null
       ? { command: "patchmesh-mcp", args: [] }
       : { command: "node", args: [posix(join(gatewayDist, "bin.js"))] },
+    // Unlike the hook branch above, a bare PATH name is the last resort here, not the
+    // preference: a plugin spawns the recorder itself, and npm's `.cmd` shims are not
+    // spawnable from Node without a shell - so wherever the real binary can be resolved,
+    // its absolute path is baked in instead.
+    recorderBin: recorderDist === null
+      ? { kind: "on-path", command: "patchmesh-record" }
+      : { kind: "absolute", path: posix(join(recorderDist, "bin.js")) },
   };
 }
 
@@ -418,6 +459,103 @@ function registerServer(worktreeRoot: string, binaries: Binaries, force: boolean
 }
 
 /**
+ * The OpenCode relay plugin, generated verbatim into `.opencode/plugins/patchmesh.mjs`.
+ *
+ * Self-contained ESM whose only imports are node builtins: OpenCode loads plugins under Bun
+ * as readily as under Node, so nothing beyond the standard library may be assumed. It spawns
+ * rather than appends - unlike the Claude hooks, which hand the host a command string, a
+ * plugin is code that has to run the recorder itself - and it swallows every error, because
+ * recording may cost time but must never break a tool call.
+ *
+ * The recorder reference is baked in at write time in one of the three shapes
+ * `resolveBinaries` produces. A repo-relative path is resolved by the plugin itself against
+ * the repository root derived from its own location (`<root>/.opencode/plugins/`), which is
+ * what makes the committed form work for every clone without host variable expansion, which
+ * OpenCode does not do.
+ */
+export function opencodePluginSource(recorder: RecorderBinary): string {
+  const bin = recorder.kind === "on-path" ? recorder.command : recorder.path;
+  const lines: readonly string[] = [
+    "// PatchMesh relay plugin for OpenCode.",
+    "// Generated by `patchmesh init --host opencode`; regenerate with --force after upgrading.",
+    "// Records every tool call to the local PatchMesh ledger. Every error is swallowed on",
+    "// purpose: recording may cost time, but it must never break a tool call.",
+    'import { spawnSync } from "node:child_process";',
+    'import { join } from "node:path";',
+    'import { fileURLToPath } from "node:url";',
+    "",
+    `const RECORDER_BIN = ${JSON.stringify(bin)};`,
+    `const RECORDER_RELATIVE = ${recorder.kind === "repo-relative" ? "true" : "false"};`,
+    `const RECORDER_BARE = ${recorder.kind === "on-path" ? "true" : "false"};`,
+    "",
+    "// Repository root, derived from this file's own location: <root>/.opencode/plugins/.",
+    "function repoRoot() {",
+    '  return fileURLToPath(new URL("../../..", import.meta.url));',
+    "}",
+    "",
+    "function record(stage) {",
+    "  return (input) => {",
+    "    try {",
+    "      const bin = RECORDER_RELATIVE ? join(repoRoot(), RECORDER_BIN) : RECORDER_BIN;",
+    "      // A baked path names a .js file, so it runs under this runtime's own interpreter;",
+    "      // a bare name is already an executable in its own right.",
+    "      const command = RECORDER_BARE ? bin : process.execPath;",
+    "      const recorderArgs = RECORDER_BARE ? [] : [bin];",
+    "      spawnSync(",
+    "        command,",
+    '        [...recorderArgs, "--host", "opencode"],',
+    "        {",
+    '          input: JSON.stringify({ stage, ...(input ?? {}) }),',
+    '          stdio: ["pipe", "ignore", "ignore"],',
+    "          timeout: 10000,",
+    "          shell: false,",
+    "        },",
+    "      );",
+    "    } catch {",
+    "      // Swallowed deliberately - see the header comment.",
+    "    }",
+    "  };",
+    "}",
+    "",
+    "export const PatchMeshPlugin = async () => ({",
+    '  "tool.execute.before": record("before"),',
+    '  "tool.execute.after": record("after"),',
+    "});",
+    "",
+  ];
+  return lines.join("\n");
+}
+
+/**
+ * Write the OpenCode plugin, idempotently.
+ *
+ * Compared byte-for-byte before writing, so a second run reports "unchanged" instead of
+ * rewriting the file and claiming to have installed something. A plugin this tool did not
+ * write is never touched: overwriting a hand-edited or newer plugin would silently discard
+ * someone's wiring, so only `--force` replaces a differing file.
+ */
+function installOpencodePlugin(worktreeRoot: string, binaries: Binaries, force: boolean): InitStep {
+  const pluginPath = join(worktreeRoot, ".opencode", "plugins", "patchmesh.mjs");
+  const source = opencodePluginSource(binaries.recorderBin);
+  const existed = existsSync(pluginPath);
+  if (existed && readFileSync(pluginPath, "utf8") === source) {
+    return { outcome: "unchanged", detail: "OpenCode plugin already installed" };
+  }
+  if (existed && !force) {
+    return {
+      outcome: "warning",
+      detail: "an OpenCode plugin already exists with different contents; rerun with --force to replace it",
+    };
+  }
+  mkdirSync(dirname(pluginPath), { recursive: true });
+  writeFileSync(pluginPath, source, "utf8");
+  return {
+    outcome: existed ? "updated" : "created",
+    detail: `OpenCode relay plugin in ${relative(worktreeRoot, pluginPath)}`,
+  };
+}
+
+/**
  * Keep the ledger out of version control.
  *
  * `.patchmesh/` holds a SQLite database, a live journal and a filesystem snapshot - per-machine
@@ -456,6 +594,15 @@ export function initializeRepository(options: InitOptions): InitResult {
       ? { outcome: "skipped", detail: ".gitignore left alone" }
       : ignoreLedger(options.worktreeRoot),
   );
+  // Only when asked for: a host this run did not name gets no step at all, so the output of
+  // an ordinary `init` reads exactly as it did before hosts existed.
+  if (options.host === "opencode") {
+    steps.push(
+      options.installHooks === false
+        ? { outcome: "skipped", detail: "OpenCode plugin skipped" }
+        : installOpencodePlugin(options.worktreeRoot, binaries, force),
+    );
+  }
 
   // A global install that is missing its siblings produces a config that looks correct and
   // records nothing. Say so here, where the user is standing, rather than leaving them to

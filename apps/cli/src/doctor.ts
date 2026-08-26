@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { LEDGER_DIRECTORY, ledgerPathFor, ledgerRootFor, resolveSourceHost } from "patchmesh-recorder";
 import { SqliteEventStore, projectWorkGraphCached } from "patchmesh-storage";
-import { HOOK_EVENTS, ownsCommand, resolveHookTarget } from "./init.js";
+import { HOOK_EVENTS, onPath, ownsCommand, resolveHookTarget } from "./init.js";
 
 /**
  * Is PatchMesh actually recording here?
@@ -190,6 +190,53 @@ function checkServer(worktreeRoot: string): DoctorCheck {
     };
   }
   return { name: "mcp", status: "ok", detail: "MCP server registered in .mcp.json" };
+}
+
+/**
+ * Is the optional OpenCode plugin installed, and does it still point at a real binary?
+ *
+ * Deliberately never a failure, and absent is not even a warning: OpenCode is a second host
+ * beside the Claude hooks this repository is normally wired with, so not having it says
+ * nothing about whether recording works here. The one state worth saying out loud is a plugin
+ * that exists but names a recorder binary that does not - someone installed it once and the
+ * install moved out from under it - and even that stays a warning, because the Claude-side
+ * recording this command's verdict is about is untouched by it.
+ */
+function checkOpencodePlugin(worktreeRoot: string): DoctorCheck {
+  const pluginPath = join(worktreeRoot, ".opencode", "plugins", "patchmesh.mjs");
+  if (!existsSync(pluginPath)) {
+    return {
+      name: "opencode",
+      status: "ok",
+      detail: "OpenCode plugin not installed (optional; install with: patchmesh init --host opencode)",
+    };
+  }
+  const source = readFileSync(pluginPath, "utf8");
+  // The single recorder reference the writer baked in, in any of its three shapes: a quoted
+  // absolute path, a repo-relative path resolved against the worktree like every hook
+  // command is, or a bare command name left to the PATH.
+  const reference = /const RECORDER_BIN = "([^"\r\n]+)"/u.exec(source)?.[1];
+  const resolves = reference !== undefined
+    && (isAbsolute(reference)
+      ? existsSync(reference)
+      : reference.includes("/") || reference.includes("\\")
+        ? existsSync(join(worktreeRoot, reference))
+        : onPath(reference));
+  if (reference === undefined) {
+    return {
+      name: "opencode",
+      status: "warn",
+      detail: "the OpenCode plugin is installed but names no recorder binary this doctor can check",
+    };
+  }
+  return resolves
+    ? { name: "opencode", status: "ok", detail: `OpenCode plugin installed at ${relative(worktreeRoot, pluginPath)}` }
+    : {
+      name: "opencode",
+      status: "warn",
+      detail: "the OpenCode plugin is installed but the recorder binary it names is not here, so OpenCode records nothing",
+      fix: "reinstall with: patchmesh init --host opencode --force",
+    };
 }
 
 function checkGitignore(worktreeRoot: string, ledgerRoot: string): DoctorCheck {
@@ -385,6 +432,7 @@ export function diagnose(options: DoctorOptions): DoctorReport {
   });
   checks.push(...checkHooks(worktreeRoot));
   checks.push(checkServer(worktreeRoot));
+  checks.push(checkOpencodePlugin(worktreeRoot));
   checks.push(checkGitignore(worktreeRoot, ledgerRoot));
   const ledgerPath = ledgerPathFor(worktreeRoot);
   checks.push(checkLedger(worktreeRoot, ledgerPath, shared, options.largeLedgerBytes ?? LEDGER_LARGE_BYTES));

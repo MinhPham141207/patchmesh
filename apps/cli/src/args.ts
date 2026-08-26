@@ -37,7 +37,7 @@ export interface ParsedArgs {
    * suspected, which is also exactly when `doctor` runs it for you.
    */
   readonly verify?: boolean;
-  readonly init: { readonly hooks: boolean; readonly gitignore: boolean; readonly force: boolean };
+  readonly init: { readonly hooks: boolean; readonly gitignore: boolean; readonly force: boolean; readonly host: string | null };
   /** Retention cutoff for `prune`, in days. Null means the command was not asked for one. */
   readonly olderThanDays: number | null;
   readonly feedback: {
@@ -91,7 +91,7 @@ export function usageText(): string {
     "",
     "Setup:",
     "  init                       Wire PatchMesh into this repository (--force, --no-hooks,",
-    "                             --no-gitignore)",
+    "                             --no-gitignore, --host opencode)",
     "  doctor                     Check that recording is actually working here",
     "",
     "  prune --older-than <days> Delete events past a retention cutoff, keeping replay intact",
@@ -183,7 +183,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       recapLimit: null,
       recapMetrics: false,
       olderThanDays: null,
-      init: { hooks: true, gitignore: true, force: false },
+      init: { hooks: true, gitignore: true, force: false, host: null },
       json: false,
       raw: false,
       follow: false,
@@ -220,6 +220,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let initHooks = true;
   let initGitignore = true;
   let initForce = false;
+  let initHost: string | null = null;
   let olderThanDays: number | null = null;
   let decisionId: DecisionId | null = null;
   let findingId: FindingId | null = null;
@@ -263,6 +264,15 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     if (option === "--no-hooks" && command === "init") { initHooks = false; continue; }
     if (option === "--no-gitignore" && command === "init") { initGitignore = false; continue; }
     if (option === "--force" && command === "init") { initForce = true; continue; }
+    if (option === "--host" && command === "init") {
+      const host = value(argv, index, option);
+      // Rejected rather than written anyway: a plugin naming a host no adapter exists for is
+      // a file on disk that records nothing and says why to nobody.
+      if (host !== "opencode") throw new ReadServiceError("usage", `unsupported host: ${host} (supported: opencode)`);
+      initHost = host;
+      index += 1;
+      continue;
+    }
     if (option === "--older-than" && command === "prune") {
       const days = Number(value(argv, index, option));
       if (!Number.isInteger(days) || days < 0) throw new ReadServiceError("usage", "--older-than takes a whole number of days");
@@ -419,7 +429,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     recapMetrics,
     ...(verify ? { verify: true } : {}),
     olderThanDays,
-    init: { hooks: initHooks, gitignore: initGitignore, force: initForce },
+    init: { hooks: initHooks, gitignore: initGitignore, force: initForce, host: initHost },
     json,
     raw,
     follow,

@@ -174,6 +174,7 @@ async function renderCommand(
         installHooks: parsed.init.hooks,
         updateGitignore: parsed.init.gitignore,
         force: parsed.init.force,
+        ...(parsed.init.host === null ? {} : { host: parsed.init.host as "opencode" }),
       }),
       parsed.json,
     );
@@ -554,14 +555,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // reads `parsed.databasePath` on its own, so defaulting in one place and not the other
     // would leave it opening the empty string while every other command worked.
     const resolvedArgv = argv.includes("--database") ? argv : [...argv, "--database", ledgerPath];
-    // `status` is the one command whose services serve projections from the persisted
-    // checkpoint, and `status --verify` the one that replays instead. The other read commands
-    // keep their direct replay: their invocations did not ask for the checkpoint, and the
-    // option belongs to the command that measured its win from it.
-    const statusOptions = argv[0] === "status"
+    // `status` and `agents` are the two graph-serving report commands whose services serve
+    // projections from the persisted checkpoint (`status --verify` replays instead). The other
+    // read commands keep their direct replay: overlaps and the recap family use windowed reads,
+    // not the whole-graph projection, so the checkpoint has nothing to offer them.
+    const checkpointOptions = argv[0] === "status" || argv[0] === "agents"
       ? { ledgerPath, verifyReplay: argv.includes("--verify") }
       : {};
-    daemon = createDaemon({ databasePath: ledgerPath, ...statusOptions });
+    daemon = createDaemon({ databasePath: ledgerPath, ...checkpointOptions });
     const controller = new AbortController();
     const onInterrupt = () => controller.abort();
     process.once("SIGINT", onInterrupt);

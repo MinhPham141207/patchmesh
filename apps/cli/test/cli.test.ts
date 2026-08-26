@@ -435,6 +435,70 @@ test("init respects opting out of hooks and gitignore", () => {
   }
 });
 
+test("init --host opencode installs the plugin once", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-opencode-"));
+  try {
+    const first = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "opencode" });
+    const pluginPath = join(root, ".opencode", "plugins", "patchmesh.mjs");
+    assert.equal(existsSync(pluginPath), true);
+    assert.equal(
+      first.steps.find((step) => step.detail.includes("OpenCode"))?.outcome,
+      "created",
+      "the first run reports the plugin as created",
+    );
+
+    const contents = readFileSync(pluginPath, "utf8");
+    const again = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "opencode" });
+    assert.equal(again.steps.some((step) => step.outcome === "unchanged"), true, "a second run reports unchanged");
+    assert.equal(again.steps.some((step) => step.outcome === "created"), false, "a second run installs nothing twice");
+    assert.equal(readFileSync(pluginPath, "utf8"), contents, "a second run leaves the file byte-identical");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the generated plugin spawns the resolved recorder binary", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-opencode-"));
+  try {
+    initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "opencode" });
+    const plugin = readFileSync(join(root, ".opencode", "plugins", "patchmesh.mjs"), "utf8");
+    // Provenance rides on every event, so the plugin must stamp its host explicitly even
+    // though the recorder's default is Claude Code.
+    assert.match(plugin, /--host opencode/);
+    assert.match(plugin, /bin\.js/, "the recorder reference must name a dist binary");
+    // OpenCode loads plugins under Bun and Node alike, so nothing beyond node builtins may
+    // be assumed - not even this repository's own packages.
+    for (const specifier of [...plugin.matchAll(/^import .* from "(.+?)";$/gmu)].map((match) => match[1]!)) {
+      assert.match(specifier, /^node:/u, `only node builtins may be imported, found ${specifier}`);
+    }
+    // Recording may cost time; it must never break a tool call.
+    assert.match(plugin, /catch/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a differing OpenCode plugin is left alone until --force", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-opencode-"));
+  try {
+    initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "opencode" });
+    const pluginPath = join(root, ".opencode", "plugins", "patchmesh.mjs");
+    writeFileSync(pluginPath, "// hand-edited\n", "utf8");
+
+    const rerun = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "opencode" });
+    // Overwriting a plugin someone else wrote or edited would silently discard their wiring,
+    // so a differing file is named out loud rather than replaced.
+    assert.equal(rerun.steps.find((step) => step.detail.includes("OpenCode"))?.outcome, "warning");
+    assert.equal(readFileSync(pluginPath, "utf8"), "// hand-edited\n", "nothing was overwritten without --force");
+
+    const forced = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "opencode", force: true });
+    assert.equal(forced.steps.find((step) => step.detail.includes("OpenCode"))?.outcome, "updated");
+    assert.notEqual(readFileSync(pluginPath, "utf8"), "// hand-edited\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("prune requires an explicit retention cutoff", async () => {
   // Deleting history is not something to do because a flag was forgotten.
   const result = await runCli(["prune"], { services, pruner: { prune: () => ({ removed: 0, retained: 0 }) } });

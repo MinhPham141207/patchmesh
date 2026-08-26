@@ -252,3 +252,66 @@ test("a ledger past the size budget is a warning that names the command, never a
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/** Wire the Claude hooks against a binary that exists, so only the OpenCode state varies. */
+function wiredRepository(): string {
+  const root = temporaryRepository();
+  const binary = join(root, "recorder", "dist", "bin.js");
+  mkdirSync(join(root, "recorder", "dist"), { recursive: true });
+  writeFileSync(binary, "", "utf8");
+  writeHooks(root, `node "${binary}"`, ALL_HOOKS);
+  return root;
+}
+
+test("an uninstalled OpenCode host is plain information, never a failure", () => {
+  const root = wiredRepository();
+  try {
+    const report = diagnose({ worktreeRoot: root });
+    assert.equal(statusOf(report, "opencode"), "ok");
+    assert.match(detailOf(report, "opencode"), /not installed/u);
+    // OpenCode is a second host beside the Claude hooks; not having it says nothing about
+    // whether recording works here, so it must not move the health verdict.
+    assert.equal(report.healthy, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an OpenCode plugin pointing at an existing binary is reported as installed", () => {
+  const root = wiredRepository();
+  try {
+    // The repo-relative committed form, resolved against the worktree like every hook command.
+    const relativeBinary = join("packages", "recorder", "dist", "bin.js");
+    mkdirSync(join(root, "packages", "recorder", "dist"), { recursive: true });
+    writeFileSync(join(root, relativeBinary), "", "utf8");
+    mkdirSync(join(root, ".opencode", "plugins"), { recursive: true });
+    writeFileSync(
+      join(root, ".opencode", "plugins", "patchmesh.mjs"),
+      `const RECORDER_BIN = "${relativeBinary.replaceAll("\\\\", "/")}";\n`,
+      "utf8",
+    );
+    const report = diagnose({ worktreeRoot: root });
+    assert.equal(statusOf(report, "opencode"), "ok");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an OpenCode plugin naming a missing recorder warns but never fails doctor", () => {
+  const root = wiredRepository();
+  try {
+    mkdirSync(join(root, ".opencode", "plugins"), { recursive: true });
+    writeFileSync(
+      join(root, ".opencode", "plugins", "patchmesh.mjs"),
+      `const RECORDER_BIN = ${JSON.stringify(join(root, "absent", "bin.js"))};\n`,
+      "utf8",
+    );
+    const report = diagnose({ worktreeRoot: root });
+    assert.equal(statusOf(report, "opencode"), "warn");
+    assert.match(detailOf(report, "opencode"), /records nothing/u);
+    // The Claude-side recording this verdict is about is untouched by a stale optional plugin.
+    assert.equal(report.healthy, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
