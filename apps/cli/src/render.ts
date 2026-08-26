@@ -58,11 +58,18 @@ function coverageGapLines(gaps: readonly CoverageGap[]): readonly string[] {
  * `observational` on its own is no more actionable than `degraded` was. What tells someone
  * whether recording is going well is the proportion and its direction over time, so that is
  * what leads. See docs/problems/PM-12.
+ *
+ * The source counts ride the same line because they answer the question the scopes cannot:
+ * how much of the traffic is seen versus merely announced. Only observed-tier sources count
+ * as observation, so a declared-only ledger reads `0/N sources observed` instead of borrowing
+ * a confidence it has not earned.
  */
 function coverageSummary(coverage: StatusView["coverage"]): string {
   if (coverage.total === 0) return coverage.presentation;
   const percent = Math.round((coverage.covered / coverage.total) * 100);
-  return `${percent}% (${coverage.covered}/${coverage.total} scopes) ${coverage.presentation}`;
+  const sources = coverage.sources ?? { observed: 0, total: 0 };
+  const sourceCounts = sources.total === 0 ? "" : ` · ${sources.observed}/${sources.total} sources observed`;
+  return `${percent}% (${coverage.covered}/${coverage.total} scopes) ${coverage.presentation}${sourceCounts}`;
 }
 
 /** Structural shape of a prune result, declared locally for the same reason as `AppendResult`. */
@@ -356,9 +363,16 @@ export function renderAgents(view: AgentsView, json: boolean): string {
     .map((agent) => {
       const isSubagent = agent.agentId.includes(".sub.");
       const named = agent.taskIds.filter((taskId) => taskId !== null).length;
+      // Host provenance rides the id column so every row answers "who recorded this" without
+      // a second lookup. An unrecognized source is named as such rather than guessed at, and
+      // carries no tier: it counts neither as observation nor as declaration.
+      const host = agent.host;
+      const provenance = host === undefined || host.displayName === null
+        ? "(unrecognized host)"
+        : `${host.displayName} (${host.tier ?? "unknown tier"})`;
       return {
         // Indentation carries the parent relationship, so the id column stays the id column.
-        label: `${isSubagent ? "  ↳ " : ""}${shortId(String(agent.agentId))}`,
+        label: `${isSubagent ? "  ↳ " : ""}${shortId(String(agent.agentId))} · ${provenance}`,
         tasks: agent.taskIds.includes(null) ? `${named} (+unattributed)` : `${named}`,
         events: `${agent.eventCount}`,
       };

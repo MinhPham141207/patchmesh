@@ -43,6 +43,8 @@ export {
 export type { JournalEntry } from "./journal.js";
 export { redactHookPayload, redactText } from "./redact.js";
 export { resolveSourceHost, sourceIdForHost } from "./source.js";
+export { hostForSourceId, resolveHostAdapter, tierForSourceId } from "./hosts/index.js";
+export type { CoverageTier, HostId, HostProvenance } from "./hosts/index.js";
 export {
   LEDGER_DIRECTORY,
   LEDGER_FILENAME,

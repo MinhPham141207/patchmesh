@@ -4,12 +4,14 @@ import type {
   ProtocolEvent,
   TaskId,
 } from "patchmesh-protocol";
+import { hostForSourceId, tierForSourceId, type CoverageTier } from "patchmesh-recorder";
 import { projectWorkGraph, projectWorkGraphCached, type WorkGraphReplayResult } from "patchmesh-storage";
 import { redactEvent } from "./redaction.js";
 import { parseTimeBound } from "./time.js";
 import {
   ReadServiceError,
   type AgentFilters,
+  type AgentHostProvenance,
   type AgentView,
   type AgentsView,
   type DecisionExplanation,
@@ -55,6 +57,53 @@ function sortedUnique<T extends string>(values: readonly T[]): readonly T[] {
 function errorCategory(error: unknown): string {
   if (error instanceof ReadServiceError) return error.code;
   return error instanceof Error ? "store_read_failed" : "read_failed";
+}
+
+const TIER_RANK: Readonly<Record<CoverageTier, number>> = { observed: 0, session: 1, declared: 2 };
+
+/**
+ * The host behind one agent's events, as the read side can honestly state it.
+ *
+ * An agent normally records through one host, but nothing in the protocol promises that, so
+ * the provenance is chosen rather than assumed: the best tier wins (an observed claim outranks
+ * a declared one), ties break by how much of the agent's traffic each source carried. A source
+ * id no registered host claims is reported as unrecognized instead of being folded into a
+ * guess -- `(unrecognized host)` is a fact; a guessed name is a fiction with a label.
+ */
+function hostProvenanceFor(sourceCounts: ReadonlyMap<string, number>): AgentHostProvenance {
+  let best: { sourceId: string; displayName: string; tier: CoverageTier; count: number } | null = null;
+  let unrecognized: { sourceId: string; count: number } | null = null;
+  for (const [sourceId, count] of sourceCounts) {
+    const host = hostForSourceId(sourceId);
+    if (host === null) {
+      if (unrecognized === null || count > unrecognized.count
+        || (count === unrecognized.count && sourceId < unrecognized.sourceId)) {
+        unrecognized = { sourceId, count };
+      }
+      continue;
+    }
+    if (best === null || TIER_RANK[host.tier] < TIER_RANK[best.tier]
+      || (TIER_RANK[host.tier] === TIER_RANK[best.tier] && count > best.count)) {
+      best = { sourceId, displayName: host.displayName, tier: host.tier, count };
+    }
+  }
+  return best !== null
+    ? { sourceId: best.sourceId, displayName: best.displayName, tier: best.tier }
+    : { sourceId: unrecognized?.sourceId ?? null, displayName: null, tier: null };
+}
+
+/** Distinct recording sources split by whether they observe, per `StatusView.coverage.sources`. */
+function sourceCoverageOf(events: readonly ProtocolEvent[]): { observed: number; total: number } {
+  const known = new Set<string>();
+  let observed = 0;
+  for (const event of events) {
+    const tier = tierForSourceId(event.source.sourceId);
+    if (tier === null) continue;
+    const isNew = !known.has(event.source.sourceId);
+    known.add(event.source.sourceId);
+    if (isNew && tier === "observed") observed += 1;
+  }
+  return { observed, total: known.size };
 }
 
 function emptyEventTypeCounts(): Record<EventType, number> {
@@ -105,7 +154,7 @@ function withCorrectedAttribution(events: readonly ProtocolEvent[]): readonly Pr
  * whether it moves; what they cannot act on is a constant. `observational` is the honest name
  * for "some scopes are seen, some are not, and that is the design".
  */
-function aggregateCoverage(snapshot: GraphView["snapshot"]): StatusView["coverage"] {
+function aggregateCoverage(snapshot: GraphView["snapshot"]): Omit<StatusView["coverage"], "sources"> {
   const modes = sortedUnique(snapshot.coverage.flatMap((coverage) => coverage.modes));
   const gaps = snapshot.coverage.flatMap((coverage) => coverage.gaps);
   const total = snapshot.coverage.length;
@@ -211,7 +260,10 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
         if (event.agentId !== null) agentIds.add(event.agentId);
         if (event.taskId !== null) taskIds.add(event.taskId);
       }
-      const coverage = aggregateCoverage(replay.snapshot);
+      const coverage = {
+        ...aggregateCoverage(replay.snapshot),
+        sources: sourceCoverageOf(attributedEvents),
+      };
       return {
         // Health is about the recorder, not about how much of the world it can see. A missing
         // source sequence means events were lost, which is a fault; an opaque shell read means
@@ -236,7 +288,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
         agentCount: 0,
         taskCount: 0,
         nullAttributionEventCount: 0,
-        coverage: { presentation: "unknown", covered: 0, total: 0, modes: [], gaps: [] },
+        coverage: { presentation: "unknown", covered: 0, total: 0, modes: [], gaps: [], sources: { observed: 0, total: 0 } },
         errorCategory: errorCategory(error),
       };
     }
@@ -246,12 +298,16 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
     const events = readEvents(options);
     const attributedEvents = withCorrectedAttribution(events);
     const byAgent = new Map<AgentId, ProtocolEvent[]>();
+    const sourcesByAgent = new Map<AgentId, Map<string, number>>();
     for (const event of attributedEvents) {
       if (event.agentId === null || (filters.agentId !== undefined && event.agentId !== filters.agentId)) continue;
       if (filters.taskId !== undefined && event.taskId !== filters.taskId) continue;
       const current = byAgent.get(event.agentId) ?? [];
       current.push(event);
       byAgent.set(event.agentId, current);
+      const sourceCounts = sourcesByAgent.get(event.agentId) ?? new Map<string, number>();
+      sourceCounts.set(event.source.sourceId, (sourceCounts.get(event.source.sourceId) ?? 0) + 1);
+      sourcesByAgent.set(event.agentId, sourceCounts);
     }
     const graph = projectGraph(options, events).snapshot;
     return {
@@ -266,6 +322,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
           eventCount: agentEvents.length,
           eventTypeCounts,
           coverage: graph.coverage.filter((coverage) => coverage.evidenceEventIds.some((eventId) => eventIds.has(eventId))),
+          host: hostProvenanceFor(sourcesByAgent.get(agentId) ?? new Map()),
         };
       }),
     };

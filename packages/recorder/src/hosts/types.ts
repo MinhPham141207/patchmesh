@@ -27,3 +27,9 @@ export interface HostAdapter {
   /** Envelope -> normalized record. Null for an envelope this host does not own. */
   parse(envelope: unknown): HostRecord | null;
 }
+
+/** What a recorded source id resolves to on the read side: a named host and its coverage tier. */
+export interface HostProvenance {
+  readonly displayName: string;
+  readonly tier: CoverageTier;
+}

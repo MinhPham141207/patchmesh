@@ -325,6 +325,59 @@ test("event pages filter in insertion order and reject missing cursors", () => w
   );
 }));
 
+test("agents carry host provenance and status counts only observed-tier sources", () => {
+  const store = SqliteEventStore.open(":memory:");
+  try {
+    const claudeEvent: ProtocolEvent = {
+      ...request,
+      eventId: "evt_10000000000000000000000000000001",
+      correlationId: "corr_10000000000000000000000000000001",
+      agentId: "agent_aaaa",
+      source: { kind: "gateway", sourceId: "source_claude_code_hook", instanceId: "55555555-5555-4555-8555-555555555555" },
+    };
+    const opencodeEvent: ProtocolEvent = {
+      ...request,
+      eventId: "evt_20000000000000000000000000000002",
+      correlationId: "corr_20000000000000000000000000000002",
+      agentId: "agent_bbbb",
+      source: { kind: "gateway", sourceId: "source_opencode_hook", instanceId: "66666666-6666-4666-8666-666666666666" },
+    };
+    const unknownEvent: ProtocolEvent = {
+      ...request,
+      eventId: "evt_30000000000000000000000000000003",
+      correlationId: "corr_30000000000000000000000000000003",
+      agentId: "agent_cccc",
+      source: { kind: "gateway", sourceId: "source_something_else", instanceId: "77777777-7777-4777-8777-777777777777" },
+    };
+    store.append(claudeEvent);
+    store.append(opencodeEvent);
+    store.append(unknownEvent);
+    const services = createReadServices({ reader: store });
+
+    const byAgent = new Map(services.listAgents().agents.map((agent) => [agent.agentId, agent]));
+    assert.deepEqual(byAgent.get("agent_aaaa")?.host, { sourceId: "source_claude_code_hook", displayName: "Claude Code", tier: "observed" });
+    assert.deepEqual(byAgent.get("agent_bbbb")?.host, { sourceId: "source_opencode_hook", displayName: "OpenCode", tier: "observed" });
+    assert.deepEqual(byAgent.get("agent_cccc")?.host, { sourceId: "source_something_else", displayName: null, tier: null });
+
+    // An unrecognized source id counts neither way: it is neither an observation nor a known
+    // declaration, so it stays out of both numbers entirely.
+    assert.deepEqual(services.getStatus().coverage.sources, { observed: 2, total: 2 });
+
+    // A declared-tier source is known participation, so it widens the denominator without
+    // ever claiming observation.
+    store.append({
+      ...claudeEvent,
+      eventId: "evt_40000000000000000000000000000004",
+      correlationId: "corr_40000000000000000000000000000004",
+      agentId: "agent_dddd",
+      source: { kind: "gateway", sourceId: "source_generic_mcp", instanceId: "88888888-8888-4888-8888-888888888888" },
+    });
+    assert.deepEqual(services.getStatus().coverage.sources, { observed: 2, total: 3 });
+  } finally {
+    store.close();
+  }
+});
+
 test("follow advances across filtered events without duplicates and aborts cleanly", async () => {
   const store = SqliteEventStore.open(":memory:");
   try {

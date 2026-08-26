@@ -7,6 +7,7 @@ import type {
   ProtocolEvent,
   TaskId,
 } from "patchmesh-protocol";
+import type { CoverageTier } from "patchmesh-recorder";
 import type {
   EventQuery,
   DecisionView,
@@ -78,8 +79,29 @@ export interface StatusView {
     readonly total: number;
     readonly modes: readonly ProjectionCoverageMode[];
     readonly gaps: readonly ProjectionCoverageGap[];
+    /**
+     * How many distinct recording sources are known hosts, split by whether they observe.
+     *
+     * Only observed-tier sources count toward observation: a declared-tier source is
+     * participation the host announced, not work that was seen, so it widens `total` without
+     * ever entering `observed`. A source id no host claims counts neither way -- it is not an
+     * observation and not a declaration, and pretending otherwise would invent coverage.
+     */
+    readonly sources: {
+      readonly observed: number;
+      readonly total: number;
+    };
   };
   readonly errorCategory: string | null;
+}
+
+/** Where one agent's events came from, resolved through the recorder's host registry. */
+export interface AgentHostProvenance {
+  /** The representative source id behind this agent's events; null when none was recorded. */
+  readonly sourceId: string | null;
+  /** Null for a source id no registered host claims; the renderer says `(unrecognized host)`. */
+  readonly displayName: string | null;
+  readonly tier: CoverageTier | null;
 }
 
 export interface AgentView {
@@ -88,6 +110,7 @@ export interface AgentView {
   readonly eventCount: number;
   readonly eventTypeCounts: Readonly<Partial<Record<EventType, number>>>;
   readonly coverage: readonly ProjectionCoverage[];
+  readonly host: AgentHostProvenance;
 }
 
 export interface AgentsView {

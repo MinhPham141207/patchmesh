@@ -2,6 +2,7 @@ export { createReadServices } from "./services.js";
 export {
   ReadServiceError,
   type AgentFilters,
+  type AgentHostProvenance,
   type AgentView,
   type AgentsView,
   type DaemonHealth,

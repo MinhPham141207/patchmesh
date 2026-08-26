@@ -703,6 +703,38 @@ test("graph names resources by path and nests versions under the file they belon
   assert.equal(result.stdout.includes("res_abc"), false);
 });
 
+test("agents render host provenance and coverage tier beside every row", async () => {
+  const agents = [
+    { agentId: "agent_aaaa-1111-4111", taskIds: ["task_1"], eventCount: 10, eventTypeCounts: {}, coverage: [], host: { sourceId: "source_opencode_hook", displayName: "OpenCode", tier: "observed" } },
+    { agentId: "agent_bbbb-2222-4222", taskIds: [], eventCount: 4, eventTypeCounts: {}, coverage: [], host: { sourceId: "source_something_else", displayName: null, tier: null } },
+    { agentId: "agent_cccc-3333-4333", taskIds: [], eventCount: 1, eventTypeCounts: {}, coverage: [], host: { sourceId: "source_claude_code_hook", displayName: "Claude Code", tier: "observed" } },
+  ];
+  const result = await runCli(["agents"], {
+    ...overlapDeps,
+    services: { ...services, listAgents: () => ({ agents }) } as unknown as ReadServices,
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /agent_aaaa-111 · OpenCode \(observed\)/);
+  assert.match(result.stdout, /agent_cccc-333 · Claude Code \(observed\)/);
+  // An unrecognized host is named as such rather than counted either way.
+  assert.match(result.stdout, /agent_bbbb-222 · \(unrecognized host\)/);
+});
+
+test("status coverage line reports how many sources are observed", async () => {
+  const observed: StatusView = {
+    ...status,
+    coverage: { presentation: "observational", covered: 1, total: 2, modes: [], gaps: [], sources: { observed: 2, total: 3 } },
+  };
+  const result = await runCli(["status"], {
+    ...overlapDeps,
+    services: { ...services, getStatus: () => observed } as unknown as ReadServices,
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /Coverage:.*2\/3 sources observed/);
+});
+
 test("agents nests a subagent under the parent whose id it truncates", async () => {
   // The recorder names a subagent `<parentPrefix>.sub.<suffix>`, so the parent relationship is
   // recorded. The prefix is a truncation, so it has to resolve against the agents present -
