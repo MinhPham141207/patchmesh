@@ -34,6 +34,11 @@ export interface EventQuery {
   readonly causationId?: EventId | null;
   /** Inclusive lower bound on `timestamp`, ISO-8601. A window, pushed to SQLite. */
   readonly since?: string;
+  /**
+   * Exclusive lower bound on `insertion_position`, for a reader resuming from a watermark -
+   * the projection checkpoint reads only what landed after its saved position.
+   */
+  readonly afterPosition?: number;
 }
 
 /**
@@ -459,6 +464,10 @@ export class SqliteEventStore {
       predicates.push("timestamp >= ?");
       parameters.push(query.since);
     }
+    if (query.afterPosition !== undefined) {
+      predicates.push("insertion_position > ?");
+      parameters.push(query.afterPosition);
+    }
     if (query.correlationId !== undefined) {
       predicates.push("correlation_id = ?");
       parameters.push(query.correlationId);
@@ -557,6 +566,22 @@ export class SqliteEventStore {
     const row = this.database.prepare("SELECT MAX(timestamp) AS latest FROM events").get() as
       { readonly latest: string | null };
     return row.latest;
+  }
+
+  /** The newest row's insertion position, or 0 when the store is empty. The checkpoint watermark. */
+  latestPosition(): number {
+    this.assertOpen();
+    const rows = this.database.prepare("SELECT MAX(insertion_position) AS position FROM events").all() as unknown as Array<{ readonly position: number | null }>;
+    return rows[0]?.position ?? 0;
+  }
+
+  /**
+   * Storage-internal: the raw database handle for this package's own secondary tables
+   * (projection checkpoint I/O). Nothing outside `packages/storage` may use it.
+   */
+  get handle(): DatabaseSync {
+    this.assertOpen();
+    return this.database;
   }
 
   close(): void {

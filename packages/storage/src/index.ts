@@ -13,6 +13,11 @@ export type {
   ReadOptions,
 } from "./event-store.js";
 export { clearEventCache, eventCacheStats, readEventsCached, readWindowCached } from "./event-cache.js";
+export {
+  clearProjectionCacheStats,
+  projectWorkGraphCached,
+  projectionCacheStats,
+} from "./projection-cache.js";
 export { replayEvents } from "./replay.js";
 export type { ReplayReducer, ReplayResult, SourceSequenceGap } from "./replay.js";
 export { SqliteEventStore } from "./event-store.js";
