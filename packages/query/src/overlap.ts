@@ -641,9 +641,10 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
           task.agentId === overlap.contention.laterWorkerAgentId),
     );
     const lines = contending.map((task) => {
-      // A worker-keyed participant always has a non-null `agentId`; worktree-keyed ones keep
-      // rendering via `name()`.
-      const label = task.taskId === null ? short(task.agentId!) : short(task.taskId);
+      // A task-keyed participant renders its task; a worker-keyed one its agent. A worktree-
+      // keyed one can carry neither id, and there is nothing to shorten then -- `name()`'s
+      // "unattributed" is the label, not a shortened id.
+      const label = task.taskId ?? (task.agentId !== null ? short(task.agentId) : name(task.agentId));
       return `    - ${task.at} ${name(task.agentId)} (${label}) ${task.changeKind}`;
     });
     const others = overlap.tasks.length - contending.length;
