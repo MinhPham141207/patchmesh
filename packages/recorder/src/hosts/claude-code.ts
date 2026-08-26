@@ -26,8 +26,8 @@ const HOST_TOOLS: Readonly<Record<string, NormalizedTool>> = {
   KillShell: { toolName: "run_shell", pathProperty: null, opaque: true },
 };
 
-/** A shell command whose effect is a commit, recognized only in its unambiguous form. */
-const GIT_COMMIT = /^\s*git\s+(?:-[^\s]+\s+|--[^\s]+(?:=[^\s]+)?\s+)*commit\b/u;
+/** A shell command whose effect is a commit, recognized only in its unambiguous form. Shared with the other adapters that map shell tools. */
+export const GIT_COMMIT = /^\s*git\s+(?:-[^\s]+\s+|--[^\s]+(?:=[^\s]+)?\s+)*commit\b/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

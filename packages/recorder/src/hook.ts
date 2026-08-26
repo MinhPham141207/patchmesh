@@ -10,7 +10,7 @@ import {
   deterministicUuid,
 } from "./identity.js";
 import { normalizeTool } from "./tool-mapping.js";
-import { resolveHostAdapter } from "./hosts/index.js";
+import { parseForHost } from "./hosts/index.js";
 import { resolveSourceHost, sourceIdForHost } from "./source.js";
 
 /** The subset of a Claude Code `PostToolUse` hook payload the recorder relies on. */
@@ -138,8 +138,7 @@ export function buildHookEvents(options: BuildHookEventsOptions): RecordedPair {
   const now = options.now ?? (() => new Date().toISOString());
   const nextEventId = options.nextEventId ?? createEventId;
 
-  const adapter = resolveHostAdapter(resolveSourceHost());
-  const record = adapter.parse(payload);
+  const record = parseForHost(resolveSourceHost(), payload);
   if (record === null) throw new HookRecordingError("payload matched no installed host adapter");
 
   const hostToolName = record.hostToolName;
