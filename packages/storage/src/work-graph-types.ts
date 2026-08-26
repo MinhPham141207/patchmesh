@@ -126,6 +126,7 @@ export interface WorkGraphSnapshot {
 export interface WorkGraphReplayResult {
   readonly orderedEvents: readonly ProtocolEvent[];
   readonly sourceSequenceGaps: readonly SourceSequenceGap[];
+  readonly state: WorkGraphState;
   readonly snapshot: WorkGraphSnapshot;
 }
 

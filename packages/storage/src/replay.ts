@@ -86,7 +86,7 @@ class MinHeap<T> {
   }
 }
 
-function causalOrder(events: readonly ProtocolEvent[]): readonly ProtocolEvent[] {
+export function causalOrder(events: readonly ProtocolEvent[]): readonly ProtocolEvent[] {
   const eventsById = new Map<string, ProtocolEvent>();
   for (const event of events) {
     if (eventsById.has(event.eventId)) {
@@ -138,7 +138,7 @@ function sourceKey(source: Source): string {
   return `${source.kind}:${source.sourceId}:${source.instanceId}`;
 }
 
-function sourceSequenceGaps(events: readonly ProtocolEvent[]): readonly SourceSequenceGap[] {
+export function sourceSequenceGaps(events: readonly ProtocolEvent[]): readonly SourceSequenceGap[] {
   const groups = new Map<string, { readonly source: Source; readonly sequences: number[] }>();
   for (const event of events) {
     if (event.sourceSequence === null) continue;

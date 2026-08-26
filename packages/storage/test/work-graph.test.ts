@@ -20,7 +20,7 @@ import type {
 } from "patchmesh-protocol";
 import { canonicalBytes, StorageError } from "../src/index.js";
 import { coverageId, versionNodeId } from "../src/work-graph-ids.js";
-import { WorkGraphProjector, projectWorkGraph } from "../src/work-graph.js";
+import { WorkGraphProjector, extendProjection, projectWorkGraph, reduceEvents, snapshotFromState } from "../src/work-graph.js";
 import type { GraphNode } from "../src/work-graph-types.js";
 
 const repositoryId = "repo_11111111-1111-4111-8111-111111111111" as RepositoryId;
@@ -600,3 +600,137 @@ test("projection cost stays near-linear in the size of the ledger", () => {
       + "linear is ~4x and quadratic is ~16x, so this reads as a scan-per-event that should be an index",
   );
 });
+
+test("extending a prefix projection equals projecting the whole ledger", () => {
+  const all = buildScenarioEvents(60);
+  const cut = 45;
+  const extended = extendProjection(reduceEvents(all.slice(0, cut)), all.slice(cut));
+
+  assert.notEqual(extended, null);
+  assert.equal(
+    JSON.stringify(snapshotFromState(extended!, [])),
+    JSON.stringify(projectWorkGraph(all).snapshot),
+  );
+});
+
+test("a suffix correction targeting a prefix event reports rebuild", () => {
+  const all = buildScenarioEvents(10);
+  const correction = buildAttributionCorrection(all[0]!, 0);
+  const prefixState = reduceEvents(all);
+
+  assert.equal(extendProjection(prefixState, [correction]), null);
+});
+
+test("a suffix correction targeting another suffix event still matches full replay", () => {
+  const pair = buildRequestWithCompletion();
+  const correction = buildAttributionCorrection(pair[1]!, 1);
+  const extended = extendProjection(reduceEvents([]), [...pair, correction]);
+
+  assert.notEqual(extended, null);
+  assert.equal(
+    JSON.stringify(snapshotFromState(extended!, [])),
+    JSON.stringify(projectWorkGraph([...pair, correction]).snapshot),
+  );
+});
+
+const scenarioGateway = {
+  kind: "gateway",
+  sourceId: "source_gateway",
+  instanceId: "11111111-1111-4111-8111-111111111111",
+} as const;
+
+function scenarioId(prefix: string, index: number): string {
+  return `${prefix}_${String(index).padStart(32, "0")}`;
+}
+
+/**
+ * One intercepted call as three events - request, watcher change bound to it, completion
+ * naming the change as its effect. Deterministic in identity and order only; used where a
+ * mixed but uniform ledger is needed at fixture scale.
+ */
+function scenarioCall(index: number): readonly ProtocolEvent[] {
+  const at = new Date(Date.parse("2026-08-08T00:00:00.000Z") + index * 1000).toISOString();
+  const requestEventId = scenarioId("evt", index * 3) as EventId;
+  const changeEventId = scenarioId("evt", index * 3 + 1) as EventId;
+  const completionEventId = scenarioId("evt", index * 3 + 2) as EventId;
+  const correlationId = scenarioId("corr", index) as ProtocolEvent["correlationId"];
+
+  const request: ToolRequestedEvent = {
+    ...baseEvent(requestEventId, correlationId),
+    source: scenarioGateway,
+    sourceSequence: index * 2,
+    timestamp: at,
+    eventType: "tool.requested",
+    payload: { toolName: "edit_file", operation: `edit src/f${index}.ts`, targetResourceId: resourceId, opaque: false },
+  };
+
+  const change: FileChangedEvent = {
+    ...baseEvent(changeEventId, correlationId),
+    timestamp: at,
+    causationId: requestEventId,
+    eventType: "file.changed",
+    payload: {
+      resource,
+      beforeVersion: contentVersion(resourceId, `before-${index}`, changeEventId),
+      afterVersion: contentVersion(resourceId, `after-${index}`, changeEventId),
+      changeKind: "modified",
+    },
+  };
+
+  const completion: ToolCompletedEvent = {
+    ...baseEvent(completionEventId, correlationId),
+    source: scenarioGateway,
+    sourceSequence: index * 2 + 1,
+    timestamp: at,
+    causationId: requestEventId,
+    eventType: "tool.completed",
+    payload: { requestEventId, outcome: "succeeded", exitCode: 0, effectEventIds: [changeEventId] },
+  };
+
+  return [request, change, completion];
+}
+
+function buildScenarioEvents(count: number): readonly ProtocolEvent[] {
+  const events: ProtocolEvent[] = [];
+  for (let index = 0; index < count; index += 1) events.push(...scenarioCall(index));
+  return events;
+}
+
+function buildRequestWithCompletion(): readonly ProtocolEvent[] {
+  const requestEventId = scenarioId("evt", 9000) as EventId;
+  const completionEventId = scenarioId("evt", 9001) as EventId;
+  const correlationId = scenarioId("corr", 9000) as ProtocolEvent["correlationId"];
+
+  const request: ToolRequestedEvent = {
+    ...baseEvent(requestEventId, correlationId),
+    source: scenarioGateway,
+    sourceSequence: 18000,
+    eventType: "tool.requested",
+    payload: { toolName: "edit_file", operation: "edit src/pair.ts", targetResourceId: resourceId, opaque: false },
+  };
+  const completion: ToolCompletedEvent = {
+    ...baseEvent(completionEventId, correlationId),
+    source: scenarioGateway,
+    sourceSequence: 18001,
+    causationId: requestEventId,
+    eventType: "tool.completed",
+    payload: { requestEventId, outcome: "succeeded", exitCode: 0, effectEventIds: [] },
+  };
+  return [request, completion];
+}
+
+function buildAttributionCorrection(target: ProtocolEvent, index: number): AttributionCorrectedEvent {
+  const eventId = scenarioId("evt", 19000 + index) as EventId;
+  return {
+    ...baseEvent(eventId, target.correlationId),
+    eventType: "attribution.corrected",
+    causationId: target.eventId,
+    payload: {
+      targetEventId: target.eventId,
+      attributedAgentId: "agent_agent-a",
+      attributedTaskId: taskId,
+      reason: "task attribution became available",
+      evidenceEventIds: [eventId],
+    },
+  };
+}

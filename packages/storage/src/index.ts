@@ -24,7 +24,7 @@ export {
   saveProjectionCheckpoint,
   type ProjectionCheckpointRecord,
 } from "./projection-checkpoint.js";
-export { WorkGraphProjector, projectWorkGraph } from "./work-graph.js";
+export { WorkGraphProjector, extendProjection, projectWorkGraph, reduceEvents } from "./work-graph.js";
 export type {
   AgentNode,
   DecisionView,

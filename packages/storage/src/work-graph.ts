@@ -369,7 +369,7 @@ function applyEvent(state: WorkGraphState, event: ProtocolEvent): WorkGraphState
   };
 }
 
-function snapshotFromState(
+export function snapshotFromState(
   state: WorkGraphState,
   sourceSequenceGaps: readonly SourceSequenceGap[] = [],
 ): WorkGraphSnapshot {
@@ -454,12 +454,80 @@ function buildProjection(orderedEvents: readonly ProtocolEvent[]): WorkGraphStat
   };
 }
 
+export function reduceEvents(orderedEvents: readonly ProtocolEvent[]): WorkGraphState {
+  const reducer = new WorkGraphProjector();
+  let state = reducer.initialState();
+  for (const event of orderedEvents) state = reducer.apply(state, event);
+  return state;
+}
+
+/**
+ * Apply a suffix of events to an already-projected base state, deferring every whole-ledger
+ * derivation to once after the batch — the same discipline that makes `buildProjection` linear.
+ *
+ * Returns null when a suffix `attribution.corrected` targets an event outside the suffix: the
+ * prefix was mapped under the old attribution and cannot be unmapped incrementally, so the
+ * caller must discard its checkpoint and rebuild with `projectWorkGraph`. A correction inside
+ * the suffix is fine — corrections are collected before any suffix event is mapped, matching
+ * `buildProjection`'s two-pass shape.
+ *
+ * Byte-identity with `buildProjection(prefix ++ suffix)` rests on three facts: evidence arrays
+ * accumulate in processing order but `snapshotFromState` sorts them on output; finding and
+ * decision views re-sort every event by id; coverage is re-derived wholesale. Nothing else
+ * observes processing order.
+ */
+export function extendProjection(
+  base: WorkGraphState,
+  suffixEvents: readonly ProtocolEvent[],
+): WorkGraphState | null {
+  const suffixIds = new Set(suffixEvents.map((event) => event.eventId));
+  for (const event of suffixEvents) {
+    if (event.eventType === "attribution.corrected" && !suffixIds.has(event.payload.targetEventId)) {
+      return null;
+    }
+  }
+
+  const next: WorkGraphState = {
+    eventsById: new Map(base.eventsById),
+    correctionsByTarget: new Map(base.correctionsByTarget),
+    nodes: new Map(base.nodes),
+    edges: new Map(base.edges),
+    findings: new Map(base.findings),
+    decisions: new Map(base.decisions),
+    coverageInputs: [...base.coverageInputs],
+  };
+
+  for (const event of suffixEvents) {
+    next.eventsById.set(event.eventId, event);
+    if (event.eventType === "attribution.corrected") {
+      next.correctionsByTarget.set(event.payload.targetEventId, {
+        eventId: event.payload.targetEventId,
+        correction: event,
+      });
+    }
+  }
+  for (const event of suffixEvents) {
+    if (event.eventType === "attribution.corrected") {
+      addEnvelopeNodes(next, event);
+      continue;
+    }
+    mapEvent(next, effectiveEvent(event, next.correctionsByTarget));
+  }
+  deriveFindingAndDecisionViews(next);
+
+  return {
+    ...next,
+    coverageInputs: deriveProjectionCoverage([...next.eventsById.values()], [], next.correctionsByTarget),
+  };
+}
+
 export function projectWorkGraph(events: readonly ProtocolEvent[]): WorkGraphReplayResult {
   const replay = replayEvents(events);
   const state = buildProjection(replay.orderedEvents);
   return {
     orderedEvents: replay.orderedEvents,
     sourceSequenceGaps: replay.sourceSequenceGaps,
+    state,
     snapshot: snapshotFromState(state, replay.sourceSequenceGaps),
   };
 }
