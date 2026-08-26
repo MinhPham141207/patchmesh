@@ -15,6 +15,7 @@ export type {
 export { clearEventCache, eventCacheStats, readEventsCached, readWindowCached } from "./event-cache.js";
 export {
   clearProjectionCacheStats,
+  maxAppliedPosition,
   projectWorkGraphCached,
   projectionCacheStats,
 } from "./projection-cache.js";

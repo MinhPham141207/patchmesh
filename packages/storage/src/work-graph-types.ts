@@ -126,6 +126,7 @@ export interface WorkGraphSnapshot {
 export interface WorkGraphReplayResult {
   readonly orderedEvents: readonly ProtocolEvent[];
   readonly sourceSequenceGaps: readonly SourceSequenceGap[];
+  /** Results served from a projection checkpoint carry an empty `eventsById` (history is trusted, not held). */
   readonly state: WorkGraphState;
   readonly snapshot: WorkGraphSnapshot;
 }

@@ -471,6 +471,9 @@ export function reduceEvents(orderedEvents: readonly ProtocolEvent[]): WorkGraph
  * the suffix is fine — corrections are collected before any suffix event is mapped, matching
  * `buildProjection`'s two-pass shape.
  *
+ * Precondition: the suffix events must be deduplicated (validated store output satisfies this);
+ * a duplicate event id in the suffix would map twice.
+ *
  * Byte-identity with `buildProjection(prefix ++ suffix)` rests on three facts: evidence arrays
  * accumulate in processing order but `snapshotFromState` sorts them on output; finding and
  * decision views re-sort every event by id; coverage is re-derived wholesale. Nothing else

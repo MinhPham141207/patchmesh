@@ -19,7 +19,7 @@ import type {
   WorkspaceId,
 } from "patchmesh-protocol";
 import { openDatabase } from "../src/database.js";
-import { canonicalBytes, SqliteEventStore, clearProjectionCacheStats, projectWorkGraph, projectWorkGraphCached, projectionCacheStats } from "../src/index.js";
+import { canonicalBytes, SqliteEventStore, clearProjectionCacheStats, loadProjectionCheckpoint, maxAppliedPosition, projectWorkGraph, projectWorkGraphCached, projectionCacheStats } from "../src/index.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -231,4 +231,96 @@ test("verify forces a full validated replay", () => {
   // The verified run rewrote the checkpoint, so the next plain read serves zero delta.
   projectWorkGraphCached(path);
   assert.equal(projectionCacheStats().zeroDeltaServes, 1);
+});
+
+test("maxAppliedPosition never advances past the applied set", () => {
+  const events = buildScenarioEvents(5);
+  const path = tempLedgerPath();
+  const store = SqliteEventStore.open(path);
+  try {
+    for (const event of events) store.append(event);
+    const positionOf = (eventId: EventId): number => {
+      const row = store.handle
+        .prepare("SELECT insertion_position AS position FROM events WHERE event_id = ?")
+        .get(eventId) as { readonly position: number };
+      return row.position;
+    };
+    const last = events[events.length - 1].eventId;
+    // Dangerous direction: rows exist beyond the applied set, so a fresh latestPosition()
+    // would run ahead of what was applied; the watermark must stay at the newest applied row.
+    assert.equal(maxAppliedPosition(store.handle, 0, new Set([events[0].eventId])), positionOf(events[0].eventId));
+    assert.equal(maxAppliedPosition(store.handle, 0, new Set(events.map((event) => event.eventId))), positionOf(last));
+    assert.equal(maxAppliedPosition(store.handle, positionOf(events[2].eventId), new Set([last])), positionOf(last));
+    // Nothing applied beyond the floor leaves the watermark at the floor.
+    assert.equal(maxAppliedPosition(store.handle, positionOf(last), new Set()), positionOf(last));
+  } finally {
+    store.close();
+  }
+});
+
+test("a delta read persists the max applied position as the watermark", () => {
+  clearProjectionCacheStats();
+  const early = buildScenarioEvents(25);
+  const path = buildLedger(early);
+  projectWorkGraphCached(path);
+
+  const later = buildScenarioEvents(40); // superset generator: first 75 events identical ids
+  const writer = SqliteEventStore.open(path);
+  try {
+    for (const event of later.slice(early.length)) writer.append(event);
+  } finally {
+    writer.close();
+  }
+
+  projectWorkGraphCached(path); // delta path
+  assert.equal(projectionCacheStats().deltaApplications >= 1, true);
+
+  const database = openDatabase(path);
+  try {
+    const checkpoint = loadProjectionCheckpoint(database);
+    const row = database
+      .prepare("SELECT insertion_position AS position FROM events WHERE event_id = ?")
+      .get(later[later.length - 1].eventId) as { readonly position: number };
+    // Pin: the stored watermark is exactly the newest row actually applied, never
+    // latestPosition() taken after the reads (the original race's source).
+    assert.equal(checkpoint?.lastInsertionPosition, row.position);
+    assert.deepEqual(
+      canonicalBytes(projectWorkGraphCached(path).snapshot),
+      canonicalBytes(projectWorkGraph(later).snapshot),
+    );
+  } finally {
+    database.close();
+  }
+});
+
+test("persistence no longer reads latestPosition", () => {
+  clearProjectionCacheStats();
+  const early = buildScenarioEvents(25);
+  const path = buildLedger(early);
+  projectWorkGraphCached(path);
+
+  let calls = 0;
+  const original = SqliteEventStore.prototype.latestPosition;
+  SqliteEventStore.prototype.latestPosition = function patchedLatestPosition(this: SqliteEventStore): number {
+    calls += 1;
+    return original.call(this);
+  };
+  try {
+    const later = buildScenarioEvents(40);
+    const writer = SqliteEventStore.open(path);
+    try {
+      for (const event of later.slice(early.length)) writer.append(event);
+    } finally {
+      writer.close();
+    }
+    // Delta path: the validity check may read it once, but persisting must not.
+    projectWorkGraphCached(path);
+    assert.equal(calls, 1);
+    calls = 0;
+    // Verify path: nothing reads it at all — the watermark comes from applied rows.
+    projectWorkGraphCached(path, { verify: true });
+    assert.equal(calls, 0);
+  } finally {
+    SqliteEventStore.prototype.latestPosition = original;
+  }
 });

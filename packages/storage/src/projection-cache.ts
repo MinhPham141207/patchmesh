@@ -66,6 +66,28 @@ function databaseHasPosition(database: DatabaseSync, position: number): boolean 
   return row !== undefined;
 }
 
+/**
+ * The watermark a persist may store: the highest insertion_position among the rows this read
+ * actually applied. Reading it from the rows rather than from `latestPosition()` keeps a
+ * concurrent append that lands after the reads from being watermarked before it is applied —
+ * an ahead-watermark makes the next read serve zero delta while permanently omitting those
+ * events. A behind-watermark is harmless: re-application is idempotent per event id.
+ */
+export function maxAppliedPosition(
+  handle: DatabaseSync,
+  minExclusive: number,
+  appliedIds: ReadonlySet<string>,
+): number {
+  const rows = handle
+    .prepare("SELECT event_id, insertion_position FROM events WHERE insertion_position > ?")
+    .all(minExclusive) as unknown as Array<{ readonly event_id: string; readonly insertion_position: number }>;
+  let watermark = minExclusive;
+  for (const row of rows) {
+    if (appliedIds.has(row.event_id) && row.insertion_position > watermark) watermark = row.insertion_position;
+  }
+  return watermark;
+}
+
 function persistQuietly(store: SqliteEventStore, record: ProjectionCheckpointRecord): void {
   try {
     saveProjectionCheckpoint(store.handle, record);
@@ -85,7 +107,7 @@ export function projectWorkGraphCached(
       const events = store.read();
       const result = projectWorkGraph(events);
       stats.lastAppliedCount = events.length;
-      persistQuietly(store, recordFromState(result.state, store.latestPosition(), result.sourceSequenceGaps));
+      persistQuietly(store, recordFromState(result.state, maxAppliedPosition(store.handle, 0, new Set(events.map((event) => event.eventId))), result.sourceSequenceGaps));
       return result;
     }
 
@@ -100,7 +122,7 @@ export function projectWorkGraphCached(
       const events = store.read();
       const result = projectWorkGraph(events);
       stats.lastAppliedCount = events.length;
-      persistQuietly(store, recordFromState(result.state, store.latestPosition(), result.sourceSequenceGaps));
+      persistQuietly(store, recordFromState(result.state, maxAppliedPosition(store.handle, 0, new Set(events.map((event) => event.eventId))), result.sourceSequenceGaps));
       return result;
     }
 
@@ -132,13 +154,14 @@ export function projectWorkGraphCached(
       const events = store.read();
       const result = projectWorkGraph(events);
       stats.lastAppliedCount = events.length;
-      persistQuietly(store, recordFromState(result.state, store.latestPosition(), result.sourceSequenceGaps));
+      persistQuietly(store, recordFromState(result.state, maxAppliedPosition(store.handle, 0, new Set(events.map((event) => event.eventId))), result.sourceSequenceGaps));
       return result;
     }
-    // Read the watermark once, after the reads: a concurrent writer landing mid-read only
-    // makes the next read re-apply an overlap, which is harmless because the delta is
-    // idempotent per event id (`eventsById` keyed by eventId).
-    persistQuietly(store, recordFromState(extended, store.latestPosition(), gaps));
+    // The watermark comes from the rows just applied, not from `latestPosition()`: an append
+    // landing between the fresh read and this persist must stay unwatermarked until a later
+    // read applies it. Re-application overlap is harmless (idempotent per event id); an
+    // ahead-watermark would zero-delta-serve while permanently omitting real events.
+    persistQuietly(store, recordFromState(extended, maxAppliedPosition(store.handle, checkpoint.lastInsertionPosition, new Set(fresh.map((event) => event.eventId))), gaps));
     return {
       orderedEvents: ordered,
       sourceSequenceGaps: gaps,
