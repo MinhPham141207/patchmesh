@@ -15,7 +15,7 @@ import type {
   WorkspaceId,
 } from "patchmesh-protocol";
 import { clearProjectionCacheStats, projectionCacheStats, SqliteEventStore } from "patchmesh-storage";
-import { createReadServices } from "../src/index.js";
+import { createReadServices, type EventReader } from "../src/index.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -124,4 +124,44 @@ test("verifyReplay routes around the checkpoint", () => {
   assert.equal(projectionCacheStats().fullRebuilds, 0);
   const direct = withReadServices(ledgerPath, {}, (services) => services.getStatus());
   assert.deepEqual(verified, direct);
+});
+
+function countingReader(store: SqliteEventStore): { readonly reader: EventReader; readonly reads: () => number } {
+  let reads = 0;
+  return {
+    reads: () => reads,
+    reader: {
+      read: (query) => {
+        reads += 1;
+        return store.read(query);
+      },
+      replay: (reducer) => store.replay(reducer),
+    },
+  };
+}
+
+test("a service call reads an already-held ledger once per projection", () => {
+  const ledgerPath = buildFixtureLedger();
+  const store = SqliteEventStore.open(ledgerPath);
+  try {
+    // Direct path: getStatus used to read three times (events, projection, coverage re-projection).
+    const direct = countingReader(store);
+    const directServices = createReadServices({ reader: direct.reader });
+    directServices.getStatus();
+    directServices.listAgents();
+    directServices.getGraph();
+    assert.equal(direct.reads(), 3);
+
+    // Checkpoint path: the reader serves only counts/attribution; projections come from the checkpoint.
+    clearProjectionCacheStats();
+    const cached = countingReader(store);
+    const cachedServices = createReadServices({ reader: cached.reader, ledgerPath });
+    cachedServices.getStatus();
+    cachedServices.listAgents();
+    cachedServices.getGraph();
+    assert.equal(projectionCacheStats().fullRebuilds, 1);
+    assert.equal(cached.reads(), 3);
+  } finally {
+    store.close();
+  }
 });

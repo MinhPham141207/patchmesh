@@ -69,11 +69,11 @@ function readEvents(options: ReadServiceOptions): readonly ProtocolEvent[] {
   }
 }
 
-function projectGraph(options: ReadServiceOptions): WorkGraphReplayResult {
+function projectGraph(options: ReadServiceOptions, events?: readonly ProtocolEvent[]): WorkGraphReplayResult {
   if (options.ledgerPath !== undefined && options.verifyReplay !== true) {
     return projectWorkGraphCached(options.ledgerPath);
   }
-  return projectWorkGraph(readEvents(options));
+  return projectWorkGraph(events ?? readEvents(options));
 }
 
 function withCorrectedAttribution(events: readonly ProtocolEvent[]): readonly ProtocolEvent[] {
@@ -105,9 +105,7 @@ function withCorrectedAttribution(events: readonly ProtocolEvent[]): readonly Pr
  * whether it moves; what they cannot act on is a constant. `observational` is the honest name
  * for "some scopes are seen, some are not, and that is the design".
  */
-function aggregateCoverage(events: readonly ProtocolEvent[], options: ReadServiceOptions): StatusView["coverage"] {
-  void events;
-  const snapshot = projectGraph(options).snapshot;
+function aggregateCoverage(snapshot: GraphView["snapshot"]): StatusView["coverage"] {
   const modes = sortedUnique(snapshot.coverage.flatMap((coverage) => coverage.modes));
   const gaps = snapshot.coverage.flatMap((coverage) => coverage.gaps);
   const total = snapshot.coverage.length;
@@ -199,7 +197,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
   const getStatus = (): StatusView => {
     try {
       const events = readEvents(options);
-      const replay = projectGraph(options);
+      const replay = projectGraph(options, events);
       const attributedEvents = withCorrectedAttribution(events);
       const eventTypeCounts = emptyEventTypeCounts();
       const agentIds = new Set<AgentId>();
@@ -213,7 +211,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
         if (event.agentId !== null) agentIds.add(event.agentId);
         if (event.taskId !== null) taskIds.add(event.taskId);
       }
-      const coverage = aggregateCoverage(events, options);
+      const coverage = aggregateCoverage(replay.snapshot);
       return {
         // Health is about the recorder, not about how much of the world it can see. A missing
         // source sequence means events were lost, which is a fault; an opaque shell read means
@@ -255,7 +253,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
       current.push(event);
       byAgent.set(event.agentId, current);
     }
-    const graph = projectGraph(options).snapshot;
+    const graph = projectGraph(options, events).snapshot;
     return {
       agents: [...byAgent.entries()].sort(([left], [right]) => compareStrings(left, right)).map(([agentId, agentEvents]) => {
         const taskIds = sortedUnique(agentEvents.map((event) => event.taskId ?? "")).map((task) => task === "" ? null : task as TaskId);
@@ -275,7 +273,7 @@ export function createReadServices(options: ReadServiceOptions): ReadServices {
 
   const getGraph = (filters: GraphFilters = {}): GraphView => {
     const events = readEvents(options);
-    const snapshot = projectGraph(options).snapshot;
+    const snapshot = projectGraph(options, events).snapshot;
     const filtered = filterGraph(snapshot, filters);
     return {
       snapshot: filtered,
