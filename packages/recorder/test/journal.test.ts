@@ -166,25 +166,43 @@ test("the hook binary's whole import graph stays free of protocol and storage", 
   // Loading them costs ~400ms of Ajv work per tool call, which is why ingest is separate.
   // The guard walks the transitive graph: a heavy import reached through identity.js or
   // journal.js would slow the tool path just as much as one written here directly.
+  // Type-only imports are erased by tsc, so they add nothing to the hook binary's load
+  // cost and are excluded alongside node builtins.
   const specifiersOf = (file: string): readonly string[] =>
-    [...readFileSync(file, "utf8").matchAll(/^\s*(?:import|export)[^"']*from\s*["']([^"']+)["']/gmu)]
+    [...readFileSync(file, "utf8").matchAll(/^\s*(?:import|export)(?=\s)(?!\s*type\b)[^"']*from\s*["']([^"']+)["']/gmu)]
       .map((match) => match[1]!);
 
   const visited = new Set<string>();
   const external: string[] = [];
+  // Source-tree walks resolve `.js` specifiers onto their `.ts` files; built files exist
+  // as written, so this is transparent for them.
+  const resolveSpecifier = (file: string, specifier: string): string => {
+    const resolved = fileURLToPath(new URL(specifier, pathToFileURL(file)));
+    return existsSync(resolved) ? resolved : resolved.replace(/\.js$/u, ".ts");
+  };
   const walk = (file: string): void => {
     if (visited.has(file)) return;
     visited.add(file);
     for (const specifier of specifiersOf(file)) {
       if (specifier.startsWith(".")) {
-        walk(fileURLToPath(new URL(specifier, pathToFileURL(file))));
+        walk(resolveSpecifier(file, specifier));
       } else if (!specifier.startsWith("node:")) {
         external.push(specifier);
       }
     }
   };
   walk(binPath);
+  // Every host adapter is parsed on the tool path once registered, so the whole
+  // `src/hosts` tree must already obey the same no-package-imports rule.
+  const hostsSource = fileURLToPath(new URL("../src/hosts", import.meta.url));
+  for (const name of readdirSync(hostsSource).filter((name) => name.endsWith(".ts"))) {
+    walk(join(hostsSource, name));
+  }
 
   assert.ok(visited.size >= 3, "expected the walk to reach identity.js and journal.js");
+  assert.ok(
+    [...visited].some((file) => file.includes("hosts")),
+    "expected the walk to cover src/hosts",
+  );
   assert.deepEqual(external, [], `hook path must import only node builtins, found: ${external.join(", ")}`);
 });
