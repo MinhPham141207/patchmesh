@@ -554,7 +554,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // reads `parsed.databasePath` on its own, so defaulting in one place and not the other
     // would leave it opening the empty string while every other command worked.
     const resolvedArgv = argv.includes("--database") ? argv : [...argv, "--database", ledgerPath];
-    daemon = createDaemon({ databasePath: ledgerPath });
+    // `status` is the one command whose services serve projections from the persisted
+    // checkpoint, and `status --verify` the one that replays instead. The other read commands
+    // keep their direct replay: their invocations did not ask for the checkpoint, and the
+    // option belongs to the command that measured its win from it.
+    const statusOptions = argv[0] === "status"
+      ? { ledgerPath, verifyReplay: argv.includes("--verify") }
+      : {};
+    daemon = createDaemon({ databasePath: ledgerPath, ...statusOptions });
     const controller = new AbortController();
     const onInterrupt = () => controller.abort();
     process.once("SIGINT", onInterrupt);

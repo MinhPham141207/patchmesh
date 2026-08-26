@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { LEDGER_DIRECTORY, ledgerPathFor, ledgerRootFor, resolveSourceHost } from "patchmesh-recorder";
-import { SqliteEventStore } from "patchmesh-storage";
+import { SqliteEventStore, projectWorkGraphCached } from "patchmesh-storage";
 import { HOOK_EVENTS, ownsCommand, resolveHookTarget } from "./init.js";
 
 /**
@@ -218,9 +218,11 @@ function readLedger(path: string): LedgerFacts | null {
   if (!existsSync(path)) return null;
   const store = SqliteEventStore.open(path);
   try {
-    // Asked of SQLite rather than answered by loading the ledger. This read every event, parsed
-    // each one out of its canonical blob and validated it, to report two numbers: on a
-    // 8,931-event ledger that was most of `doctor`'s six seconds, and it grew with history.
+    // Asked of SQLite rather than answered by loading the ledger, which keeps these two
+    // numbers cheap: this read once loaded every event and validated each out of its
+    // canonical blob, and on a 8,931-event ledger that was most of `doctor`'s six seconds,
+    // growing with history. The size check below still avoids loading events; the replay
+    // check that follows loads them deliberately, because validating the replay is its job.
     return { events: store.count(), latest: store.latestTimestamp() };
   } finally {
     store.close();
@@ -275,6 +277,27 @@ function checkLedger(worktreeRoot: string, ledgerPath: string, shared: boolean, 
     status: "ok",
     detail: `${facts.events} event(s) in ${where}${size}, latest ${facts.latest}`,
   };
+}
+
+/**
+ * Replay the whole ledger and validate every event, which is the one check that can say the
+ * history itself is intact rather than merely present.
+ *
+ * It costs a full replay (~1.5s at 10k events) every run, and that is accepted by spec:
+ * corruption discovery is routine here, speed is not doctor's job. The counts above stay
+ * cheap precisely so this check is the only thing paying for the events.
+ */
+function replayCheck(ledgerPath: string): DoctorCheck {
+  try {
+    projectWorkGraphCached(ledgerPath, { verify: true });
+    return { name: "replay", status: "ok", detail: "every event validated and replayed" };
+  } catch (error) {
+    return {
+      name: "replay",
+      status: "fail",
+      detail: `replay failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
@@ -363,7 +386,11 @@ export function diagnose(options: DoctorOptions): DoctorReport {
   checks.push(...checkHooks(worktreeRoot));
   checks.push(checkServer(worktreeRoot));
   checks.push(checkGitignore(worktreeRoot, ledgerRoot));
-  checks.push(checkLedger(worktreeRoot, ledgerPathFor(worktreeRoot), shared, options.largeLedgerBytes ?? LEDGER_LARGE_BYTES));
+  const ledgerPath = ledgerPathFor(worktreeRoot);
+  checks.push(checkLedger(worktreeRoot, ledgerPath, shared, options.largeLedgerBytes ?? LEDGER_LARGE_BYTES));
+  // Only when the ledger-existence check above had something to look at: replaying a file
+  // that is not there would create one, and this command never creates what it diagnoses.
+  if (existsSync(ledgerPath)) checks.push(replayCheck(ledgerPath));
   checks.push(...checkJournal(worktreeRoot, now));
 
   return { checks, healthy: !checks.some((check) => check.status === "fail") };

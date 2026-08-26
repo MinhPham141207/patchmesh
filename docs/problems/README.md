@@ -80,6 +80,12 @@ Found by re-judging the product against the live ledger rather than against its 
 | [PM-18](PM-18-nothing-budgets-the-ledger.md) | `doctor` reports ledger size always and warns past 64MiB, naming `prune` rather than running it. |
 | [PM-19](PM-19-the-projection-went-quadratic-again.md) | The projection was O(requests x events) again: a scan per call in `toolCoverage`, plus `mergeEvidence` re-sorting a growing list. `status` **41s -> 12.7s**, the projection **16.9s -> 1.3s**, output byte-identical. Guarded by a scaling test that fails on the old code. |
 
+### Shipped 2026-08-26
+
+| Item | What landed |
+| --- | --- |
+| [Projection checkpoint](../superpowers/specs/2026-08-26-projection-checkpoint-design.md) | Read commands serve graph projections from a persisted, hash-checked checkpoint and apply only new events. Full replay remains available via `patchmesh status --verify` and runs on every `doctor`. |
+
 ## Closed, recorded so they are not re-litigated
 
 | Problem | Closed by |

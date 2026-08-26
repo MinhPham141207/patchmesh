@@ -31,6 +31,12 @@ export interface ParsedArgs {
    * invite reading the two as unrelated numbers.
    */
   readonly recapMetrics: boolean;
+  /**
+   * `status --verify`: replay and validate every event instead of serving the persisted
+   * checkpoint. Off by default because the checkpoint is the point; on when corruption is
+   * suspected, which is also exactly when `doctor` runs it for you.
+   */
+  readonly verify?: boolean;
   readonly init: { readonly hooks: boolean; readonly gitignore: boolean; readonly force: boolean };
   /** Retention cutoff for `prune`, in days. Null means the command was not asked for one. */
   readonly olderThanDays: number | null;
@@ -96,7 +102,8 @@ export function usageText(): string {
     "  recap                      What previous sessions did (--within <minutes>, --limit <n>,",
     "                             --agent) — start here",
     "  recap --metrics            Calls an agent makes before its first change (time to resume)",
-    "  status                     Store health, counts, and observation coverage",
+    "  status [--verify]          Store health, counts, and observation coverage (--verify",
+    "                             replays and validates every event)",
     "  agents                     Observed agents, busiest first",
     "  events                     Recent calls, newest first (--raw for raw event lines,",
     "                             --follow, --type, --since, --until, --limit, --cursor)",
@@ -207,6 +214,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let withinMinutes: number | null = null;
   let recapLimit: number | null = null;
   let recapMetrics = false;
+  let verify = false;
   let graphPrint = false;
   let graphPort: number | null = null;
   let initHooks = true;
@@ -366,6 +374,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       continue;
     }
     if (option === "--metrics" && command === "recap") { recapMetrics = true; continue; }
+    if (option === "--verify" && command === "status") { verify = true; continue; }
     if (option === "--limit" && command === "recap") {
       const parsed = Number(value(argv, index, option));
       if (!Number.isInteger(parsed) || parsed <= 0) throw new ReadServiceError("usage", "--limit takes a positive whole number of tasks");
@@ -408,6 +417,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     withinMinutes,
     recapLimit,
     recapMetrics,
+    ...(verify ? { verify: true } : {}),
     olderThanDays,
     init: { hooks: initHooks, gitignore: initGitignore, force: initForce },
     json,

@@ -13,6 +13,13 @@ import { SqliteEventStore, type AppendResult, type PruneResult } from "patchmesh
 export interface DaemonOptions {
   readonly reader?: EventReader;
   readonly databasePath?: string;
+  /**
+   * Read-service options passed through to `createReadServices`. The CLI sets them for
+   * `status` alone -- the one command whose invocation asked to serve projections from the
+   * persisted checkpoint, or to verify a full replay with `--verify`.
+   */
+  readonly ledgerPath?: string;
+  readonly verifyReplay?: boolean;
 }
 
 export interface DaemonHealth {
@@ -101,7 +108,11 @@ export function createDaemon(options: DaemonOptions): PatchMeshDaemon {
     store = SqliteEventStore.open(options.databasePath);
     return store;
   })();
-  const services = createReadServices({ reader });
+  const services = createReadServices({
+    reader,
+    ...(options.ledgerPath === undefined ? {} : { ledgerPath: options.ledgerPath }),
+    ...(options.verifyReplay === undefined ? {} : { verifyReplay: options.verifyReplay }),
+  });
   return {
     services,
     health: () => {
