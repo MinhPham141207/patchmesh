@@ -315,3 +315,31 @@ test("an OpenCode plugin naming a missing recorder warns but never fails doctor"
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// The EINVAL refusal is Node-on-Windows behavior; elsewhere a bare name on the PATH is fine.
+test("a bare recorder name reachable only through a .cmd shim warns instead of being blessed", { skip: process.platform !== "win32" }, () => {
+  const root = wiredRepository();
+  const shimDirectory = mkdtempSync(join(tmpdir(), "patchmesh-doctor-shim-"));
+  const previousPath = process.env["PATH"];
+  try {
+    writeFileSync(join(shimDirectory, "patchmesh-fake.cmd"), "@echo off\r\n", "utf8");
+    mkdirSync(join(root, ".opencode", "plugins"), { recursive: true });
+    writeFileSync(
+      join(root, ".opencode", "plugins", "patchmesh.mjs"),
+      'const RECORDER_BIN = "patchmesh-fake";\n',
+      "utf8",
+    );
+    process.env["PATH"] = shimDirectory;
+    const report = diagnose({ worktreeRoot: root });
+    // The name is on the PATH, but only as the kind of shim the plugin's spawn is refused;
+    // saying ok here would bless an install that records nothing.
+    assert.equal(statusOf(report, "opencode"), "warn");
+    assert.match(detailOf(report, "opencode"), /\.cmd shim/u);
+    assert.equal(report.healthy, true);
+  } finally {
+    if (previousPath === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = previousPath;
+    rmSync(shimDirectory, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});

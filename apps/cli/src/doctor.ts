@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { delimiter, isAbsolute, join, relative } from "node:path";
 import { LEDGER_DIRECTORY, ledgerPathFor, ledgerRootFor, resolveSourceHost } from "patchmesh-recorder";
 import { SqliteEventStore, projectWorkGraphCached } from "patchmesh-storage";
 import { HOOK_EVENTS, onPath, ownsCommand, resolveHookTarget } from "./init.js";
@@ -202,6 +202,28 @@ function checkServer(worktreeRoot: string): DoctorCheck {
  * install moved out from under it - and even that stays a warning, because the Claude-side
  * recording this command's verdict is about is untouched by it.
  */
+/**
+ * Whether a bare command name reaches PATH only through a `.cmd`/`.bat` shim.
+ *
+ * The gap this names: `onPath` answers "the name is there", but the plugin spawns bare names
+ * with `shell: false`, and Node >=18 refuses to spawn `.cmd`/`.bat` shims outright (EINVAL).
+ * On Windows an npm-linked `patchmesh-record` is exactly such a shim, so doctor saying "ok"
+ * here would bless an install that cannot record. Deferred rather than fixed by rewriting
+ * the reference: baking a resolvable absolute path in is Task 6's host-plumbing work, which
+ * is where the bare-name form itself should be revisited.
+ */
+function resolvesOnlyThroughCmdShim(command: string): boolean {
+  if (process.platform !== "win32") return false;
+  const entries = (process.env["PATH"] ?? "").split(delimiter).filter((entry) => entry !== "");
+  const native = entries.some((entry) =>
+    existsSync(join(entry, command)) || existsSync(join(entry, `${command}.exe`)));
+  if (native) return false;
+  const shims = (process.env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter((value) => value !== "" && value.toLowerCase() !== ".exe");
+  return entries.some((entry) => shims.some((ext) => existsSync(join(entry, command + ext))));
+}
+
 function checkOpencodePlugin(worktreeRoot: string): DoctorCheck {
   const pluginPath = join(worktreeRoot, ".opencode", "plugins", "patchmesh.mjs");
   if (!existsSync(pluginPath)) {
@@ -216,10 +238,11 @@ function checkOpencodePlugin(worktreeRoot: string): DoctorCheck {
   // absolute path, a repo-relative path resolved against the worktree like every hook
   // command is, or a bare command name left to the PATH.
   const reference = /const RECORDER_BIN = "([^"\r\n]+)"/u.exec(source)?.[1];
+  const bare = reference !== undefined && !reference.includes("/") && !reference.includes("\\");
   const resolves = reference !== undefined
     && (isAbsolute(reference)
       ? existsSync(reference)
-      : reference.includes("/") || reference.includes("\\")
+      : !bare
         ? existsSync(join(worktreeRoot, reference))
         : onPath(reference));
   if (reference === undefined) {
@@ -227,6 +250,18 @@ function checkOpencodePlugin(worktreeRoot: string): DoctorCheck {
       name: "opencode",
       status: "warn",
       detail: "the OpenCode plugin is installed but names no recorder binary this doctor can check",
+    };
+  }
+  // A bare name that PATH answers only through a `.cmd` shim is not a working install on
+  // Windows - the plugin's `shell: false` spawn of it is refused by Node. Warned rather than
+  // passed as ok, so doctor cannot bless recording that cannot happen.
+  if (bare && resolvesOnlyThroughCmdShim(reference)) {
+    return {
+      name: "opencode",
+      status: "warn",
+      detail: "the OpenCode plugin names a bare recorder command that Windows resolves only through a .cmd shim,"
+        + " which Node refuses to spawn without a shell, so OpenCode records nothing here",
+      fix: "install the recorder where its real binary resolves, then reinstall with: patchmesh init --host opencode --force",
     };
   }
   return resolves

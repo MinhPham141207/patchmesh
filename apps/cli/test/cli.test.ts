@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import type { EventId, ProtocolEvent } from "patchmesh-protocol";
 import type { ReadServices, StatusView } from "patchmesh-query";
@@ -474,6 +475,40 @@ test("the generated plugin spawns the resolved recorder binary", () => {
     // Recording may cost time; it must never break a tool call.
     assert.match(plugin, /catch/u);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the generated plugin resolves repo-relative binaries against the repository root", async () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-opencode-"));
+  const markerEnv = "PM_PLUGIN_TEST_MARKER";
+  const previousMarker = process.env[markerEnv];
+  try {
+    // The dependency branch, where the plugin's binary reference is repo-relative and its
+    // correctness rests entirely on repoRoot()'s URL arithmetic.
+    const recorderBin = join(root, "node_modules", "patchmesh-recorder", "dist", "bin.js");
+    mkdirSync(dirname(recorderBin), { recursive: true });
+    writeFileSync(
+      recorderBin,
+      "require('fs').writeFileSync(process.env['PM_PLUGIN_TEST_MARKER'], 'recorded');\n",
+      "utf8",
+    );
+    initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "opencode" });
+
+    // Executed, not regex-matched: a source match is exactly what let repoRoot() pop one
+    // segment too many and land outside the repository while every test stayed green. The
+    // fixture recorder writes a marker only if the spawn actually reached it through the
+    // plugin's own path resolution.
+    const plugin = await import(pathToFileURL(join(root, ".opencode", "plugins", "patchmesh.mjs")).href);
+    const hooks = (await plugin.PatchMeshPlugin()) as Record<string, (input: unknown) => void>;
+    const marker = join(root, "marker.txt");
+    process.env[markerEnv] = marker;
+    hooks["tool.execute.before"]({ tool: "probe" });
+
+    assert.equal(existsSync(marker), true, "the plugin must reach the recorder relative to the repository root");
+  } finally {
+    if (previousMarker === undefined) delete process.env[markerEnv];
+    else process.env[markerEnv] = previousMarker;
     rmSync(root, { recursive: true, force: true });
   }
 });
