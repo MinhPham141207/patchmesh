@@ -452,6 +452,22 @@ Whichever host Wave 0 shows has a genuine per-call surface — expected to be Op
 cross-host contention on a file both touched. This is the acceptance test that matters; everything
 before it is scaffolding.
 
+**Shipped 2026-08-26 (Wave B gate run):**
+[tools/concurrency/cross-host-scenario.ts](../../tools/concurrency/cross-host-scenario.ts) replays
+the two-host timeline through the real recorder pipeline — a Claude Code agent writing at T+0 and
+still active at T+40, an OpenCode agent (null task, no turn marker) writing the same file at T+20,
+each journalled with its host's payload-stamp provenance — and asserts all eight acceptance
+conditions: exactly one overlap, contention evidence naming the claude-code writer as earlier and
+the opencode writer as later, both hosts' provenance in one ledger, and the opencode side recorded
+with null tasks but a real agent id. Plugin spawn latency was measured by timing 25 spawns of
+`patchmesh-record --host opencode` with a fixture envelope on stdin in a throwaway worktree:
+p50 = 112 ms, p95 = 149 ms, max = 157 ms — inside the ~300 ms p50 ceiling of §7.2 of the design
+spec, so the batching discussion stays closed. Honest caveat: this measures the recorder cost as
+the plugin's child process experiences it; it excludes the Bun-side relay overhead of the installed
+plugin itself, which only a live session can observe. **Live-session dogfood (one real OpenCode
+session alongside a Claude session editing nearby files) is still pending**, so acceptance rests on
+manufactured-but-real-pipeline traffic rather than genuine cross-host traffic yet.
+
 ### Wave C — mailbox (0.4.0) — **shipped 2026-08-26**
 
 Events, `patchmesh send`/`inbox`/`ack`, the three MCP tools, `SessionStart` injection,
