@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
-import { access, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -83,6 +83,10 @@ const EMPTY_STATE: PersistedState = { version: 1, committed: [], preparedAt: {},
 const STALE_LOCK_MS = 5 * 60 * 1000;
 const instances = new Map<string, ObservationSidecar>();
 const servers = new Map<string, ObservationSidecarServer>();
+
+function tokenPath(root: string): string {
+  return resolve(root, ".patchmesh", "observation", "sidecar.token");
+}
 
 function socketPath(root: string): string {
   const name = `patchmesh-observation-${hashId(resolve(root)).slice(0, 24)}`;
@@ -166,7 +170,7 @@ async function readState(path: string): Promise<LoadedState> {
     return { state: {
       version: 1,
       committed: parsed.committed.filter((value): value is string => typeof value === "string").slice(-1024),
-      preparedAt: isRecord(parsed.preparedAt) ? Object.fromEntries(Object.entries(parsed.preparedAt).filter(([, value]) => typeof value === "string")) : {},
+      preparedAt: isRecord(parsed.preparedAt) ? Object.fromEntries(Object.entries(parsed.preparedAt).filter(([, value]) => typeof value === "string").slice(-1024)) : {},
       latest: parsed.latest,
       pending: parsed.pending,
     }, valid: true };
@@ -304,7 +308,7 @@ export class ObservationSidecar {
         };
         this.state = {
           ...this.state,
-          preparedAt: { ...this.state.preparedAt, [requestId]: result.preparedAt },
+          preparedAt: Object.fromEntries(Object.entries({ ...this.state.preparedAt, [requestId]: result.preparedAt }).slice(-1024)),
           pending: { ...this.state.pending, [requestId]: serializeResult(result) },
         };
         await writeState(this.statePath, this.state);
@@ -333,7 +337,7 @@ export class ObservationSidecar {
         this.state = {
           version: 1,
           committed,
-          preparedAt: this.state.preparedAt,
+          preparedAt: Object.fromEntries(Object.entries(this.state.preparedAt).slice(-1024)),
           latest,
           pending: pendingState,
         };
@@ -365,13 +369,20 @@ export async function startObservationSidecarServer(root: string, options: Obser
   if (running) return running;
   const sidecar = await startObservationSidecar(key, options);
   const address = socketPath(key);
+  const authSecretPath = tokenPath(key);
+  const authToken = randomBytes(32).toString("hex");
+  await mkdir(dirname(authSecretPath), { recursive: true });
+  await writeFile(authSecretPath, authToken, { encoding: "utf8", mode: 0o600 });
+  if (process.platform !== "win32") {
+    await chmod(authSecretPath, 0o600).catch(() => undefined);
+  }
   const proxy: ObservationSidecarServer = { address, close: async () => undefined };
   for (let attempt = 0; ; attempt += 1) {
-    if (await sidecarServerResponds(address)) {
+    if (await sidecarServerResponds(address, authToken)) {
       servers.set(key, proxy);
       return proxy;
     }
-    const server: Server = createServer((socket) => handleSocket(socket, sidecar));
+    const server: Server = createServer((socket) => handleSocket(socket, sidecar, authToken));
     try {
       await new Promise<void>((resolveServer, reject) => {
         server.once("error", reject);
@@ -383,6 +394,7 @@ export async function startObservationSidecarServer(root: string, options: Obser
           await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
           if (process.platform !== "win32") await unlink(address).catch(() => undefined);
           servers.delete(key);
+          await unlink(authSecretPath).catch(() => undefined);
           await stopObservationSidecar(key);
         },
       };
@@ -391,7 +403,7 @@ export async function startObservationSidecarServer(root: string, options: Obser
     } catch (error) {
       await new Promise<void>((resolveClose) => server.close(() => resolveClose())).catch(() => undefined);
       if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE" || attempt >= 1) throw error;
-      if (await sidecarServerResponds(address)) {
+      if (await sidecarServerResponds(address, authToken)) {
         servers.set(key, proxy);
         return proxy;
       }
@@ -402,16 +414,16 @@ export async function startObservationSidecarServer(root: string, options: Obser
   }
 }
 
-async function sidecarServerResponds(address: string): Promise<boolean> {
+async function sidecarServerResponds(address: string, authToken?: string): Promise<boolean> {
   try {
-    await new ObservationSidecarServerClient(address).ping();
+    await new ObservationSidecarServerClient(address, undefined, 500, authToken).ping();
     return true;
   } catch {
     return false;
   }
 }
 
-async function handleSocket(socket: Socket, sidecar: ObservationSidecar): Promise<void> {
+async function handleSocket(socket: Socket, sidecar: ObservationSidecar, authToken?: string): Promise<void> {
   let buffer = "";
   socket.setEncoding("utf8");
   socket.on("data", (chunk: string) => {
@@ -421,14 +433,18 @@ async function handleSocket(socket: Socket, sidecar: ObservationSidecar): Promis
       if (end < 0) return;
       const line = buffer.slice(0, end);
       buffer = buffer.slice(end + 1);
-      void handleMessage(line, sidecar, socket);
+      void handleMessage(line, sidecar, socket, authToken);
     }
   });
 }
 
-async function handleMessage(line: string, sidecar: ObservationSidecar, socket: Socket): Promise<void> {
+async function handleMessage(line: string, sidecar: ObservationSidecar, socket: Socket, authToken?: string): Promise<void> {
   try {
-    const message = JSON.parse(line) as { op: string; requestId?: string; transactionId?: string; context?: ObservationContext };
+    const message = JSON.parse(line) as { op: string; token?: string; requestId?: string; transactionId?: string; context?: ObservationContext };
+    if (authToken !== undefined && message.token !== authToken) {
+      socket.write(JSON.stringify({ ok: false, error: "unauthorized observation request" }) + "\n");
+      return;
+    }
     if (message.op === "ping") {
       socket.write('{"ok":true}\n');
     } else if (message.op === "drain" && message.requestId && message.context) {
@@ -445,9 +461,19 @@ async function handleMessage(line: string, sidecar: ObservationSidecar, socket: 
   }
 }
 
+async function readAuthToken(root: string): Promise<string | undefined> {
+  try {
+    const token = (await readFile(tokenPath(root), "utf8")).trim();
+    return token.length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function connectObservationSidecar(root: string): Promise<ObservationSidecarServerClient> {
   const address = socketPath(root);
-  return new ObservationSidecarServerClient(address);
+  const token = await readAuthToken(root);
+  return new ObservationSidecarServerClient(address, undefined, 5_000, token);
 }
 
 export async function ensureObservationSidecar(root: string, options: ObservationSidecarOptions = {}): Promise<ObservationSidecarServerClient> {
@@ -477,7 +503,7 @@ export async function ensureObservationSidecar(root: string, options: Observatio
 }
 
 export class ObservationSidecarServerClient {
-  constructor(readonly address: string, private readonly local?: ObservationSidecar, private readonly requestTimeoutMs = 5_000) {}
+  constructor(readonly address: string, private readonly local?: ObservationSidecar, private readonly requestTimeoutMs = 5_000, private readonly token?: string) {}
 
   drain(requestId: string, context: ObservationContext): Promise<ObservationDrainResult> {
     if (this.local) return this.local.drain(requestId, context);
@@ -511,7 +537,8 @@ export class ObservationSidecarServerClient {
           else finish(undefined, response.result);
         } catch (error) { finish(error instanceof Error ? error : new Error("invalid observation response")); }
       });
-      socket.on("connect", () => socket.write(`${JSON.stringify(message)}\n`));
+      const payload = this.token ? { ...message, token: this.token } : message;
+      socket.on("connect", () => socket.write(`${JSON.stringify(payload)}\n`));
     });
   }
 }

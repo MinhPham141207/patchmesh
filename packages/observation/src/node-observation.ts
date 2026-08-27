@@ -53,6 +53,11 @@ function sha256(value: Uint8Array | string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function gitBlobHash(value: Uint8Array): string {
+  const header = Buffer.from(`blob ${value.byteLength}\0`);
+  return createHash("sha1").update(header).update(value).digest("hex");
+}
+
 function gap(kind: ObservationGap["kind"], scope: string, reason: string): ObservationGap {
   return { kind, scope, reason: sanitizeDiagnostic(reason) };
 }
@@ -143,6 +148,38 @@ async function captureGitMetadata(root: string): Promise<GitMetadata> {
     gaps.push(gap("unverified", "git", "Git repository metadata is unavailable"));
   }
   return { commonDirectory, administrativeDirectory, revision, gaps };
+}
+
+async function fastGitRevision(adminDir: string | null, commonDir: string | null, root: string): Promise<string | null> {
+  if (!adminDir) return gitValue(root, "rev-parse", "HEAD");
+  try {
+    const headContent = (await readFile(resolve(adminDir, "HEAD"), "utf8")).trim();
+    if (!headContent.startsWith("ref: ")) {
+      if (/^[0-9a-f]{40}$/i.test(headContent)) return headContent;
+    } else {
+      const refPath = headContent.slice(5).trim();
+      for (const base of [adminDir, commonDir]) {
+        if (!base) continue;
+        try {
+          const refContent = (await readFile(resolve(base, refPath), "utf8")).trim();
+          if (/^[0-9a-f]{40}$/i.test(refContent)) return refContent;
+        } catch { /* try next */ }
+      }
+      if (commonDir) {
+        try {
+          const packed = await readFile(resolve(commonDir, "packed-refs"), "utf8");
+          for (const line of packed.split("\n")) {
+            if (line.startsWith("#") || line.startsWith("^") || !line.includes(" ")) continue;
+            const [hash, ref] = line.trim().split(" ");
+            if (ref === refPath && hash && /^[0-9a-f]{40}$/i.test(hash)) return hash;
+          }
+        } catch { /* fallback */ }
+      }
+    }
+  } catch {
+    /* fallback */
+  }
+  return gitValue(root, "rev-parse", "HEAD");
 }
 
 async function gitBlobHashes(root: string, paths: readonly string[]): Promise<ReadonlyMap<string, string> | null> {
@@ -300,9 +337,10 @@ async function captureFiles(root: string, includeGitBlobs: boolean): Promise<{
       try {
         const info = await lstat(file.absolutePath, { bigint: true });
         if (!info.isFile()) continue;
+        const content = await readFile(file.absolutePath);
         fileStates[index] = {
-          contentHash: sha256(await readFile(file.absolutePath)),
-          gitBlob: blobHashes?.get(file.relativePath) ?? fallbackBlobs?.[index] ?? null,
+          contentHash: sha256(content),
+          gitBlob: includeGitBlobs ? gitBlobHash(content) : null,
           fileKind: "file",
         };
         fileMetadata[index] = metadataFromStat(info);
@@ -760,7 +798,9 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
           continue;
         }
         if (!hashedCandidates.has(logicalPath)) {
-          files.set(logicalPath, { contentHash: sha256(await this.candidateReader(absolute)), gitBlob: null, fileKind: "file" });
+          const content = await this.candidateReader(absolute);
+          const blob = before.repository.commonDirectory !== null && before.worktree.administrativeDirectory !== null ? gitBlobHash(content) : null;
+          files.set(logicalPath, { contentHash: sha256(content), gitBlob: blob, fileKind: "file" });
           hashedCandidates.add(logicalPath);
         }
         metadata.set(logicalPath, metadataFromStat(info));
@@ -779,13 +819,9 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
       if (!sameWorkspaceIdentity(session.identity, identityBeforeGit) || !sameWorkspaceIdentity(currentIdentity, identityBeforeGit)) {
         markIdentityChanged();
       } else {
-        const blobs = candidatePaths.length > 0 && before.repository.commonDirectory !== null && before.worktree.administrativeDirectory !== null
-          ? await gitBlobHashes(session.root, candidatePaths)
-          : new Map<string, string>();
-        const fallback = blobs === null
-          ? await Promise.all(candidatePaths.map((path) => gitValue(session.root, "hash-object", "--", path)))
-          : null;
-        const resolvedRevision = await gitValue(session.root, "rev-parse", "HEAD");
+        const blobs = new Map<string, string>();
+        const fallback = null;
+        const resolvedRevision = await fastGitRevision(before.worktree.administrativeDirectory, before.repository.commonDirectory, session.root);
         const identityAfterGit = await captureWorkspaceIdentity(session.root);
         if (!sameWorkspaceIdentity(identityBeforeGit, identityAfterGit) || !sameWorkspaceIdentity(session.identity, identityAfterGit)) {
           markIdentityChanged();
@@ -860,7 +896,8 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
           }
           const nextMetadata = metadataFromStat(info);
           if (!sameMetadata(metadata.get(logicalPath), nextMetadata)) {
-            files.set(logicalPath, { contentHash: sha256(await this.candidateReader(absolute)), gitBlob: null, fileKind: "file" });
+            const content = await this.candidateReader(absolute);
+            files.set(logicalPath, { contentHash: sha256(content), gitBlob: gitBlobHash(content), fileKind: "file" });
             metadata.set(logicalPath, nextMetadata);
             hashedCandidates.add(logicalPath);
           }

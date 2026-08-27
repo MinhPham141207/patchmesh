@@ -1,0 +1,2047 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "m0_interception_budget",
+  "definitionVersion": "phase2-m0-v1",
+  "definitionDigest": "sha256:9aa8410b9f773ef130e45dee801d1fe34707e8f6df9bdf120a79bba9b757f374",
+  "generatedAt": "2026-08-27T14:09:55.295Z",
+  "commit": "f6ef8a6999c487b5ff1984b50f07846240893317",
+  "gitDirty": true,
+  "environment": {
+    "timestamp": "2026-08-27T13:23:58.577Z",
+    "commit": "f6ef8a6999c487b5ff1984b50f07846240893317",
+    "dirty": true,
+    "os": "win32",
+    "osRelease": "10.0.26200",
+    "architecture": "x64",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+    "memoryBytes": 16813264896,
+    "nodeVersion": "v24.15.0",
+    "pnpmVersion": "unavailable",
+    "workloadDefinitionDigest": "sha256:9aa8410b9f773ef130e45dee801d1fe34707e8f6df9bdf120a79bba9b757f374"
+  },
+  "workloads": [
+    {
+      "workloadId": "large",
+      "fileCount": 50000,
+      "budgetMs": 5000,
+      "coldInitializationMs": 15426.947333333332,
+      "coldInitializationRunsMs": [
+        14980.4053,
+        15540.7267,
+        15759.71
+      ],
+      "runs": [
+        {
+          "runId": "run-1",
+          "warmupSamples": [
+            {
+              "baselineNs": 8783500,
+              "instrumentedNs": 3853761200,
+              "overheadNs": 3844977700,
+              "failure": null
+            },
+            {
+              "baselineNs": 11594200,
+              "instrumentedNs": 481908200,
+              "overheadNs": 470314000,
+              "failure": null
+            },
+            {
+              "baselineNs": 9750000,
+              "instrumentedNs": 502593100,
+              "overheadNs": 492843100,
+              "failure": null
+            },
+            {
+              "baselineNs": 9899100,
+              "instrumentedNs": 485296400,
+              "overheadNs": 475397300,
+              "failure": null
+            },
+            {
+              "baselineNs": 10128100,
+              "instrumentedNs": 384063800,
+              "overheadNs": 373935700,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 8712900,
+              "instrumentedNs": 502050600,
+              "overheadNs": 493337700,
+              "failure": null
+            },
+            {
+              "baselineNs": 12877100,
+              "instrumentedNs": 472148200,
+              "overheadNs": 459271100,
+              "failure": null
+            },
+            {
+              "baselineNs": 3999500,
+              "instrumentedNs": 374980100,
+              "overheadNs": 370980600,
+              "failure": null
+            },
+            {
+              "baselineNs": 7938600,
+              "instrumentedNs": 372610100,
+              "overheadNs": 364671500,
+              "failure": null
+            },
+            {
+              "baselineNs": 10159800,
+              "instrumentedNs": 407244400,
+              "overheadNs": 397084600,
+              "failure": null
+            },
+            {
+              "baselineNs": 2505200,
+              "instrumentedNs": 417636000,
+              "overheadNs": 415130800,
+              "failure": null
+            },
+            {
+              "baselineNs": 8890300,
+              "instrumentedNs": 363888300,
+              "overheadNs": 354998000,
+              "failure": null
+            },
+            {
+              "baselineNs": 6732700,
+              "instrumentedNs": 433053800,
+              "overheadNs": 426321100,
+              "failure": null
+            },
+            {
+              "baselineNs": 5811600,
+              "instrumentedNs": 287034700,
+              "overheadNs": 281223100,
+              "failure": null
+            },
+            {
+              "baselineNs": 12002400,
+              "instrumentedNs": 452768400,
+              "overheadNs": 440766000,
+              "failure": null
+            },
+            {
+              "baselineNs": 11395600,
+              "instrumentedNs": 390106800,
+              "overheadNs": 378711200,
+              "failure": null
+            },
+            {
+              "baselineNs": 10400000,
+              "instrumentedNs": 405126300,
+              "overheadNs": 394726300,
+              "failure": null
+            },
+            {
+              "baselineNs": 9473400,
+              "instrumentedNs": 437074000,
+              "overheadNs": 427600600,
+              "failure": null
+            },
+            {
+              "baselineNs": 9446700,
+              "instrumentedNs": 194501500,
+              "overheadNs": 185054800,
+              "failure": null
+            },
+            {
+              "baselineNs": 8316700,
+              "instrumentedNs": 433967900,
+              "overheadNs": 425651200,
+              "failure": null
+            },
+            {
+              "baselineNs": 10176200,
+              "instrumentedNs": 457559300,
+              "overheadNs": 447383100,
+              "failure": null
+            },
+            {
+              "baselineNs": 9390900,
+              "instrumentedNs": 436613700,
+              "overheadNs": 427222800,
+              "failure": null
+            },
+            {
+              "baselineNs": 5639400,
+              "instrumentedNs": 445944000,
+              "overheadNs": 440304600,
+              "failure": null
+            },
+            {
+              "baselineNs": 10026400,
+              "instrumentedNs": 416813800,
+              "overheadNs": 406787400,
+              "failure": null
+            },
+            {
+              "baselineNs": 9015800,
+              "instrumentedNs": 475216900,
+              "overheadNs": 466201100,
+              "failure": null
+            },
+            {
+              "baselineNs": 4967100,
+              "instrumentedNs": 362332700,
+              "overheadNs": 357365600,
+              "failure": null
+            },
+            {
+              "baselineNs": 9210700,
+              "instrumentedNs": 310695700,
+              "overheadNs": 301485000,
+              "failure": null
+            },
+            {
+              "baselineNs": 9323800,
+              "instrumentedNs": 429913900,
+              "overheadNs": 420590100,
+              "failure": null
+            },
+            {
+              "baselineNs": 6129600,
+              "instrumentedNs": 486740800,
+              "overheadNs": 480611200,
+              "failure": null
+            },
+            {
+              "baselineNs": 9329100,
+              "instrumentedNs": 491802800,
+              "overheadNs": 482473700,
+              "failure": null
+            },
+            {
+              "baselineNs": 7334200,
+              "instrumentedNs": 286560500,
+              "overheadNs": 279226300,
+              "failure": null
+            },
+            {
+              "baselineNs": 9520400,
+              "instrumentedNs": 427097600,
+              "overheadNs": 417577200,
+              "failure": null
+            },
+            {
+              "baselineNs": 5858900,
+              "instrumentedNs": 454418300,
+              "overheadNs": 448559400,
+              "failure": null
+            },
+            {
+              "baselineNs": 10056700,
+              "instrumentedNs": 560967100,
+              "overheadNs": 550910400,
+              "failure": null
+            },
+            {
+              "baselineNs": 9901500,
+              "instrumentedNs": 577984400,
+              "overheadNs": 568082900,
+              "failure": null
+            }
+          ],
+          "p50Ms": 420.5901,
+          "p95Ms": 550.9104
+        },
+        {
+          "runId": "run-2",
+          "warmupSamples": [
+            {
+              "baselineNs": 13282900,
+              "instrumentedNs": 274302800,
+              "overheadNs": 261019900,
+              "failure": null
+            },
+            {
+              "baselineNs": 8086600,
+              "instrumentedNs": 441630100,
+              "overheadNs": 433543500,
+              "failure": null
+            },
+            {
+              "baselineNs": 7983600,
+              "instrumentedNs": 452737000,
+              "overheadNs": 444753400,
+              "failure": null
+            },
+            {
+              "baselineNs": 7390700,
+              "instrumentedNs": 453730900,
+              "overheadNs": 446340200,
+              "failure": null
+            },
+            {
+              "baselineNs": 11063500,
+              "instrumentedNs": 449120700,
+              "overheadNs": 438057200,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 11971400,
+              "instrumentedNs": 389097800,
+              "overheadNs": 377126400,
+              "failure": null
+            },
+            {
+              "baselineNs": 10647300,
+              "instrumentedNs": 467461700,
+              "overheadNs": 456814400,
+              "failure": null
+            },
+            {
+              "baselineNs": 9804000,
+              "instrumentedNs": 477201100,
+              "overheadNs": 467397100,
+              "failure": null
+            },
+            {
+              "baselineNs": 8835400,
+              "instrumentedNs": 376867500,
+              "overheadNs": 368032100,
+              "failure": null
+            },
+            {
+              "baselineNs": 10371300,
+              "instrumentedNs": 471283900,
+              "overheadNs": 460912600,
+              "failure": null
+            },
+            {
+              "baselineNs": 5199700,
+              "instrumentedNs": 486653800,
+              "overheadNs": 481454100,
+              "failure": null
+            },
+            {
+              "baselineNs": 5797700,
+              "instrumentedNs": 299938300,
+              "overheadNs": 294140600,
+              "failure": null
+            },
+            {
+              "baselineNs": 9563000,
+              "instrumentedNs": 460384400,
+              "overheadNs": 450821400,
+              "failure": null
+            },
+            {
+              "baselineNs": 10742100,
+              "instrumentedNs": 529699300,
+              "overheadNs": 518957200,
+              "failure": null
+            },
+            {
+              "baselineNs": 11166900,
+              "instrumentedNs": 486738900,
+              "overheadNs": 475572000,
+              "failure": null
+            },
+            {
+              "baselineNs": 10140900,
+              "instrumentedNs": 456019100,
+              "overheadNs": 445878200,
+              "failure": null
+            },
+            {
+              "baselineNs": 11540500,
+              "instrumentedNs": 488572800,
+              "overheadNs": 477032300,
+              "failure": null
+            },
+            {
+              "baselineNs": 3020900,
+              "instrumentedNs": 427782500,
+              "overheadNs": 424761600,
+              "failure": null
+            },
+            {
+              "baselineNs": 5326000,
+              "instrumentedNs": 398161800,
+              "overheadNs": 392835800,
+              "failure": null
+            },
+            {
+              "baselineNs": 5906300,
+              "instrumentedNs": 463665100,
+              "overheadNs": 457758800,
+              "failure": null
+            },
+            {
+              "baselineNs": 5802600,
+              "instrumentedNs": 406450800,
+              "overheadNs": 400648200,
+              "failure": null
+            },
+            {
+              "baselineNs": 10486200,
+              "instrumentedNs": 472736900,
+              "overheadNs": 462250700,
+              "failure": null
+            },
+            {
+              "baselineNs": 10004800,
+              "instrumentedNs": 454903300,
+              "overheadNs": 444898500,
+              "failure": null
+            },
+            {
+              "baselineNs": 11718200,
+              "instrumentedNs": 512598300,
+              "overheadNs": 500880100,
+              "failure": null
+            },
+            {
+              "baselineNs": 8576800,
+              "instrumentedNs": 436758700,
+              "overheadNs": 428181900,
+              "failure": null
+            },
+            {
+              "baselineNs": 8218200,
+              "instrumentedNs": 466171800,
+              "overheadNs": 457953600,
+              "failure": null
+            },
+            {
+              "baselineNs": 10375800,
+              "instrumentedNs": 531687500,
+              "overheadNs": 521311700,
+              "failure": null
+            },
+            {
+              "baselineNs": 12382100,
+              "instrumentedNs": 316122500,
+              "overheadNs": 303740400,
+              "failure": null
+            },
+            {
+              "baselineNs": 9434300,
+              "instrumentedNs": 419599200,
+              "overheadNs": 410164900,
+              "failure": null
+            },
+            {
+              "baselineNs": 11860900,
+              "instrumentedNs": 498712900,
+              "overheadNs": 486852000,
+              "failure": null
+            },
+            {
+              "baselineNs": 8954400,
+              "instrumentedNs": 515384300,
+              "overheadNs": 506429900,
+              "failure": null
+            },
+            {
+              "baselineNs": 13241100,
+              "instrumentedNs": 412391200,
+              "overheadNs": 399150100,
+              "failure": null
+            },
+            {
+              "baselineNs": 11924100,
+              "instrumentedNs": 509636700,
+              "overheadNs": 497712600,
+              "failure": null
+            },
+            {
+              "baselineNs": 7297800,
+              "instrumentedNs": 554296400,
+              "overheadNs": 546998600,
+              "failure": null
+            },
+            {
+              "baselineNs": 8253900,
+              "instrumentedNs": 516368900,
+              "overheadNs": 508115000,
+              "failure": null
+            }
+          ],
+          "p50Ms": 457.7588,
+          "p95Ms": 521.3117
+        },
+        {
+          "runId": "run-3",
+          "warmupSamples": [
+            {
+              "baselineNs": 4415200,
+              "instrumentedNs": 461734700,
+              "overheadNs": 457319500,
+              "failure": null
+            },
+            {
+              "baselineNs": 5431700,
+              "instrumentedNs": 437966500,
+              "overheadNs": 432534800,
+              "failure": null
+            },
+            {
+              "baselineNs": 7615100,
+              "instrumentedNs": 402161600,
+              "overheadNs": 394546500,
+              "failure": null
+            },
+            {
+              "baselineNs": 9344700,
+              "instrumentedNs": 397694900,
+              "overheadNs": 388350200,
+              "failure": null
+            },
+            {
+              "baselineNs": 12946900,
+              "instrumentedNs": 398219900,
+              "overheadNs": 385273000,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 9100900,
+              "instrumentedNs": 394207100,
+              "overheadNs": 385106200,
+              "failure": null
+            },
+            {
+              "baselineNs": 8647300,
+              "instrumentedNs": 416600600,
+              "overheadNs": 407953300,
+              "failure": null
+            },
+            {
+              "baselineNs": 9815200,
+              "instrumentedNs": 319070800,
+              "overheadNs": 309255600,
+              "failure": null
+            },
+            {
+              "baselineNs": 10963400,
+              "instrumentedNs": 415611500,
+              "overheadNs": 404648100,
+              "failure": null
+            },
+            {
+              "baselineNs": 9085300,
+              "instrumentedNs": 478042800,
+              "overheadNs": 468957500,
+              "failure": null
+            },
+            {
+              "baselineNs": 7555500,
+              "instrumentedNs": 440148300,
+              "overheadNs": 432592800,
+              "failure": null
+            },
+            {
+              "baselineNs": 7633100,
+              "instrumentedNs": 432521200,
+              "overheadNs": 424888100,
+              "failure": null
+            },
+            {
+              "baselineNs": 10365800,
+              "instrumentedNs": 417129900,
+              "overheadNs": 406764100,
+              "failure": null
+            },
+            {
+              "baselineNs": 6493600,
+              "instrumentedNs": 478607200,
+              "overheadNs": 472113600,
+              "failure": null
+            },
+            {
+              "baselineNs": 9234900,
+              "instrumentedNs": 486175500,
+              "overheadNs": 476940600,
+              "failure": null
+            },
+            {
+              "baselineNs": 7526500,
+              "instrumentedNs": 433463400,
+              "overheadNs": 425936900,
+              "failure": null
+            },
+            {
+              "baselineNs": 12045600,
+              "instrumentedNs": 486198400,
+              "overheadNs": 474152800,
+              "failure": null
+            },
+            {
+              "baselineNs": 9644300,
+              "instrumentedNs": 446328600,
+              "overheadNs": 436684300,
+              "failure": null
+            },
+            {
+              "baselineNs": 5175900,
+              "instrumentedNs": 496566500,
+              "overheadNs": 491390600,
+              "failure": null
+            },
+            {
+              "baselineNs": 10892100,
+              "instrumentedNs": 519961400,
+              "overheadNs": 509069300,
+              "failure": null
+            },
+            {
+              "baselineNs": 12722400,
+              "instrumentedNs": 512445400,
+              "overheadNs": 499723000,
+              "failure": null
+            },
+            {
+              "baselineNs": 10884400,
+              "instrumentedNs": 449361600,
+              "overheadNs": 438477200,
+              "failure": null
+            },
+            {
+              "baselineNs": 10476800,
+              "instrumentedNs": 357493200,
+              "overheadNs": 347016400,
+              "failure": null
+            },
+            {
+              "baselineNs": 11952300,
+              "instrumentedNs": 397680500,
+              "overheadNs": 385728200,
+              "failure": null
+            },
+            {
+              "baselineNs": 6737500,
+              "instrumentedNs": 446487600,
+              "overheadNs": 439750100,
+              "failure": null
+            },
+            {
+              "baselineNs": 11784200,
+              "instrumentedNs": 466898800,
+              "overheadNs": 455114600,
+              "failure": null
+            },
+            {
+              "baselineNs": 8659700,
+              "instrumentedNs": 426376900,
+              "overheadNs": 417717200,
+              "failure": null
+            },
+            {
+              "baselineNs": 13755100,
+              "instrumentedNs": 411271600,
+              "overheadNs": 397516500,
+              "failure": null
+            },
+            {
+              "baselineNs": 10245800,
+              "instrumentedNs": 481735200,
+              "overheadNs": 471489400,
+              "failure": null
+            },
+            {
+              "baselineNs": 10375400,
+              "instrumentedNs": 441600300,
+              "overheadNs": 431224900,
+              "failure": null
+            },
+            {
+              "baselineNs": 7165700,
+              "instrumentedNs": 484887600,
+              "overheadNs": 477721900,
+              "failure": null
+            },
+            {
+              "baselineNs": 11055700,
+              "instrumentedNs": 468002200,
+              "overheadNs": 456946500,
+              "failure": null
+            },
+            {
+              "baselineNs": 4181300,
+              "instrumentedNs": 459795700,
+              "overheadNs": 455614400,
+              "failure": null
+            },
+            {
+              "baselineNs": 9419300,
+              "instrumentedNs": 518716300,
+              "overheadNs": 509297000,
+              "failure": null
+            },
+            {
+              "baselineNs": 8959100,
+              "instrumentedNs": 486699700,
+              "overheadNs": 477740600,
+              "failure": null
+            }
+          ],
+          "p50Ms": 438.4772,
+          "p95Ms": 509.0693
+        }
+      ],
+      "gateP95Ms": 550.9104,
+      "failures": 0,
+      "accepted": true
+    },
+    {
+      "workloadId": "medium",
+      "fileCount": 10000,
+      "budgetMs": 1500,
+      "coldInitializationMs": 4753.671566666667,
+      "coldInitializationRunsMs": [
+        5044.3538,
+        5546.4739,
+        3670.187
+      ],
+      "runs": [
+        {
+          "runId": "run-1",
+          "warmupSamples": [
+            {
+              "baselineNs": 9929000,
+              "instrumentedNs": 142083400,
+              "overheadNs": 132154400,
+              "failure": null
+            },
+            {
+              "baselineNs": 12189100,
+              "instrumentedNs": 160895800,
+              "overheadNs": 148706700,
+              "failure": null
+            },
+            {
+              "baselineNs": 13865800,
+              "instrumentedNs": 144585500,
+              "overheadNs": 130719700,
+              "failure": null
+            },
+            {
+              "baselineNs": 6585200,
+              "instrumentedNs": 141904000,
+              "overheadNs": 135318800,
+              "failure": null
+            },
+            {
+              "baselineNs": 10695200,
+              "instrumentedNs": 141861500,
+              "overheadNs": 131166300,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 10028800,
+              "instrumentedNs": 145910700,
+              "overheadNs": 135881900,
+              "failure": null
+            },
+            {
+              "baselineNs": 9926000,
+              "instrumentedNs": 175544200,
+              "overheadNs": 165618200,
+              "failure": null
+            },
+            {
+              "baselineNs": 7675000,
+              "instrumentedNs": 196592600,
+              "overheadNs": 188917600,
+              "failure": null
+            },
+            {
+              "baselineNs": 6414200,
+              "instrumentedNs": 174983300,
+              "overheadNs": 168569100,
+              "failure": null
+            },
+            {
+              "baselineNs": 8337600,
+              "instrumentedNs": 147473900,
+              "overheadNs": 139136300,
+              "failure": null
+            },
+            {
+              "baselineNs": 6177400,
+              "instrumentedNs": 175286300,
+              "overheadNs": 169108900,
+              "failure": null
+            },
+            {
+              "baselineNs": 14846400,
+              "instrumentedNs": 181168300,
+              "overheadNs": 166321900,
+              "failure": null
+            },
+            {
+              "baselineNs": 10998700,
+              "instrumentedNs": 171822100,
+              "overheadNs": 160823400,
+              "failure": null
+            },
+            {
+              "baselineNs": 7115500,
+              "instrumentedNs": 190011300,
+              "overheadNs": 182895800,
+              "failure": null
+            },
+            {
+              "baselineNs": 7481600,
+              "instrumentedNs": 186908600,
+              "overheadNs": 179427000,
+              "failure": null
+            },
+            {
+              "baselineNs": 10302500,
+              "instrumentedNs": 182098300,
+              "overheadNs": 171795800,
+              "failure": null
+            },
+            {
+              "baselineNs": 11422900,
+              "instrumentedNs": 87003900,
+              "overheadNs": 75581000,
+              "failure": null
+            },
+            {
+              "baselineNs": 6786300,
+              "instrumentedNs": 173026700,
+              "overheadNs": 166240400,
+              "failure": null
+            },
+            {
+              "baselineNs": 9332400,
+              "instrumentedNs": 210361700,
+              "overheadNs": 201029300,
+              "failure": null
+            },
+            {
+              "baselineNs": 7695400,
+              "instrumentedNs": 174464600,
+              "overheadNs": 166769200,
+              "failure": null
+            },
+            {
+              "baselineNs": 6154500,
+              "instrumentedNs": 201747700,
+              "overheadNs": 195593200,
+              "failure": null
+            },
+            {
+              "baselineNs": 9726300,
+              "instrumentedNs": 206238400,
+              "overheadNs": 196512100,
+              "failure": null
+            },
+            {
+              "baselineNs": 12895900,
+              "instrumentedNs": 220420600,
+              "overheadNs": 207524700,
+              "failure": null
+            },
+            {
+              "baselineNs": 7156800,
+              "instrumentedNs": 192447000,
+              "overheadNs": 185290200,
+              "failure": null
+            },
+            {
+              "baselineNs": 8235300,
+              "instrumentedNs": 214126800,
+              "overheadNs": 205891500,
+              "failure": null
+            },
+            {
+              "baselineNs": 8998000,
+              "instrumentedNs": 224556900,
+              "overheadNs": 215558900,
+              "failure": null
+            },
+            {
+              "baselineNs": 6793500,
+              "instrumentedNs": 231197500,
+              "overheadNs": 224404000,
+              "failure": null
+            },
+            {
+              "baselineNs": 8126100,
+              "instrumentedNs": 227280100,
+              "overheadNs": 219154000,
+              "failure": null
+            },
+            {
+              "baselineNs": 8469000,
+              "instrumentedNs": 169423000,
+              "overheadNs": 160954000,
+              "failure": null
+            },
+            {
+              "baselineNs": 7110100,
+              "instrumentedNs": 268927400,
+              "overheadNs": 261817300,
+              "failure": null
+            },
+            {
+              "baselineNs": 13133800,
+              "instrumentedNs": 265981900,
+              "overheadNs": 252848100,
+              "failure": null
+            },
+            {
+              "baselineNs": 9373100,
+              "instrumentedNs": 267706300,
+              "overheadNs": 258333200,
+              "failure": null
+            },
+            {
+              "baselineNs": 9984300,
+              "instrumentedNs": 241565400,
+              "overheadNs": 231581100,
+              "failure": null
+            },
+            {
+              "baselineNs": 6153900,
+              "instrumentedNs": 282105800,
+              "overheadNs": 275951900,
+              "failure": null
+            },
+            {
+              "baselineNs": 8052300,
+              "instrumentedNs": 338162400,
+              "overheadNs": 330110100,
+              "failure": null
+            }
+          ],
+          "p50Ms": 185.2902,
+          "p95Ms": 275.9519
+        },
+        {
+          "runId": "run-2",
+          "warmupSamples": [
+            {
+              "baselineNs": 11084800,
+              "instrumentedNs": 131239000,
+              "overheadNs": 120154200,
+              "failure": null
+            },
+            {
+              "baselineNs": 8517400,
+              "instrumentedNs": 107141000,
+              "overheadNs": 98623600,
+              "failure": null
+            },
+            {
+              "baselineNs": 10436200,
+              "instrumentedNs": 93764800,
+              "overheadNs": 83328600,
+              "failure": null
+            },
+            {
+              "baselineNs": 4962600,
+              "instrumentedNs": 99872300,
+              "overheadNs": 94909700,
+              "failure": null
+            },
+            {
+              "baselineNs": 19444300,
+              "instrumentedNs": 141542700,
+              "overheadNs": 122098400,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 6654800,
+              "instrumentedNs": 146255000,
+              "overheadNs": 139600200,
+              "failure": null
+            },
+            {
+              "baselineNs": 12609800,
+              "instrumentedNs": 127090100,
+              "overheadNs": 114480300,
+              "failure": null
+            },
+            {
+              "baselineNs": 11221300,
+              "instrumentedNs": 162680100,
+              "overheadNs": 151458800,
+              "failure": null
+            },
+            {
+              "baselineNs": 7795600,
+              "instrumentedNs": 187668100,
+              "overheadNs": 179872500,
+              "failure": null
+            },
+            {
+              "baselineNs": 4602600,
+              "instrumentedNs": 164039600,
+              "overheadNs": 159437000,
+              "failure": null
+            },
+            {
+              "baselineNs": 10165800,
+              "instrumentedNs": 186071200,
+              "overheadNs": 175905400,
+              "failure": null
+            },
+            {
+              "baselineNs": 10576600,
+              "instrumentedNs": 166314500,
+              "overheadNs": 155737900,
+              "failure": null
+            },
+            {
+              "baselineNs": 9890000,
+              "instrumentedNs": 178200900,
+              "overheadNs": 168310900,
+              "failure": null
+            },
+            {
+              "baselineNs": 11255800,
+              "instrumentedNs": 138305900,
+              "overheadNs": 127050100,
+              "failure": null
+            },
+            {
+              "baselineNs": 7415900,
+              "instrumentedNs": 159217500,
+              "overheadNs": 151801600,
+              "failure": null
+            },
+            {
+              "baselineNs": 12965900,
+              "instrumentedNs": 173313500,
+              "overheadNs": 160347600,
+              "failure": null
+            },
+            {
+              "baselineNs": 11133600,
+              "instrumentedNs": 203599200,
+              "overheadNs": 192465600,
+              "failure": null
+            },
+            {
+              "baselineNs": 8553500,
+              "instrumentedNs": 218660400,
+              "overheadNs": 210106900,
+              "failure": null
+            },
+            {
+              "baselineNs": 9797600,
+              "instrumentedNs": 200085300,
+              "overheadNs": 190287700,
+              "failure": null
+            },
+            {
+              "baselineNs": 7543500,
+              "instrumentedNs": 201616800,
+              "overheadNs": 194073300,
+              "failure": null
+            },
+            {
+              "baselineNs": 6933000,
+              "instrumentedNs": 193072700,
+              "overheadNs": 186139700,
+              "failure": null
+            },
+            {
+              "baselineNs": 13534000,
+              "instrumentedNs": 204264700,
+              "overheadNs": 190730700,
+              "failure": null
+            },
+            {
+              "baselineNs": 24157800,
+              "instrumentedNs": 194493600,
+              "overheadNs": 170335800,
+              "failure": null
+            },
+            {
+              "baselineNs": 10839700,
+              "instrumentedNs": 223291400,
+              "overheadNs": 212451700,
+              "failure": null
+            },
+            {
+              "baselineNs": 12695400,
+              "instrumentedNs": 223745900,
+              "overheadNs": 211050500,
+              "failure": null
+            },
+            {
+              "baselineNs": 7693200,
+              "instrumentedNs": 209629200,
+              "overheadNs": 201936000,
+              "failure": null
+            },
+            {
+              "baselineNs": 11144100,
+              "instrumentedNs": 191806200,
+              "overheadNs": 180662100,
+              "failure": null
+            },
+            {
+              "baselineNs": 10801300,
+              "instrumentedNs": 183095800,
+              "overheadNs": 172294500,
+              "failure": null
+            },
+            {
+              "baselineNs": 3231800,
+              "instrumentedNs": 214843800,
+              "overheadNs": 211612000,
+              "failure": null
+            },
+            {
+              "baselineNs": 4198700,
+              "instrumentedNs": 203239600,
+              "overheadNs": 199040900,
+              "failure": null
+            },
+            {
+              "baselineNs": 10215900,
+              "instrumentedNs": 223837900,
+              "overheadNs": 213622000,
+              "failure": null
+            },
+            {
+              "baselineNs": 7792200,
+              "instrumentedNs": 229765000,
+              "overheadNs": 221972800,
+              "failure": null
+            },
+            {
+              "baselineNs": 10788500,
+              "instrumentedNs": 261585000,
+              "overheadNs": 250796500,
+              "failure": null
+            },
+            {
+              "baselineNs": 4582600,
+              "instrumentedNs": 249907600,
+              "overheadNs": 245325000,
+              "failure": null
+            },
+            {
+              "baselineNs": 11163900,
+              "instrumentedNs": 179529600,
+              "overheadNs": 168365700,
+              "failure": null
+            }
+          ],
+          "p50Ms": 180.6621,
+          "p95Ms": 245.325
+        },
+        {
+          "runId": "run-3",
+          "warmupSamples": [
+            {
+              "baselineNs": 10081400,
+              "instrumentedNs": 169007100,
+              "overheadNs": 158925700,
+              "failure": null
+            },
+            {
+              "baselineNs": 7873100,
+              "instrumentedNs": 126488300,
+              "overheadNs": 118615200,
+              "failure": null
+            },
+            {
+              "baselineNs": 10157700,
+              "instrumentedNs": 118839500,
+              "overheadNs": 108681800,
+              "failure": null
+            },
+            {
+              "baselineNs": 5653900,
+              "instrumentedNs": 148402700,
+              "overheadNs": 142748800,
+              "failure": null
+            },
+            {
+              "baselineNs": 10101400,
+              "instrumentedNs": 139201900,
+              "overheadNs": 129100500,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 7511200,
+              "instrumentedNs": 130758000,
+              "overheadNs": 123246800,
+              "failure": null
+            },
+            {
+              "baselineNs": 10890100,
+              "instrumentedNs": 142695600,
+              "overheadNs": 131805500,
+              "failure": null
+            },
+            {
+              "baselineNs": 11368300,
+              "instrumentedNs": 144737700,
+              "overheadNs": 133369400,
+              "failure": null
+            },
+            {
+              "baselineNs": 6353600,
+              "instrumentedNs": 142382700,
+              "overheadNs": 136029100,
+              "failure": null
+            },
+            {
+              "baselineNs": 2994800,
+              "instrumentedNs": 136548500,
+              "overheadNs": 133553700,
+              "failure": null
+            },
+            {
+              "baselineNs": 19357400,
+              "instrumentedNs": 149736500,
+              "overheadNs": 130379100,
+              "failure": null
+            },
+            {
+              "baselineNs": 9013700,
+              "instrumentedNs": 162710000,
+              "overheadNs": 153696300,
+              "failure": null
+            },
+            {
+              "baselineNs": 9073700,
+              "instrumentedNs": 157774400,
+              "overheadNs": 148700700,
+              "failure": null
+            },
+            {
+              "baselineNs": 6356900,
+              "instrumentedNs": 138966000,
+              "overheadNs": 132609100,
+              "failure": null
+            },
+            {
+              "baselineNs": 11540100,
+              "instrumentedNs": 115099100,
+              "overheadNs": 103559000,
+              "failure": null
+            },
+            {
+              "baselineNs": 10336700,
+              "instrumentedNs": 160418000,
+              "overheadNs": 150081300,
+              "failure": null
+            },
+            {
+              "baselineNs": 6188000,
+              "instrumentedNs": 193403000,
+              "overheadNs": 187215000,
+              "failure": null
+            },
+            {
+              "baselineNs": 7976500,
+              "instrumentedNs": 177818100,
+              "overheadNs": 169841600,
+              "failure": null
+            },
+            {
+              "baselineNs": 8554000,
+              "instrumentedNs": 164382300,
+              "overheadNs": 155828300,
+              "failure": null
+            },
+            {
+              "baselineNs": 14754700,
+              "instrumentedNs": 157154600,
+              "overheadNs": 142399900,
+              "failure": null
+            },
+            {
+              "baselineNs": 10933700,
+              "instrumentedNs": 185943000,
+              "overheadNs": 175009300,
+              "failure": null
+            },
+            {
+              "baselineNs": 11718700,
+              "instrumentedNs": 172131800,
+              "overheadNs": 160413100,
+              "failure": null
+            },
+            {
+              "baselineNs": 9445400,
+              "instrumentedNs": 166046000,
+              "overheadNs": 156600600,
+              "failure": null
+            },
+            {
+              "baselineNs": 9856500,
+              "instrumentedNs": 192473900,
+              "overheadNs": 182617400,
+              "failure": null
+            },
+            {
+              "baselineNs": 11092400,
+              "instrumentedNs": 187007900,
+              "overheadNs": 175915500,
+              "failure": null
+            },
+            {
+              "baselineNs": 10526900,
+              "instrumentedNs": 169515100,
+              "overheadNs": 158988200,
+              "failure": null
+            },
+            {
+              "baselineNs": 2847100,
+              "instrumentedNs": 176693500,
+              "overheadNs": 173846400,
+              "failure": null
+            },
+            {
+              "baselineNs": 8030300,
+              "instrumentedNs": 145243800,
+              "overheadNs": 137213500,
+              "failure": null
+            },
+            {
+              "baselineNs": 8999200,
+              "instrumentedNs": 206686900,
+              "overheadNs": 197687700,
+              "failure": null
+            },
+            {
+              "baselineNs": 6545700,
+              "instrumentedNs": 185489600,
+              "overheadNs": 178943900,
+              "failure": null
+            },
+            {
+              "baselineNs": 9341700,
+              "instrumentedNs": 189760400,
+              "overheadNs": 180418700,
+              "failure": null
+            },
+            {
+              "baselineNs": 7530900,
+              "instrumentedNs": 227222400,
+              "overheadNs": 219691500,
+              "failure": null
+            },
+            {
+              "baselineNs": 6937100,
+              "instrumentedNs": 227141400,
+              "overheadNs": 220204300,
+              "failure": null
+            },
+            {
+              "baselineNs": 11838700,
+              "instrumentedNs": 220813800,
+              "overheadNs": 208975100,
+              "failure": null
+            },
+            {
+              "baselineNs": 9023500,
+              "instrumentedNs": 220264000,
+              "overheadNs": 211240500,
+              "failure": null
+            }
+          ],
+          "p50Ms": 156.6006,
+          "p95Ms": 219.6915
+        }
+      ],
+      "gateP95Ms": 275.9519,
+      "failures": 0,
+      "accepted": true
+    },
+    {
+      "workloadId": "small",
+      "fileCount": 1000,
+      "budgetMs": 250,
+      "coldInitializationMs": 1546.4076333333333,
+      "coldInitializationRunsMs": [
+        1466.0336,
+        1502.5746,
+        1670.6147
+      ],
+      "runs": [
+        {
+          "runId": "run-1",
+          "warmupSamples": [
+            {
+              "baselineNs": 10418200,
+              "instrumentedNs": 85819000,
+              "overheadNs": 75400800,
+              "failure": null
+            },
+            {
+              "baselineNs": 5094500,
+              "instrumentedNs": 96483300,
+              "overheadNs": 91388800,
+              "failure": null
+            },
+            {
+              "baselineNs": 8182900,
+              "instrumentedNs": 88512500,
+              "overheadNs": 80329600,
+              "failure": null
+            },
+            {
+              "baselineNs": 8859300,
+              "instrumentedNs": 95885100,
+              "overheadNs": 87025800,
+              "failure": null
+            },
+            {
+              "baselineNs": 8607700,
+              "instrumentedNs": 97300500,
+              "overheadNs": 88692800,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 9670700,
+              "instrumentedNs": 83680400,
+              "overheadNs": 74009700,
+              "failure": null
+            },
+            {
+              "baselineNs": 7750300,
+              "instrumentedNs": 110966300,
+              "overheadNs": 103216000,
+              "failure": null
+            },
+            {
+              "baselineNs": 9081900,
+              "instrumentedNs": 98567100,
+              "overheadNs": 89485200,
+              "failure": null
+            },
+            {
+              "baselineNs": 10622800,
+              "instrumentedNs": 108145100,
+              "overheadNs": 97522300,
+              "failure": null
+            },
+            {
+              "baselineNs": 9480300,
+              "instrumentedNs": 95373100,
+              "overheadNs": 85892800,
+              "failure": null
+            },
+            {
+              "baselineNs": 3801300,
+              "instrumentedNs": 117116800,
+              "overheadNs": 113315500,
+              "failure": null
+            },
+            {
+              "baselineNs": 8311600,
+              "instrumentedNs": 93110400,
+              "overheadNs": 84798800,
+              "failure": null
+            },
+            {
+              "baselineNs": 6518600,
+              "instrumentedNs": 73693700,
+              "overheadNs": 67175100,
+              "failure": null
+            },
+            {
+              "baselineNs": 3175100,
+              "instrumentedNs": 106885000,
+              "overheadNs": 103709900,
+              "failure": null
+            },
+            {
+              "baselineNs": 9791500,
+              "instrumentedNs": 115726400,
+              "overheadNs": 105934900,
+              "failure": null
+            },
+            {
+              "baselineNs": 9629100,
+              "instrumentedNs": 124351600,
+              "overheadNs": 114722500,
+              "failure": null
+            },
+            {
+              "baselineNs": 9989000,
+              "instrumentedNs": 121314500,
+              "overheadNs": 111325500,
+              "failure": null
+            },
+            {
+              "baselineNs": 6751800,
+              "instrumentedNs": 126365500,
+              "overheadNs": 119613700,
+              "failure": null
+            },
+            {
+              "baselineNs": 8568100,
+              "instrumentedNs": 147978000,
+              "overheadNs": 139409900,
+              "failure": null
+            },
+            {
+              "baselineNs": 6073200,
+              "instrumentedNs": 114371000,
+              "overheadNs": 108297800,
+              "failure": null
+            },
+            {
+              "baselineNs": 3009000,
+              "instrumentedNs": 125902400,
+              "overheadNs": 122893400,
+              "failure": null
+            },
+            {
+              "baselineNs": 7675400,
+              "instrumentedNs": 155995700,
+              "overheadNs": 148320300,
+              "failure": null
+            },
+            {
+              "baselineNs": 8309500,
+              "instrumentedNs": 88430000,
+              "overheadNs": 80120500,
+              "failure": null
+            },
+            {
+              "baselineNs": 8299700,
+              "instrumentedNs": 130509800,
+              "overheadNs": 122210100,
+              "failure": null
+            },
+            {
+              "baselineNs": 7084400,
+              "instrumentedNs": 84433700,
+              "overheadNs": 77349300,
+              "failure": null
+            },
+            {
+              "baselineNs": 3564300,
+              "instrumentedNs": 73870000,
+              "overheadNs": 70305700,
+              "failure": null
+            },
+            {
+              "baselineNs": 2188800,
+              "instrumentedNs": 83658700,
+              "overheadNs": 81469900,
+              "failure": null
+            },
+            {
+              "baselineNs": 3582500,
+              "instrumentedNs": 87319500,
+              "overheadNs": 83737000,
+              "failure": null
+            },
+            {
+              "baselineNs": 4703300,
+              "instrumentedNs": 165825300,
+              "overheadNs": 161122000,
+              "failure": null
+            },
+            {
+              "baselineNs": 10483600,
+              "instrumentedNs": 106693700,
+              "overheadNs": 96210100,
+              "failure": null
+            },
+            {
+              "baselineNs": 5384100,
+              "instrumentedNs": 92804800,
+              "overheadNs": 87420700,
+              "failure": null
+            },
+            {
+              "baselineNs": 9235300,
+              "instrumentedNs": 170616800,
+              "overheadNs": 161381500,
+              "failure": null
+            },
+            {
+              "baselineNs": 6437700,
+              "instrumentedNs": 178793000,
+              "overheadNs": 172355300,
+              "failure": null
+            },
+            {
+              "baselineNs": 3016700,
+              "instrumentedNs": 150855400,
+              "overheadNs": 147838700,
+              "failure": null
+            },
+            {
+              "baselineNs": 1993800,
+              "instrumentedNs": 90480800,
+              "overheadNs": 88487000,
+              "failure": null
+            }
+          ],
+          "p50Ms": 103.216,
+          "p95Ms": 161.3815
+        },
+        {
+          "runId": "run-2",
+          "warmupSamples": [
+            {
+              "baselineNs": 7675900,
+              "instrumentedNs": 69666800,
+              "overheadNs": 61990900,
+              "failure": null
+            },
+            {
+              "baselineNs": 6420900,
+              "instrumentedNs": 93443900,
+              "overheadNs": 87023000,
+              "failure": null
+            },
+            {
+              "baselineNs": 4669400,
+              "instrumentedNs": 81510700,
+              "overheadNs": 76841300,
+              "failure": null
+            },
+            {
+              "baselineNs": 10549200,
+              "instrumentedNs": 60786400,
+              "overheadNs": 50237200,
+              "failure": null
+            },
+            {
+              "baselineNs": 4675400,
+              "instrumentedNs": 89326700,
+              "overheadNs": 84651300,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 4258200,
+              "instrumentedNs": 91710300,
+              "overheadNs": 87452100,
+              "failure": null
+            },
+            {
+              "baselineNs": 5547300,
+              "instrumentedNs": 75501300,
+              "overheadNs": 69954000,
+              "failure": null
+            },
+            {
+              "baselineNs": 8098500,
+              "instrumentedNs": 84759300,
+              "overheadNs": 76660800,
+              "failure": null
+            },
+            {
+              "baselineNs": 11608600,
+              "instrumentedNs": 104047900,
+              "overheadNs": 92439300,
+              "failure": null
+            },
+            {
+              "baselineNs": 8915700,
+              "instrumentedNs": 95353200,
+              "overheadNs": 86437500,
+              "failure": null
+            },
+            {
+              "baselineNs": 9399400,
+              "instrumentedNs": 107834600,
+              "overheadNs": 98435200,
+              "failure": null
+            },
+            {
+              "baselineNs": 4715200,
+              "instrumentedNs": 98405800,
+              "overheadNs": 93690600,
+              "failure": null
+            },
+            {
+              "baselineNs": 7235700,
+              "instrumentedNs": 100556200,
+              "overheadNs": 93320500,
+              "failure": null
+            },
+            {
+              "baselineNs": 8358800,
+              "instrumentedNs": 109966600,
+              "overheadNs": 101607800,
+              "failure": null
+            },
+            {
+              "baselineNs": 9883300,
+              "instrumentedNs": 77134100,
+              "overheadNs": 67250800,
+              "failure": null
+            },
+            {
+              "baselineNs": 2202700,
+              "instrumentedNs": 108997000,
+              "overheadNs": 106794300,
+              "failure": null
+            },
+            {
+              "baselineNs": 7522000,
+              "instrumentedNs": 117052500,
+              "overheadNs": 109530500,
+              "failure": null
+            },
+            {
+              "baselineNs": 10734300,
+              "instrumentedNs": 120609700,
+              "overheadNs": 109875400,
+              "failure": null
+            },
+            {
+              "baselineNs": 6613000,
+              "instrumentedNs": 114442500,
+              "overheadNs": 107829500,
+              "failure": null
+            },
+            {
+              "baselineNs": 9640000,
+              "instrumentedNs": 90340200,
+              "overheadNs": 80700200,
+              "failure": null
+            },
+            {
+              "baselineNs": 11241600,
+              "instrumentedNs": 109433800,
+              "overheadNs": 98192200,
+              "failure": null
+            },
+            {
+              "baselineNs": 6198700,
+              "instrumentedNs": 111616600,
+              "overheadNs": 105417900,
+              "failure": null
+            },
+            {
+              "baselineNs": 7862900,
+              "instrumentedNs": 109033800,
+              "overheadNs": 101170900,
+              "failure": null
+            },
+            {
+              "baselineNs": 6235800,
+              "instrumentedNs": 128445300,
+              "overheadNs": 122209500,
+              "failure": null
+            },
+            {
+              "baselineNs": 4127300,
+              "instrumentedNs": 145441600,
+              "overheadNs": 141314300,
+              "failure": null
+            },
+            {
+              "baselineNs": 7920200,
+              "instrumentedNs": 130667900,
+              "overheadNs": 122747700,
+              "failure": null
+            },
+            {
+              "baselineNs": 5028400,
+              "instrumentedNs": 115509300,
+              "overheadNs": 110480900,
+              "failure": null
+            },
+            {
+              "baselineNs": 6244200,
+              "instrumentedNs": 141160000,
+              "overheadNs": 134915800,
+              "failure": null
+            },
+            {
+              "baselineNs": 4437400,
+              "instrumentedNs": 139740100,
+              "overheadNs": 135302700,
+              "failure": null
+            },
+            {
+              "baselineNs": 2568500,
+              "instrumentedNs": 135481500,
+              "overheadNs": 132913000,
+              "failure": null
+            },
+            {
+              "baselineNs": 9032400,
+              "instrumentedNs": 89825400,
+              "overheadNs": 80793000,
+              "failure": null
+            },
+            {
+              "baselineNs": 5711200,
+              "instrumentedNs": 145658200,
+              "overheadNs": 139947000,
+              "failure": null
+            },
+            {
+              "baselineNs": 5351400,
+              "instrumentedNs": 133918000,
+              "overheadNs": 128566600,
+              "failure": null
+            },
+            {
+              "baselineNs": 6203900,
+              "instrumentedNs": 185062200,
+              "overheadNs": 178858300,
+              "failure": null
+            },
+            {
+              "baselineNs": 3804800,
+              "instrumentedNs": 156286900,
+              "overheadNs": 152482100,
+              "failure": null
+            }
+          ],
+          "p50Ms": 105.4179,
+          "p95Ms": 152.4821
+        },
+        {
+          "runId": "run-3",
+          "warmupSamples": [
+            {
+              "baselineNs": 8975100,
+              "instrumentedNs": 85402200,
+              "overheadNs": 76427100,
+              "failure": null
+            },
+            {
+              "baselineNs": 8066100,
+              "instrumentedNs": 88608200,
+              "overheadNs": 80542100,
+              "failure": null
+            },
+            {
+              "baselineNs": 6248100,
+              "instrumentedNs": 95286400,
+              "overheadNs": 89038300,
+              "failure": null
+            },
+            {
+              "baselineNs": 9526300,
+              "instrumentedNs": 90223500,
+              "overheadNs": 80697200,
+              "failure": null
+            },
+            {
+              "baselineNs": 3267900,
+              "instrumentedNs": 92138400,
+              "overheadNs": 88870500,
+              "failure": null
+            }
+          ],
+          "samples": [
+            {
+              "baselineNs": 7962800,
+              "instrumentedNs": 77551900,
+              "overheadNs": 69589100,
+              "failure": null
+            },
+            {
+              "baselineNs": 8649900,
+              "instrumentedNs": 96428100,
+              "overheadNs": 87778200,
+              "failure": null
+            },
+            {
+              "baselineNs": 11695800,
+              "instrumentedNs": 103113300,
+              "overheadNs": 91417500,
+              "failure": null
+            },
+            {
+              "baselineNs": 7663400,
+              "instrumentedNs": 108612700,
+              "overheadNs": 100949300,
+              "failure": null
+            },
+            {
+              "baselineNs": 3193800,
+              "instrumentedNs": 112729000,
+              "overheadNs": 109535200,
+              "failure": null
+            },
+            {
+              "baselineNs": 7091000,
+              "instrumentedNs": 112140800,
+              "overheadNs": 105049800,
+              "failure": null
+            },
+            {
+              "baselineNs": 2267700,
+              "instrumentedNs": 96218400,
+              "overheadNs": 93950700,
+              "failure": null
+            },
+            {
+              "baselineNs": 7750300,
+              "instrumentedNs": 110626800,
+              "overheadNs": 102876500,
+              "failure": null
+            },
+            {
+              "baselineNs": 6947700,
+              "instrumentedNs": 102341000,
+              "overheadNs": 95393300,
+              "failure": null
+            },
+            {
+              "baselineNs": 8778300,
+              "instrumentedNs": 120999900,
+              "overheadNs": 112221600,
+              "failure": null
+            },
+            {
+              "baselineNs": 8682900,
+              "instrumentedNs": 84143000,
+              "overheadNs": 75460100,
+              "failure": null
+            },
+            {
+              "baselineNs": 3109300,
+              "instrumentedNs": 104059500,
+              "overheadNs": 100950200,
+              "failure": null
+            },
+            {
+              "baselineNs": 6547500,
+              "instrumentedNs": 102075700,
+              "overheadNs": 95528200,
+              "failure": null
+            },
+            {
+              "baselineNs": 9218600,
+              "instrumentedNs": 120119400,
+              "overheadNs": 110900800,
+              "failure": null
+            },
+            {
+              "baselineNs": 6998600,
+              "instrumentedNs": 110619200,
+              "overheadNs": 103620600,
+              "failure": null
+            },
+            {
+              "baselineNs": 10206200,
+              "instrumentedNs": 120001300,
+              "overheadNs": 109795100,
+              "failure": null
+            },
+            {
+              "baselineNs": 9319200,
+              "instrumentedNs": 152265200,
+              "overheadNs": 142946000,
+              "failure": null
+            },
+            {
+              "baselineNs": 6652500,
+              "instrumentedNs": 135835500,
+              "overheadNs": 129183000,
+              "failure": null
+            },
+            {
+              "baselineNs": 8911500,
+              "instrumentedNs": 107821500,
+              "overheadNs": 98910000,
+              "failure": null
+            },
+            {
+              "baselineNs": 9603500,
+              "instrumentedNs": 143253800,
+              "overheadNs": 133650300,
+              "failure": null
+            },
+            {
+              "baselineNs": 2356300,
+              "instrumentedNs": 148017200,
+              "overheadNs": 145660900,
+              "failure": null
+            },
+            {
+              "baselineNs": 8524300,
+              "instrumentedNs": 111359300,
+              "overheadNs": 102835000,
+              "failure": null
+            },
+            {
+              "baselineNs": 7565300,
+              "instrumentedNs": 114898300,
+              "overheadNs": 107333000,
+              "failure": null
+            },
+            {
+              "baselineNs": 6346100,
+              "instrumentedNs": 154467600,
+              "overheadNs": 148121500,
+              "failure": null
+            },
+            {
+              "baselineNs": 9954400,
+              "instrumentedNs": 155052100,
+              "overheadNs": 145097700,
+              "failure": null
+            },
+            {
+              "baselineNs": 11891700,
+              "instrumentedNs": 151926600,
+              "overheadNs": 140034900,
+              "failure": null
+            },
+            {
+              "baselineNs": 8081800,
+              "instrumentedNs": 84587900,
+              "overheadNs": 76506100,
+              "failure": null
+            },
+            {
+              "baselineNs": 3178300,
+              "instrumentedNs": 141578300,
+              "overheadNs": 138400000,
+              "failure": null
+            },
+            {
+              "baselineNs": 3094000,
+              "instrumentedNs": 90879600,
+              "overheadNs": 87785600,
+              "failure": null
+            },
+            {
+              "baselineNs": 3628200,
+              "instrumentedNs": 137569100,
+              "overheadNs": 133940900,
+              "failure": null
+            }
+          ],
+          "p50Ms": 103.6206,
+          "p95Ms": 145.6609
+        }
+      ],
+      "gateP95Ms": 161.3815,
+      "failures": 0,
+      "accepted": true
+    }
+  ],
+  "decision": "deferred",
+  "reason": "M0 evidence environment pnpmVersion is not identified; M0 evidence was generated from a dirty worktree; M0 verification did not bind an independently requested controlled environment",
+  "owner": "phase2-runtime",
+  "dueGate": "M0 controlled benchmark"
+}

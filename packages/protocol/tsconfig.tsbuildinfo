@@ -1,0 +1,1 @@
+{"version":"7.0.2","root":["./src/diagnostics.ts","./src/events.ts","./src/identities.ts","./src/index.ts","./src/validation.ts"],"packageJsons":["./package.json"],"missingPackageJsons":["../../node_modules/ajv/dist/2020.js/package.json","../../node_modules/ajv/package.json","./node_modules/ajv/dist/2020.js/package.json","./node_modules/ajv/package.json"],"semanticErrors":true}

@@ -3,6 +3,23 @@
 All notable changes to PatchMesh are recorded here. Versions are shared across every package
 in the workspace, so a version number identifies one state of the whole product.
 
+## 0.3.0 — 2026-08-27
+
+Multi-host agent workspace support, authenticated observation sidecar daemon, and performance optimizations.
+
+### Added
+
+- **Persistent observation sidecar doemon** (`patchmesh-observation`) with token-authenticated local IOC, bounded prepared transaction pruning, and non-blocking background filesystem capture.
+- **Codex and OpenCode host adapters** (`patchmesh-recorder`, `patchmesh-adapters`) allowing multi-agent participation across Claude Code, Codex, and OpenCode on a shared work ledger.
+- **Mailbox core and projections** (`patchmesh-query`, `patchmesh-gateway`) supporting direct messaging, broadcast notices, and session-start delivery across autonomous agents.
+
+### Optimized
+
+- **M0 benchmark p9fth runtime reduced to 161.38ms** (small tier), meeting the budget (<= 250ms) via fast Git reference lookups and inline blob hashing.
+
+---
+
+
 ## 0.2.0 — 2026-08-25
 
 Two problems found by re-judging the product against its own live ledger rather than against
