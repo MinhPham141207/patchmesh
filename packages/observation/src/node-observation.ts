@@ -72,6 +72,36 @@ async function gitValue(root: string, ...args: string[]): Promise<string | null>
 }
 
 /**
+ * Return the files Git considers part of this worktree's observable set.
+ *
+ * `--exclude-standard` applies repository, info, and global ignore rules before the filesystem
+ * walk starts. A null result means Git could not answer; callers must retain the existing
+ * recursive fallback rather than dropping observations.
+ */
+async function gitVisiblePaths(root: string): Promise<ReadonlySet<string> | null> {
+  try {
+    const result = await execFile("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
+    });
+    const paths = new Set<string>();
+    for (const value of result.stdout.split("\0")) {
+      if (value === "") continue;
+      try {
+        paths.add(normalizeLogicalPath(value.replaceAll("\\", "/")));
+      } catch {
+        return null;
+      }
+    }
+    return paths;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * One spelling for a directory that decides repository identity.
  *
  * `git rev-parse --git-common-dir` answers *relatively* from a primary worktree (`.git`) and
@@ -157,6 +187,11 @@ function isWithinRoot(root: string, candidate: string): boolean {
   return relativePath === "" || (!relativePath.startsWith(`..${sep}`) && relativePath !== ".." && !isAbsolute(relativePath));
 }
 
+function isIgnoreRulePath(path: string): boolean {
+  const normalized = path.replaceAll("\\", "/");
+  return normalized === ".gitignore" || normalized.endsWith("/.gitignore") || normalized === ".git/info/exclude";
+}
+
 async function hasSymlinkAncestor(root: string, logicalPath: string): Promise<boolean> {
   const segments = logicalPath.split("/");
   let current = root;
@@ -180,6 +215,18 @@ async function captureFiles(root: string, includeGitBlobs: boolean): Promise<{
   const metadata = new Map<string, FileMetadata>();
   const gaps: ObservationGap[] = [];
   const regularFiles: Array<{ readonly absolutePath: string; readonly relativePath: string; readonly logicalPath: string }> = [];
+  const visiblePaths = await gitVisiblePaths(root);
+  const visibleDirectories = visiblePaths === null ? null : new Set<string>();
+  if (visiblePaths !== null) {
+    const directories = visibleDirectories!;
+    for (const path of visiblePaths) {
+      let end = path.lastIndexOf("/");
+      while (end > 0) {
+        directories.add(path.slice(0, end));
+        end = path.lastIndexOf("/", end - 1);
+      }
+    }
+  }
 
   async function visit(directory: string): Promise<void> {
     let entries;
@@ -196,6 +243,7 @@ async function captureFiles(root: string, includeGitBlobs: boolean): Promise<{
       if (isIgnoredObservationPath(relativePath)) continue;
 
       if (entry.isDirectory()) {
+        if (visibleDirectories !== null && !visibleDirectories.has(relativePath)) continue;
         await visit(absolutePath);
         continue;
       }
@@ -207,7 +255,6 @@ async function captureFiles(root: string, includeGitBlobs: boolean): Promise<{
         gaps.push(gap("unverified", "filesystem", "A path is outside the logical workspace contract"));
         continue;
       }
-
       if (entry.isSymbolicLink()) {
         try {
           const target = await readlink(absolutePath);
@@ -215,6 +262,7 @@ async function captureFiles(root: string, includeGitBlobs: boolean): Promise<{
             gaps.push(gap("unverified", logicalPath, "A symbolic link target escapes the workspace root"));
             continue;
           }
+          if (visiblePaths !== null && !visiblePaths.has(logicalPath)) continue;
           files.set(logicalPath, {
             contentHash: sha256(`symlink:${target}`),
             gitBlob: null,
@@ -225,6 +273,8 @@ async function captureFiles(root: string, includeGitBlobs: boolean): Promise<{
         }
         continue;
       }
+
+      if (visiblePaths !== null && !visiblePaths.has(logicalPath)) continue;
 
       if (!entry.isFile()) {
         gaps.push(gap("unverified", logicalPath, "A workspace entry has an unsupported file type"));
@@ -402,6 +452,60 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
 
   async captureAfter(context: ObservationContext): Promise<ObservationCapture> {
     return this.capture(context, true);
+  }
+
+  /** Restore a previously committed snapshot without recursively hashing the worktree. */
+  async restoreSnapshot(context: ObservationContext, capture: ObservationCapture): Promise<void> {
+    const session = await this.sessionFor(context);
+    session.snapshot = capture.snapshot;
+    session.persistentGaps = [...capture.gaps.filter((item) => item.scope !== "tool.effects")];
+    session.degraded = gap("watcher_unavailable", "filesystem", "observation watcher restarted; changes during downtime may be unobserved");
+    session.completedWindows = this.reconciliationEveryWindows - 1;
+    session.pendingGaps = [];
+    session.outOfBandChanges = [];
+    session.processedCursor = session.cursor;
+    const metadata = new Map<string, FileMetadata>();
+    await Promise.all([...capture.snapshot.files].map(async ([logicalPath, state]) => {
+      if (state.fileKind !== "file") return;
+      try {
+        const info = await lstat(resolve(session.root, logicalPath), { bigint: true });
+        if (info.isFile()) metadata.set(logicalPath, metadataFromStat(info));
+      } catch { /* missing files are handled as changes on the next watcher event */ }
+    }));
+    session.metadata = metadata;
+  }
+
+  /** Reconcile a restored snapshot before a restarted sidecar acknowledges a drain. */
+  async reconcile(context: ObservationContext): Promise<ObservationCapture> {
+    const session = await this.sessionFor(context);
+    if (session.activeCursor !== null) throw new Error("cannot reconcile during an active observation window");
+    let full: Awaited<ReturnType<typeof this.captureState>> | null = null;
+    let throughCursor = session.cursor;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      throughCursor = session.cursor;
+      full = await this.captureState(context, false, false);
+      if (session.cursor === throughCursor) break;
+    }
+    if (full === null || session.cursor !== throughCursor) {
+      session.processedCursor = 0;
+      session.degraded = gap("watcher_unavailable", "filesystem", "workspace changed continuously during sidecar reconciliation");
+      session.pendingGaps.push(gap("unattributed", "observation.window", "workspace changed continuously during sidecar reconciliation"));
+      session.completedWindows = this.reconciliationEveryWindows - 1;
+      return full?.capture ?? session.snapshot === null
+        ? (full?.capture ?? await this.capture(context, false))
+        : { snapshot: session.snapshot, gaps: session.persistentGaps, outOfBandChanges: [] };
+    }
+    session.snapshot = full.capture.snapshot;
+    session.metadata = new Map(full.metadata);
+    session.identity = await captureWorkspaceIdentity(session.root);
+    session.persistentGaps = full.capture.gaps.filter((item) => item.scope !== "tool.effects");
+    session.pendingGaps = [];
+    session.outOfBandChanges = [];
+    session.processedCursor = throughCursor;
+    this.pruneJournal(session);
+    session.completedWindows = 0;
+    if (session.watcher !== null) session.degraded = null;
+    return full.capture;
   }
 
   async beginWindow(context: ObservationContext): Promise<ObservationWindow> {
@@ -612,6 +716,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
     };
     if (!sameWorkspaceIdentity(session.identity, currentIdentity)) markIdentityChanged();
     const paths = new Set<string>();
+    let ignoreRulesChanged = false;
     for (const entry of session.journal.filter((item) => item.cursor > cursor && item.cursor <= throughCursor)) {
       if (entry.path === null) {
         gaps.push(gap("unverified", "filesystem", "watcher did not provide a changed path"));
@@ -619,10 +724,24 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
       }
       try {
         const logicalPath = normalizeLogicalPath(entry.path.replaceAll("\\", "/"));
+        if (isIgnoreRulePath(logicalPath)) ignoreRulesChanged = true;
         if (!isIgnoredObservationPath(logicalPath)) paths.add(logicalPath);
       } catch {
         gaps.push(gap("unverified", "filesystem", "watcher path is unsafe"));
       }
+    }
+    if (ignoreRulesChanged) {
+      const full = await this.captureState(session.context, false, false);
+      return {
+        capture: {
+          ...full.capture,
+          gaps: [
+            ...full.capture.gaps,
+            gap("unverified", "tool.effects", "snapshot observation verifies final state but cannot prove each effect originated from the intercepted operation"),
+          ],
+        },
+        metadata: new Map(full.metadata),
+      };
     }
     const orderedPaths = [...paths].sort((left, right) => left.split("/").length - right.split("/").length || left.localeCompare(right));
     for (const logicalPath of orderedPaths) {

@@ -110,3 +110,42 @@ test("parsing for a host follows envelope shape without giving up provenance or 
   // A declared-tier host owns no envelopes: nothing is parsed on its behalf.
   assert.equal(parseForHost("generic-mcp", claudeShaped), null);
 });
+
+test("codex adapter parses hook aliases and normalizes its native tools", () => {
+  const codex = resolveHostAdapter("codex");
+  assert.equal(codex.id, "codex");
+  assert.equal(codex.tier, "observed");
+  const record = codex.parse({
+    event: "PostToolUse",
+    conversation_id: "thread-codex-1",
+    generation_id: "generation-codex-1",
+    tool_use_id: "call-codex-1",
+    toolName: "read_file",
+    toolInput: { path: "src/index.ts" },
+    toolResponse: { exitCode: 0 },
+    cwd: "D:/patchmesh",
+  });
+  assert.equal(record?.stage, "post");
+  assert.equal(record?.sessionId, "thread-codex-1");
+  assert.equal(record?.delegateId, "call-codex-1");
+  assert.deepEqual(normalizeToolFor("codex", "read_file", null), {
+    toolName: "read_file", pathProperty: "path", opaque: false,
+  });
+  assert.deepEqual(normalizeToolFor("codex", "apply_patch", null), {
+    toolName: "edit_file", pathProperty: null, opaque: true,
+  });
+  assert.deepEqual(normalizeToolFor("codex", "shell", "printf ok"), {
+    toolName: "run_shell", pathProperty: null, opaque: true,
+  });
+});
+
+test("codex adapter ignores lifecycle events and rejects incomplete envelopes", () => {
+  const codex = resolveHostAdapter("codex");
+  assert.equal(codex.parse({ event: "SessionStart", conversation_id: "s1" }), null);
+  assert.equal(codex.parse({ event: "PostToolUse", conversation_id: "s1" }), null);
+  assert.equal(codex.parse({ event: "PostToolUse", toolName: "shell" }), null);
+});
+
+test("codex provenance resolves from the registered hook source", () => {
+  assert.equal(tierForSourceId("source_codex_hook"), "observed");
+});

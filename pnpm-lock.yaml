@@ -95,6 +95,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.4.3)
+      patchmesh-observation:
+        specifier: workspace:*
+        version: link:../observation
       patchmesh-protocol:
         specifier: workspace:*
         version: link:../protocol

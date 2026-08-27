@@ -215,7 +215,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       return 0;
     }
     if (hostFlag !== null && !isKnownHost(hostFlag)) {
-      debug(`unsupported host: ${hostFlag} (known: claude-code, opencode, generic-mcp)`);
+      debug(`unsupported host: ${hostFlag} (known: claude-code, opencode, codex, generic-mcp)`);
       return 0;
     }
 

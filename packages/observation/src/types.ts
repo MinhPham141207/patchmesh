@@ -95,6 +95,7 @@ export interface ObservationWindowResult {
 export interface IncrementalObservationBoundary extends ObservationBoundary {
   beginWindow(context: ObservationContext): Promise<ObservationWindow>;
   endWindow(window: ObservationWindow): Promise<ObservationWindowResult>;
+  restoreSnapshot?(context: ObservationContext, capture: ObservationCapture): Promise<void>;
   dispose?(workspaceId?: WorkspaceId): Promise<void>;
 }
 

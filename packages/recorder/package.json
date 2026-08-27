@@ -7,12 +7,17 @@
   ],
   "bin": {
     "patchmesh-record": "dist/bin.js",
-    "patchmesh-ingest": "dist/ingest-bin.js"
+    "patchmesh-ingest": "dist/ingest-bin.js",
+    "patchmesh-codex-relay": "dist/codex-relay.js"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./codex-relay": {
+      "types": "./dist/codex-relay.d.ts",
+      "import": "./dist/codex-relay.js"
     }
   },
   "scripts": {

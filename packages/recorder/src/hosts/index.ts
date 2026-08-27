@@ -1,6 +1,7 @@
 import { sourceIdForHost } from "../source.js";
 import type { NormalizedTool } from "../tool-mapping.js";
 import { claudeCodeAdapter, normalizeClaudeTool } from "./claude-code.js";
+import { codexAdapter, normalizeCodexTool } from "./codex.js";
 import { genericMcpAdapter } from "./generic-mcp.js";
 import { normalizeOpencodeTool, opencodeAdapter } from "./opencode.js";
 import type { CoverageTier, HostAdapter, HostId, HostProvenance, HostRecord } from "./types.js";
@@ -12,7 +13,7 @@ import type { CoverageTier, HostAdapter, HostId, HostProvenance, HostRecord } fr
  * dispatches on the envelope's own shape across adapters, so an observed-tier host's
  * translated payloads are recorded by whichever adapter claims them.
  */
-const HOST_ADAPTERS: readonly HostAdapter[] = [claudeCodeAdapter, opencodeAdapter, genericMcpAdapter];
+const HOST_ADAPTERS: readonly HostAdapter[] = [claudeCodeAdapter, opencodeAdapter, codexAdapter, genericMcpAdapter];
 
 export function resolveHostAdapter(host: string): HostAdapter {
   return HOST_ADAPTERS.find((adapter) => adapter.id === host) ?? claudeCodeAdapter;
@@ -45,6 +46,7 @@ export function parseForHost(hostId: string, envelope: unknown): HostRecord | nu
 const TOOL_NORMALIZERS: Readonly<Record<HostId, ((hostToolName: string, command: string | null) => NormalizedTool) | null>> = {
   "claude-code": normalizeClaudeTool,
   "opencode": normalizeOpencodeTool,
+  "codex": normalizeCodexTool,
   "generic-mcp": null,
 };
 
@@ -62,6 +64,7 @@ export function normalizeToolFor(hostId: string, hostToolName: string, command: 
 const HOSTS_BY_SOURCE_ID: Readonly<Record<string, HostProvenance>> = {
   [sourceIdForHost("claude-code")]: { displayName: claudeCodeAdapter.displayName, tier: claudeCodeAdapter.tier },
   [sourceIdForHost("opencode")]: { displayName: opencodeAdapter.displayName, tier: opencodeAdapter.tier },
+  [sourceIdForHost("codex")]: { displayName: codexAdapter.displayName, tier: codexAdapter.tier },
   ["source_generic_mcp"]: { displayName: genericMcpAdapter.displayName, tier: genericMcpAdapter.tier },
 };
 
@@ -75,4 +78,5 @@ export function tierForSourceId(sourceId: string): CoverageTier | null {
 
 export type { CoverageTier, HostAdapter, HostId, HostProvenance, HostRecord } from "./types.js";
 export { claudeCodeAdapter, normalizeClaudeTool } from "./claude-code.js";
+export { codexAdapter, normalizeCodexTool, parseCodexEnvelope } from "./codex.js";
 export { normalizeOpencodeTool, opencodeAdapter, translateOpencodeRecord } from "./opencode.js";

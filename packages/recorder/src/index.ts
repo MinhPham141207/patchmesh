@@ -26,7 +26,7 @@ export type {
   RecordTurnEffectsOptions,
   RecordTurnEffectsResult,
 } from "./ingest.js";
-export { ignoredByRepository, observeTurnEffects, readSnapshot, writeSnapshot } from "./effects.js";
+export { ignoredByRepository, observationRequestId, observeTurnEffects, readSnapshot, writeSnapshot } from "./effects.js";
 export type { ObserveTurnEffectsOptions, StoredSnapshot, TurnEffects } from "./effects.js";
 // Exported so the version-drift guard can be tested directly. Racing a real drain against a
 // second write cannot test it: when the snapshot happens to catch the newer content, analyzing
@@ -43,7 +43,7 @@ export {
 export type { JournalEntry } from "./journal.js";
 export { redactHookPayload, redactText } from "./redact.js";
 export { resolveProvenanceHost, resolveSourceHost, sourceIdForHost } from "./source.js";
-export { hostForSourceId, resolveHostAdapter, tierForSourceId } from "./hosts/index.js";
+export { hostForSourceId, resolveHostAdapter, tierForSourceId, codexAdapter, normalizeCodexTool, parseCodexEnvelope } from "./hosts/index.js";
 export type { CoverageTier, HostId, HostProvenance } from "./hosts/index.js";
 export {
   LEDGER_DIRECTORY,
@@ -72,3 +72,4 @@ export { readInFlightCalls } from "./inflight.js";
 export type { InFlightCall, ReadInFlightOptions } from "./inflight.js";
 export { computeContentionAdvisory, computePostWriteAdvisory, computeTurnStartAdvisory } from "./advisory.js";
 export type { ComputeAdvisoryOptions, ContentionAdvisory, TurnStartAdvisory } from "./advisory.js";
+export { main as codexRelayMain, translateCodexPayload } from "./codex-relay.js";

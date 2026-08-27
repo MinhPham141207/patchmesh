@@ -6,9 +6,23 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseEvent, type ProtocolEvent } from "patchmesh-protocol";
 import { replayEvents, SqliteEventStore } from "patchmesh-storage";
-import { recordTurnEffects } from "../src/index.js";
+import { observationRequestId, recordTurnEffects } from "../src/index.js";
 
 const TURN = { agentId: "agent_live-session" as const, taskId: "task_turn.live.abc123" as const };
+
+test("observation request ids are deterministic for retry", () => {
+  const identity = {
+    worktreeRoot: "C:/worktree",
+    repositoryId: "repo_1" as never,
+    workspaceId: "ws_1" as never,
+    worktreeId: "wt_1" as never,
+  };
+  const calls = [{ completionEventId: "evt_1" as never }];
+  assert.equal(
+    observationRequestId({ identity, agentId: TURN.agentId, taskId: TURN.taskId, calls }),
+    observationRequestId({ identity, agentId: TURN.agentId, taskId: TURN.taskId, calls }),
+  );
+});
 
 function temporaryWorktree(): string {
   const root = mkdtempSync(join(tmpdir(), "patchmesh-effects-"));

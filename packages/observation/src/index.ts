@@ -23,3 +23,16 @@ export { isIgnoredObservationPath, OBSERVATION_IGNORE_POLICY_VERSION } from "./i
 export { sanitizeDiagnostic } from "./redaction.js";
 export { NodeObservationBoundary } from "./node-observation.js";
 export type { NodeObservationOptions } from "./node-observation.js";
+export {
+  ObservationSidecar,
+  ObservationSidecarServerClient,
+  ackObservationDrain,
+  connectObservationSidecar,
+  deterministicObservationDrainId,
+  ensureObservationSidecar,
+  requestObservationDrain,
+  startObservationSidecarServer,
+  startObservationSidecar,
+  stopObservationSidecar,
+} from "./sidecar.js";
+export type { ObservationDrainResult, ObservationSidecarOptions, ObservationSidecarServer } from "./sidecar.js";

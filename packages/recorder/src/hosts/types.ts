@@ -1,4 +1,4 @@
-export type HostId = "claude-code" | "opencode" | "generic-mcp";
+export type HostId = "claude-code" | "opencode" | "codex" | "generic-mcp";
 export type CoverageTier = "observed" | "session" | "declared";
 
 /**

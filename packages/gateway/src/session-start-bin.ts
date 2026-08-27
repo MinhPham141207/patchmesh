@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
-import { agentIdForSession, findWorktreeRoot, freshenLedger, ledgerPathFor, LEDGER_DIRECTORY } from "patchmesh-recorder";
+import {
+  agentIdForSession,
+  findWorktreeRoot,
+  freshenLedger,
+  ledgerPathFor,
+  LEDGER_DIRECTORY,
+} from "patchmesh-recorder";
+import { ensureObservationSidecar } from "patchmesh-observation";
 import { findOverlappingWork, recapRecentWork, renderOverlap, renderRecap } from "patchmesh-query";
 import { measurementPathFor, recordAnswer } from "./measure.js";
 import { claimInjection, injectionStatePathFor } from "./injection-state.js";
@@ -207,6 +214,13 @@ export async function main(): Promise<number> {
       debug("no git worktree found for hook cwd");
       return 0;
     }
+
+    // Start the per-worktree watcher before any drain can ask it for observations. The sidecar
+    // owns its own persistence and is idempotent; startup is best effort because this hook must
+    // never prevent a session from starting when filesystem watching is unavailable.
+    void ensureObservationSidecar(worktreeRoot).catch((error: unknown) => {
+      debug(error instanceof Error ? error.message : "observation sidecar unavailable");
+    });
 
     // Drained before the recap is built, not after. This is the surface that actually reaches
     // agents -- measured adoption of the pull tools is one call per 183 -- so a session-start

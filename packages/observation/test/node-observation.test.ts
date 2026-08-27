@@ -614,6 +614,25 @@ test("shared versioned ignore policy is equivalent for full and incremental obse
   }
 });
 
+test("full observation skips Git-ignored files before hashing them", async () => {
+  const directory = await createRepository();
+  try {
+    writeFileSync(join(directory, ".gitignore"), "ignored/\n");
+    mkdirSync(join(directory, "ignored"));
+    writeFileSync(join(directory, "ignored", "cache.bin"), "cache\n");
+    writeFileSync(join(directory, "visible.txt"), "visible\n");
+    const boundary = new NodeObservationBoundary({
+      source: { kind: "watcher", sourceId: "source_observation", instanceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" },
+    });
+    const capture = await boundary.captureBefore(context(directory, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"));
+    assert.equal(capture.snapshot.files.has("ignored/cache.bin"), false);
+    assert.equal(capture.snapshot.files.has("visible.txt"), true);
+    await boundary.dispose();
+  } finally {
+    removeRepository(directory);
+  }
+});
+
 test("processed watcher entries are pruned instead of causing lifetime overflow", async () => {
   const directory = await createRepository();
   let listener: ((eventType: string, filename: string | Buffer | null) => void) | undefined;

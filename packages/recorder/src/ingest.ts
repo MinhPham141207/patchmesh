@@ -12,7 +12,7 @@ import { basename, dirname, join } from "node:path";
 import type { TaskId } from "patchmesh-protocol";
 import { SqliteEventStore } from "patchmesh-storage";
 import type { AgentId } from "patchmesh-protocol";
-import { observeTurnEffects, type EffectAttributionCall } from "./effects.js";
+import { observationRequestId, observeTurnEffects, type EffectAttributionCall } from "./effects.js";
 import { buildHookEvents, declaredLogicalPath, type HookPayload } from "./hook.js";
 import { agentIdForSession, createEventId, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
 import { deriveAnalysisEvents, latestSymbolVersions } from "./symbols.js";
@@ -188,6 +188,14 @@ export interface RecordTurnEffectsOptions {
    * really an assertion about which line of the test ran first.
    */
   readonly now?: (() => string) | undefined;
+  /** Stable sidecar transaction id; derived from turn/calls when omitted. */
+  readonly requestId?: string | undefined;
+}
+
+interface PersistedObservationRequest {
+  readonly requestId: string;
+  readonly turn: { readonly agentId: AgentId | null; readonly taskId: TaskId | null } | null;
+  readonly calls: readonly EffectAttributionCall[];
 }
 
 export interface RecordTurnEffectsResult {
@@ -206,7 +214,21 @@ export interface RecordTurnEffectsResult {
  */
 export async function recordTurnEffects(options: RecordTurnEffectsOptions): Promise<RecordTurnEffectsResult> {
   const identity = resolveRepositoryIdentity(options.worktreeRoot);
-  const { events, baselineOnly } = await observeTurnEffects({
+  const requestStatePath = join(options.worktreeRoot, ".patchmesh", "observation", "recorder-request.json");
+  const markerExisted = existsSync(requestStatePath);
+  const sidecarStatePath = join(options.worktreeRoot, ".patchmesh", "observation", "sidecar.json");
+  const derivedRequestId = options.requestId ?? observationRequestId({ identity, agentId: options.turn?.agentId ?? null, taskId: options.turn?.taskId ?? null, calls: options.calls });
+  const persisted = options.requestId === undefined
+    ? readOrCreateObservationRequest(requestStatePath, {
+      requestId: derivedRequestId,
+      turn: options.turn,
+      calls: options.calls ?? [],
+    })
+    : null;
+  const requestId = persisted?.requestId ?? options.requestId ?? derivedRequestId;
+  const turn = persisted?.turn ?? options.turn;
+  const calls = persisted?.calls ?? options.calls;
+  const { events, baselineOnly, acknowledge } = await observeTurnEffects({
     identity,
     snapshotPath: options.snapshotPath,
     // `file.changed` is a watcher's claim about the filesystem, not a gateway's claim about a
@@ -216,9 +238,10 @@ export async function recordTurnEffects(options: RecordTurnEffectsOptions): Prom
       sourceId: "source_patchmesh_observer",
       instanceId: identity.worktreeId.slice("wt_".length),
     },
-    agentId: options.turn?.agentId ?? null,
-    taskId: options.turn?.taskId ?? null,
-    calls: options.calls,
+    agentId: turn?.agentId ?? null,
+    taskId: turn?.taskId ?? null,
+    calls,
+    requestId,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 
@@ -255,7 +278,72 @@ export async function recordTurnEffects(options: RecordTurnEffectsOptions): Prom
       store.close();
     }
   }
+  // Commit the sidecar cursor even when this transaction had no file changes (including the
+  // initial baseline); otherwise every subsequent drain would replay the same window.
+  if (acknowledge !== undefined) await acknowledge();
+  // A pre-existing marker may describe a prepared sidecar transaction. Keep it when IPC is
+  // temporarily unavailable; clearing it would strand that transaction and lose crash retry.
+  // A marker created during a legacy fallback is safe to clear when no sidecar state exists.
+  if (acknowledge !== undefined || !markerExisted || !existsSync(sidecarStatePath)) {
+    clearObservationRequest(requestStatePath, requestId);
+  }
   return { changed: events.length, baselineOnly };
+}
+
+function readOrCreateObservationRequest(path: string, fallback: PersistedObservationRequest): PersistedObservationRequest {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (isPersistedObservationRequest(parsed)) return parsed;
+    if (typeof parsed === "string" && parsed !== "") return { ...fallback, requestId: parsed };
+  } catch {
+    // Create below.
+  }
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(fallback)}\n`, { encoding: "utf8", flag: "wx" });
+    return fallback;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      try {
+        const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+        if (isPersistedObservationRequest(parsed)) return parsed;
+        if (typeof parsed === "string" && parsed !== "") return { ...fallback, requestId: parsed };
+      } catch {
+        // Fall through to the deterministic id.
+      }
+    }
+    return fallback;
+  }
+}
+
+function isPersistedObservationRequest(value: unknown): value is PersistedObservationRequest {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const turn = candidate.turn;
+  const validTurn = turn === null || (typeof turn === "object" && turn !== null && !Array.isArray(turn)
+    && (typeof (turn as Record<string, unknown>).agentId === "string" || (turn as Record<string, unknown>).agentId === null)
+    && (typeof (turn as Record<string, unknown>).taskId === "string" || (turn as Record<string, unknown>).taskId === null));
+  const validCalls = Array.isArray(candidate.calls) && candidate.calls.every((call) => {
+    if (typeof call !== "object" || call === null || Array.isArray(call)) return false;
+    const value = call as Record<string, unknown>;
+    return typeof value.completionEventId === "string"
+      && typeof value.correlationId === "string"
+      && (typeof value.agentId === "string" || value.agentId === null)
+      && (typeof value.taskId === "string" || value.taskId === null)
+      && typeof value.startedAtMs === "number" && Number.isFinite(value.startedAtMs)
+      && typeof value.completedAtMs === "number" && Number.isFinite(value.completedAtMs)
+      && (typeof value.declaredPath === "string" || value.declaredPath === null);
+  });
+  return typeof candidate.requestId === "string" && candidate.requestId !== "" && validTurn && validCalls;
+}
+
+function clearObservationRequest(path: string, requestId: string): void {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if ((isPersistedObservationRequest(parsed) && parsed.requestId === requestId) || parsed === requestId) rmSync(path, { force: true });
+  } catch {
+    // Best effort; an old id is harmless after sidecar acknowledgement.
+  }
 }
 
 interface DrainClaimOptions {

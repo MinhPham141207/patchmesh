@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { findWorktreeRoot } from "./identity.js";
 import { ingestJournal, recordTurnEffects } from "./ingest.js";
 import { journalPathFor } from "./journal.js";
@@ -32,7 +34,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       ledgerPath: ledgerPathFor(worktreeRoot),
     });
     debug(`ingested ${result.ingested}, skipped ${result.skipped}, turns ${result.turns}`);
-
+    // A zero-entry lifecycle invocation is normally the duplicate SessionEnd fallback. Retry
+    // effects only when the prior process left a durable sidecar transaction pending.
+    if (result.ingested === 0 && !existsSync(join(worktreeRoot, LEDGER_DIRECTORY, "observation", "recorder-request.json"))) return 0;
     // Effects are observed after the journal is safely drained: a failure here leaves the
     // recorded calls in the ledger rather than stranding them in an unclaimed journal.
     const effects = await recordTurnEffects({

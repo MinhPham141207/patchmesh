@@ -1,18 +1,24 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   diffSnapshots,
   fileResourceId,
   NodeObservationBoundary,
   normalizeLogicalPath,
+  type ObservationCapture,
   type ObservationContext,
   type ObservationSnapshot,
   type ObservedFileChange,
   type ObservedFileState,
 } from "patchmesh-observation";
+import {
+  connectObservationSidecar,
+  deterministicObservationDrainId,
+  type ObservationDrainResult,
+} from "patchmesh-observation";
 import type { AgentId, CorrelationId, EventId, ProtocolEvent, Source, TaskId } from "patchmesh-protocol";
-import { createCorrelationId, createEventId, type RepositoryIdentity } from "./identity.js";
+import { createCorrelationId, createEventId, deterministicUuid, type RepositoryIdentity } from "./identity.js";
 import { LEDGER_DIRECTORY } from "./record.js";
 
 /**
@@ -310,12 +316,31 @@ export interface ObserveTurnEffectsOptions {
   readonly nextEventId?: () => EventId;
   /** Calls drained in this same round, against whose windows changes are matched. */
   readonly calls?: readonly EffectAttributionCall[] | undefined;
+  /** Stable id for the persistent sidecar transaction. */
+  readonly requestId?: string | undefined;
 }
 
 export interface TurnEffects {
   readonly events: readonly ProtocolEvent[];
   /** Set when the baseline was missing, so this run only established one. */
   readonly baselineOnly: boolean;
+  /** Acknowledge the sidecar only after ledger append succeeds. */
+  readonly acknowledge?: (() => Promise<void>) | undefined;
+}
+
+function stableId(prefix: string, namespace: string, value: string): string {
+  return `${prefix}${deterministicUuid(namespace, value).replaceAll("-", "")}`;
+}
+
+export function observationRequestId(options: Pick<ObserveTurnEffectsOptions, "identity" | "agentId" | "taskId" | "calls">): string {
+  const calls = [...(options.calls ?? [])].map((call) => call.completionEventId).sort().join(",");
+  const turn = `${options.agentId ?? ""}\0${options.taskId ?? ""}`;
+  return deterministicObservationDrainId({
+    workspaceRoot: options.identity.worktreeRoot,
+    repositoryId: options.identity.repositoryId,
+    workspaceId: options.identity.workspaceId,
+    worktreeId: options.identity.worktreeId,
+  }, `${turn}\0${calls}`);
 }
 
 /**
@@ -338,13 +363,40 @@ export async function observeTurnEffects(options: ObserveTurnEffectsOptions): Pr
     worktreeId: identity.worktreeId,
   };
 
-  const boundary = new NodeObservationBoundary({ source: options.source });
-  const capture = await boundary.captureAfter(context);
+  const requestId = options.requestId ?? observationRequestId(options);
+  const sidecarStatePath = join(identity.worktreeRoot, LEDGER_DIRECTORY, "observation", "sidecar.json");
+  let sidecar: ObservationDrainResult | null = null;
+  let sidecarAck: (() => Promise<void>) | undefined;
+  let sidecarRetryPending = false;
+  try {
+    const client = await connectObservationSidecar(identity.worktreeRoot);
+    sidecar = await client.drain(requestId, context);
+    sidecarAck = () => client.ack(requestId, sidecar!.transactionId);
+  } catch (error) {
+    // IPC/startup is best effort; retain the historical full-capture fallback.
+    // A timed-out drain may still be running in the sidecar. Falling back here would
+    // race its durable result and emit the same file change twice. Keep the request
+    // marker so the next drain retries the same transaction.
+    sidecarRetryPending = error instanceof Error && error.message === "observation request timed out";
+  }
+  if (sidecarRetryPending) return { events: [], baselineOnly: false };
+  let previous: ObservationSnapshot | null;
+  let capture: ObservationCapture;
+  let acknowledge: (() => Promise<void>) | undefined;
+  let baselineOnly = false;
+  if (sidecar !== null) {
+    previous = sidecar.before.snapshot;
+    capture = sidecar.capture;
+    acknowledge = sidecarAck;
+    baselineOnly = sidecar.baselineOnly;
+  } else {
+    const boundary = new NodeObservationBoundary({ source: options.source });
+    capture = await boundary.captureAfter(context);
+    previous = readSnapshot(options.snapshotPath);
+    writeSnapshot(options.snapshotPath, capture.snapshot, now());
+  }
   const timestamp = now();
-
-  const previous = readSnapshot(options.snapshotPath);
-  writeSnapshot(options.snapshotPath, capture.snapshot, timestamp);
-  if (previous === null) return { events: [], baselineOnly: true };
+  if (previous === null) return { events: [], baselineOnly: true, acknowledge };
 
   const diff = diffSnapshots(previous, capture.snapshot, false);
   const candidates = diff.changes.filter((change) => !isRecorderState(change.path));
@@ -368,12 +420,18 @@ export async function observeTurnEffects(options: ObserveTurnEffectsOptions): Pr
         // gets one correlation of its own, not one per batch: it is its own causal root, and a
         // correlation may hold only one root, so sharing an id across a batch makes every event
         // after the first invalid. Per-event validation cannot see this; it is a set property.
-        correlationId: owner?.correlationId ?? createCorrelationId(),
+        correlationId: owner?.correlationId
+          ?? (sidecar === null
+            ? createCorrelationId()
+            : stableId("corr_", "patchmesh:file-change-correlation", `${requestId}\0${change.path}`) as CorrelationId),
         causationId: owner?.completionEventId ?? null,
-        eventId: nextEventId(),
+        eventId: sidecar === null
+          ? nextEventId()
+          : stableId("evt_", "patchmesh:file-change", `${requestId}\0${change.path}\0${change.changeKind}\0${change.after?.contentHash ?? ""}`) as EventId,
+        requestId,
       });
     });
-  return { events, baselineOnly: false };
+  return { events, baselineOnly, acknowledge };
 }
 
 interface FileChangedEventOptions {
@@ -387,6 +445,7 @@ interface FileChangedEventOptions {
   /** The completion this change was matched to, or null when no single call's window held it. */
   readonly causationId: EventId | null;
   readonly eventId: EventId;
+  readonly requestId?: string;
 }
 
 function fileChangedEvent(options: FileChangedEventOptions): ProtocolEvent {
