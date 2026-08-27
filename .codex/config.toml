@@ -1,0 +1,34 @@
+[mcp_servers.knowl]
+command = "knowl.cmd"
+args = [ "serve" ]
+
+[mcp_servers.knowl.tools.knowl_query]
+approval_mode = "approve"
+
+[mcp_servers.knowl.tools.knowl_update]
+approval_mode = "approve"
+
+[mcp_servers.knowl.tools.knowl_ingest]
+approval_mode = "approve"
+
+[mcp_servers.knowl.tools.knowl_ingest_atoms]
+approval_mode = "approve"
+
+[mcp_servers.knowl.tools.knowl_store]
+approval_mode = "approve"
+
+[mcp_servers.knowl.tools.knowl_feedback]
+approval_mode = "approve"
+
+[mcp_servers.knowl.tools.knowl_conflicts]
+approval_mode = "approve"
+
+[mcp_servers.knowl.tools.knowl_decide]
+approval_mode = "approve"
+
+[mcp_servers.patchmesh]
+command = "node"
+args = [ "D:/patchmesh/packages/gateway/dist/bin.js", "D:/patchmesh" ]
+
+[mcp_servers.patchmesh.tools.patchmesh_active_work]
+approval_mode = "approve"
