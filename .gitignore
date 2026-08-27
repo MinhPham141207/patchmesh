@@ -3,6 +3,8 @@
 KNOWL.md
 
 # agent
+.codex/
+.claude/
 AGENTS.md
 
 # local worktrees

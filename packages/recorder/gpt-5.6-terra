@@ -1,0 +1,82 @@
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test } from "node:test";
+
+function commands(hooks: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>, event: string): string[] {
+  return (hooks[event] ?? []).flatMap((entry) => (entry.hooks ?? []).flatMap((hook) => hook.command ?? []));
+}
+
+test("Codex config preserves Knowl and adds PatchMesh recording", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-codex-config-"));
+  try {
+    const codexDir = join(root, ".codex");
+    mkdirSync(codexDir, { recursive: true });
+
+    const sampleConfig = [
+      "[mcp_servers.knowl]",
+      "command = \"knowl.cmd\"",
+      "args = [ \"serve\" ]",
+      "",
+      "[mcp_servers.patchmesh]",
+      "command = \"node\"",
+      "args = [ \"D:/patchmesh/packages/gateway/dist/bin.js\", \"D:/patchmesh\" ]",
+      "",
+      "[mcp_servers.patchmesh.tools.patchmesh_active_work]",
+      "approval_mode = \"approve\"",
+    ].join("\n");
+
+    const sampleHooks = {
+      hooks: {
+        SessionStart: [
+          { matcher: ".*", hooks: [{ type: "command", command: "knowl.cmd agent-hook codex SessionStart --json" }] },
+        ],
+        PostToolUse: [
+          { matcher: ".*", hooks: [{ type: "command", command: "knowl.cmd agent-hook codex PostToolUse --json" }] },
+          { matcher: ".*", hooks: [{ type: "command", command: "node D:/patchmesh/packages/recorder/dist/codex-relay.js PostToolUse" }] },
+        ],
+        PostToolUseFailure: [
+          { matcher: ".*", hooks: [{ type: "command", command: "knowl.cmd agent-hook codex PostToolUseFailure --json" }] },
+          { matcher: ".*", hooks: [{ type: "command", command: "node D:/patchmesh/packages/recorder/dist/codex-relay.js PostToolUseFailure" }] },
+        ],
+        Stop: [
+          { matcher: ".*", hooks: [{ type: "command", command: "knowl.cmd agent-hook codex Stop --json" }] },
+          { matcher: ".*", hooks: [{ type: "command", command: "node D:/patchmesh/packages/recorder/dist/ingest-bin.js D:/patchmesh" }] },
+        ],
+        SessionEnd: [
+          { matcher: ".*", hooks: [{ type: "command", command: "node D:/patchmesh/packages/recorder/dist/ingest-bin.js D:/patchmesh" }] },
+        ],
+      },
+    };
+
+    writeFileSync(join(codexDir, "config.toml"), sampleConfig, "utf8");
+    writeFileSync(join(codexDir, "hooks.json"), JSON.stringify(sampleHooks, null, 2), "utf8");
+
+    const config = readFileSync(join(codexDir, "config.toml"), "utf8");
+    const hooks = JSON.parse(readFileSync(join(codexDir, "hooks.json"), "utf8")) as {
+      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
+    };
+
+    assert.match(config, /\[mcp_servers\.knowl\]/u);
+    assert.match(config, /\\[mcp_servers\.patchmesh\]/u);
+    assert.match(config, /command = "node"/u);
+    assert.match(config, /D:\/patchmesh\/packages\/gateway\/dist\/bin\.js/u);
+    assert.match(config, /args = \[ "D:\/patchmesh\/packages\/gateway\/dist\/bin\.js", "D:\/patchmesh" \]/u);
+
+    const hookEntries = hooks.hooks ?? {};
+    assert.ok(commands(hookEntries, "SessionStart").includes("knowl.cmd agent-hook codex SessionStart --json"));
+    assert.ok(commands(hookEntries, "PostToolUse").includes("knowl.cmd agent-hook codex PostToolUse --json"));
+    assert.ok(commands(hookEntries, "PostToolUseFailure").includes("knowl.cmd agent-hook codex PostToolUseFailure --json"));
+    assert.ok(commands(hookEntries, "Stop").includes("knowl.cmd agent-hook codex Stop --json"));
+
+    const relay = "node D:/patchmesh/packages/recorder/dist/codex-relay.js";
+    assert.ok(commands(hookEntries, "PostToolUse").includes(`${relay} PostToolUse`));
+    assert.ok(commands(hookEntries, "PostToolUseFailure").includes(`${relay} PostToolUseFailure`));
+    const ingest = "node D:/patchmesh/packages/recorder/dist/ingest-bin.js D:/patchmesh";
+    assert.ok(commands(hookEntries, "Stop").includes(ingest));
+    assert.ok(commands(hookEntries, "SessionEnd").includes(ingest));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
