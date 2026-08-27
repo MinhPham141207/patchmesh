@@ -155,14 +155,14 @@ async function fastGitRevision(adminDir: string | null, commonDir: string | null
   try {
     const headContent = (await readFile(resolve(adminDir, "HEAD"), "utf8")).trim();
     if (!headContent.startsWith("ref: ")) {
-      if (/^[0-9a-f]{40}$/i.test(headContent)) return headContent;
+      if (/^[0-9a-f]{40,64}$/i.test(headContent)) return headContent;
     } else {
       const refPath = headContent.slice(5).trim();
       for (const base of [adminDir, commonDir]) {
         if (!base) continue;
         try {
           const refContent = (await readFile(resolve(base, refPath), "utf8")).trim();
-          if (/^[0-9a-f]{40}$/i.test(refContent)) return refContent;
+          if (/^[0-9a-f]{40,64}$/i.test(refContent)) return refContent;
         } catch { /* try next */ }
       }
       if (commonDir) {
@@ -171,7 +171,7 @@ async function fastGitRevision(adminDir: string | null, commonDir: string | null
           for (const line of packed.split("\n")) {
             if (line.startsWith("#") || line.startsWith("^") || !line.includes(" ")) continue;
             const [hash, ref] = line.trim().split(" ");
-            if (ref === refPath && hash && /^[0-9a-f]{40}$/i.test(hash)) return hash;
+            if (ref === refPath && hash && /^[0-9a-f]{40,64}$/i.test(hash)) return hash;
           }
         } catch { /* fallback */ }
       }
@@ -742,6 +742,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
     const files = new Map(before.files);
     const metadata = new Map(session.metadata);
     const hashedCandidates = new Set<string>();
+    const candidateContents = new Map<string, Uint8Array>();
     const gaps: ObservationGap[] = [gap("unverified", "tool.effects", "snapshot observation verifies final state but cannot prove each effect originated from the intercepted operation")];
     const currentIdentity = await captureWorkspaceIdentity(session.root);
     let identityChanged = false;
@@ -791,7 +792,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
         if (info.isSymbolicLink()) { gaps.push(gap("unverified", logicalPath, "symlink changes require full reconciliation")); continue; }
         if (!info.isFile()) {
           if (info.isDirectory()) {
-            await this.scanDirectoryCandidate(session, logicalPath, files, metadata, gaps, hashedCandidates);
+            await this.scanDirectoryCandidate(session, logicalPath, files, metadata, gaps, hashedCandidates, candidateContents);
             continue;
           }
           gaps.push(gap("unverified", logicalPath, "watcher path is not a regular file"));
@@ -800,7 +801,8 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
         if (!hashedCandidates.has(logicalPath)) {
           const content = await this.candidateReader(absolute);
           const blob = before.repository.commonDirectory !== null && before.worktree.administrativeDirectory !== null ? gitBlobHash(content) : null;
-          files.set(logicalPath, { contentHash: sha256(content), gitBlob: blob, fileKind: "file" });
+          files.set(logicalPath, { contentHash: sha256(content), gitBlob: null, fileKind: "file" });
+          candidateContents.set(logicalPath, content);
           hashedCandidates.add(logicalPath);
         }
         metadata.set(logicalPath, metadataFromStat(info));
@@ -819,8 +821,6 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
       if (!sameWorkspaceIdentity(session.identity, identityBeforeGit) || !sameWorkspaceIdentity(currentIdentity, identityBeforeGit)) {
         markIdentityChanged();
       } else {
-        const blobs = new Map<string, string>();
-        const fallback = null;
         const resolvedRevision = await fastGitRevision(before.worktree.administrativeDirectory, before.repository.commonDirectory, session.root);
         const identityAfterGit = await captureWorkspaceIdentity(session.root);
         if (!sameWorkspaceIdentity(identityBeforeGit, identityAfterGit) || !sameWorkspaceIdentity(session.identity, identityAfterGit)) {
@@ -828,10 +828,13 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
         } else {
           revision = resolvedRevision;
           if (revision === null) gaps.push(gap("unverified", "git", "Git revision metadata is unavailable"));
-          for (let index = 0; index < candidatePaths.length; index += 1) {
-            const path = candidatePaths[index]!;
+          const hasGit = before.repository.commonDirectory !== null && before.worktree.administrativeDirectory !== null;
+          for (const path of candidatePaths) {
             const state = files.get(path);
-            if (state !== undefined) files.set(path, { ...state, gitBlob: blobs?.get(path) ?? fallback?.[index] ?? null });
+            const content = candidateContents.get(path);
+            if (state !== undefined) {
+              files.set(path, { ...state, gitBlob: hasGit && content !== undefined ? gitBlobHash(content) : null });
+            }
           }
         }
       }
@@ -855,6 +858,7 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
     metadata: Map<string, FileMetadata>,
     gaps: ObservationGap[],
     hashedCandidates: Set<string>,
+    candidateContents: Map<string, Uint8Array>,
   ): Promise<void> {
     const observed = new Set<string>();
     const visit = async (directory: string): Promise<void> => {
@@ -897,7 +901,8 @@ export class NodeObservationBoundary implements IncrementalObservationBoundary {
           const nextMetadata = metadataFromStat(info);
           if (!sameMetadata(metadata.get(logicalPath), nextMetadata)) {
             const content = await this.candidateReader(absolute);
-            files.set(logicalPath, { contentHash: sha256(content), gitBlob: gitBlobHash(content), fileKind: "file" });
+            files.set(logicalPath, { contentHash: sha256(content), gitBlob: null, fileKind: "file" });
+            candidateContents.set(logicalPath, content);
             metadata.set(logicalPath, nextMetadata);
             hashedCandidates.add(logicalPath);
           }

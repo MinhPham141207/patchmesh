@@ -38,3 +38,5 @@ tools/concurrency/output/
 .patchmesh-probe/
 
 issues.md
+mvp_target.md
+logs.md
