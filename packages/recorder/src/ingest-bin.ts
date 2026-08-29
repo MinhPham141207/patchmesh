@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { findWorktreeRoot } from "./identity.js";
-import { ingestJournal, recordTurnEffects } from "./ingest.js";
+import { ingestJournal, recordTurnEffects, emitTaskCompleted } from "./ingest.js";
 import { journalPathFor } from "./journal.js";
 import { LEDGER_DIRECTORY, ledgerPathFor, snapshotPathFor } from "./record.js";
 
@@ -47,6 +47,17 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       calls: result.calls,
     });
     debug(effects.baselineOnly ? "observed baseline only" : `observed ${effects.changed} file change(s)`);
+    if (result.closedTurn !== null) {
+      try {
+        emitTaskCompleted({
+          worktreeRoot,
+          ledgerPath: ledgerPathFor(worktreeRoot),
+          turn: result.closedTurn,
+        });
+      } catch (error) {
+        debug(`task.completed failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     return 0;
   } catch (error) {
     debug(error instanceof Error ? error.message : "unknown ingest failure");

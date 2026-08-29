@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -9,16 +10,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import type { TaskId } from "patchmesh-protocol";
+import type { AgentId, CorrelationId, TaskId } from "patchmesh-protocol";
 import { canonicalDigest, SqliteEventStore } from "patchmesh-storage";
-import type { AgentId } from "patchmesh-protocol";
 import { observationRequestId, observeTurnEffects, type EffectAttributionCall } from "./effects.js";
 import { buildHookEvents, declaredLogicalPath, type HookPayload } from "./hook.js";
-import { agentIdForSession, createEventId, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
+import { agentIdForSession, createCorrelationId, createEventId, resolveRepositoryIdentity, taskIdForTurn } from "./identity.js";
 import { deriveAnalysisEvents, latestSymbolVersions } from "./symbols.js";
 import { ABANDONED_AFTER_MS } from "./inflight.js";
 import { appendJournalEntry, parseJournalLine, type JournalEntry } from "./journal.js";
 import { resolveProvenanceHost } from "./source.js";
+import { snapshotPathFor } from "./record.js";
 import {
   isCallStart,
   isTurnMarker,
@@ -234,6 +235,105 @@ function soleTurnOf(
   const turn = turnTasks.get(sessionId);
   if (turn === undefined) return null;
   return { agentId: agentIdForSession(sessionId), taskId: turn.taskId as TaskId | null };
+}
+
+export interface EmitTaskCompletedOptions {
+  readonly worktreeRoot: string;
+  readonly ledgerPath: string;
+  readonly turn: { readonly agentId: AgentId | null; readonly taskId: TaskId | null };
+}
+
+/**
+ * Append a `task.completed` event for the turn that just closed.
+ *
+ * The event carries the files changed during the turn (from `file.changed` events already
+ * in the store) and the git HEAD as `baseRevision`. When the store cannot be read or the
+ * git call fails, the event is still emitted with degraded fields rather than skipped —
+ * a partial answer beats silence.
+ */
+export function emitTaskCompleted(options: EmitTaskCompletedOptions): void {
+  const { worktreeRoot, ledgerPath, turn } = options;
+  const identity = resolveRepositoryIdentity(worktreeRoot);
+
+  let baseRevision = "0000000000000000000000000000000000000000";
+  try {
+    baseRevision = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: worktreeRoot,
+      encoding: "utf8",
+      timeout: 5_000,
+    }).trim();
+  } catch {
+    // Git unavailable or not a repo — degrade gracefully.
+  }
+
+  const store = SqliteEventStore.open(ledgerPath);
+  try {
+    const resourceIdRows = turn.taskId !== null
+      ? store.handle.prepare(`
+          SELECT canonical_event
+          FROM events
+          WHERE event_type = 'file.changed'
+            AND task_id = ?
+        `).all(turn.taskId) as Array<{ canonical_event: Uint8Array | string }>
+      : [];
+
+    const resourceIds = resourceIdRows
+      .map((row) => {
+        const bytes = typeof row.canonical_event === "string"
+          ? new TextEncoder().encode(row.canonical_event)
+          : new Uint8Array(row.canonical_event);
+        const event = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+        const payload = event.payload as Record<string, unknown> | undefined;
+        const resource = payload?.resource as Record<string, unknown> | undefined;
+        return typeof resource?.resourceId === "string" ? resource.resourceId : null;
+      })
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+    let correlationId = createCorrelationId();
+    if (turn.taskId !== null && resourceIds.length > 0) {
+      const row = store.handle.prepare(`
+        SELECT correlation_id FROM events
+        WHERE event_type = 'file.changed' AND task_id = ?
+        LIMIT 1
+      `).get(turn.taskId) as { correlation_id: string } | undefined;
+      if (row !== undefined) {
+        correlationId = row.correlation_id as CorrelationId;
+      }
+    }
+
+    const workProductId = `work_${canonicalDigest(turn.taskId ?? "unattributed").slice(0, 32)}`;
+    const targetSnapshotId = `snapshot_${canonicalDigest(snapshotPathFor(worktreeRoot))}`;
+
+    const event = {
+      schemaVersion: 1 as const,
+      eventId: createEventId(),
+      eventType: "task.completed" as const,
+      source: {
+        kind: "watcher" as const,
+        sourceId: "source_patchmesh_observer",
+        instanceId: identity.worktreeId.slice("wt_".length),
+      },
+      timestamp: new Date().toISOString(),
+      repositoryId: identity.repositoryId,
+      workspaceId: identity.workspaceId,
+      worktreeId: identity.worktreeId,
+      agentId: turn.agentId,
+      taskId: turn.taskId,
+      correlationId,
+      causationId: null,
+      sourceSequence: null,
+      payload: {
+        workProductId,
+        baseRevision,
+        targetSnapshotId,
+        resourceIds,
+      },
+    };
+
+    store.appendAtomic([event]);
+  } finally {
+    store.close();
+  }
 }
 
 export interface RecordTurnEffectsOptions {
