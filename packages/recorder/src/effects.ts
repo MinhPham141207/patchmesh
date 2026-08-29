@@ -282,6 +282,42 @@ function soleCallCovering(
   return found;
 }
 
+function isDescendant(childId: string, parentId: string): boolean {
+  return childId.startsWith(`${parentId}.`);
+}
+
+/**
+ * Like `soleCallCovering`, but when multiple calls cover the same mtime, prefers the child
+ * over its parent. A child's agent id is `parent.sub.<id>`, so the parent/child relationship
+ * is structural rather than declared. When the covering calls are unrelated, ambiguity still
+ * returns null.
+ */
+function nestedCallCovering(
+  worktreeRoot: string,
+  change: ObservedFileChange,
+  calls: readonly EffectAttributionCall[],
+): EffectAttributionCall | null {
+  const at = changeTimeMs(worktreeRoot, change);
+  if (at === null) return null;
+  const covering = calls.filter(
+    (call) => at >= call.startedAtMs && at <= call.completedAtMs,
+  );
+  if (covering.length === 0) return null;
+  if (covering.length === 1) return covering[0]!;
+  // Multiple calls cover this mtime. Prefer a child over its parent.
+  for (const candidate of covering) {
+    if (candidate.agentId === null) continue;
+    const isChild = covering.some(
+      (other) =>
+        other !== candidate &&
+        other.agentId !== null &&
+        isDescendant(candidate.agentId, other.agentId),
+    );
+    if (isChild) return candidate;
+  }
+  return null;
+}
+
 /**
  * Bind one observed change to the call that owns it, or to nothing.
  *
@@ -302,7 +338,7 @@ export function bindChange(
 ): EffectAttributionCall | null {
   const declaring = calls.filter((call) => call.declaredPath !== null && call.declaredPath === change.path);
   if (declaring.length === 1) return declaring[0]!;
-  return soleCallCovering(worktreeRoot, change, calls);
+  return nestedCallCovering(worktreeRoot, change, calls);
 }
 
 export interface ObserveTurnEffectsOptions {
