@@ -11,7 +11,7 @@ export interface ExitOptions {
 }
 
 export interface ExitStep {
-  readonly outcome: "removed" | "unchanged" | "skipped";
+  readonly outcome: "removed" | "unchanged";
   readonly detail: string;
 }
 
@@ -72,7 +72,8 @@ function removePatchmeshHooks(worktreeRoot: string): ExitStep {
     return { outcome: "unchanged", detail: "no PatchMesh hooks in .claude/settings.local.json" };
   }
 
-  const hasContent = Object.keys(hooks).length > 0 || isRecord(settings["permissions"]);
+  const remainingKeys = Object.keys(settings).filter((key) => key !== "hooks");
+  const hasContent = Object.keys(hooks).length > 0 || remainingKeys.length > 0;
   if (!hasContent) {
     unlinkSync(settingsPath);
     return { outcome: "removed", detail: "removed .claude/settings.local.json (empty after removal)" };
@@ -95,7 +96,8 @@ function removeMcpEntry(worktreeRoot: string): ExitStep {
   }
 
   delete servers[OWNED_MCP_KEY];
-  if (Object.keys(servers).length === 0) {
+  const otherTopLevelKeys = Object.keys(config).filter((key) => key !== "mcpServers");
+  if (Object.keys(servers).length === 0 && otherTopLevelKeys.length === 0) {
     unlinkSync(configPath);
     return { outcome: "removed", detail: "removed .mcp.json (empty after removal)" };
   }
@@ -166,6 +168,63 @@ function removeGitignoreEntry(worktreeRoot: string): ExitStep {
   return { outcome: "removed", detail: "removed .patchmesh/ entry from .gitignore" };
 }
 
+function dryCheckHooks(worktreeRoot: string): ExitStep {
+  const settingsPath = join(worktreeRoot, ".claude", "settings.local.json");
+  if (!existsSync(settingsPath)) {
+    return { outcome: "unchanged", detail: ".claude/settings.local.json not found" };
+  }
+  const settings = readJson(settingsPath);
+  const hooks = isRecord(settings["hooks"]) ? (settings["hooks"] as Record<string, unknown>) : null;
+  if (hooks === null) {
+    return { outcome: "unchanged", detail: "no hooks in .claude/settings.local.json" };
+  }
+  const hasOurs = Object.values(hooks).some((groups) => {
+    if (!Array.isArray(groups)) return false;
+    return (groups as unknown[]).some((group) => {
+      if (!isRecord(group) || !Array.isArray(group["hooks"])) return false;
+      return (group["hooks"] as unknown[]).some(
+        (hook) => isRecord(hook) && typeof hook["command"] === "string" && ownsCommand(hook["command"]),
+      );
+    });
+  });
+  if (!hasOurs) {
+    return { outcome: "unchanged", detail: "no PatchMesh hooks in .claude/settings.local.json" };
+  }
+  return { outcome: "removed", detail: "PatchMesh hooks from .claude/settings.local.json" };
+}
+
+function dryCheckMcp(worktreeRoot: string): ExitStep {
+  const configPath = join(worktreeRoot, ".mcp.json");
+  if (!existsSync(configPath)) {
+    return { outcome: "unchanged", detail: ".mcp.json not found" };
+  }
+  const config = readJson(configPath);
+  const servers = isRecord(config["mcpServers"]) ? (config["mcpServers"] as Record<string, unknown>) : null;
+  if (servers === null || servers[OWNED_MCP_KEY] === undefined) {
+    return { outcome: "unchanged", detail: "no patchmesh entry in .mcp.json" };
+  }
+  return { outcome: "removed", detail: "patchmesh entry from .mcp.json" };
+}
+
+function dryCheckGitignore(worktreeRoot: string): ExitStep {
+  const ignorePath = join(worktreeRoot, ".gitignore");
+  if (!existsSync(ignorePath)) {
+    return { outcome: "unchanged", detail: ".gitignore not found" };
+  }
+  const content = readFileSync(ignorePath, "utf8");
+  const lines = content.split(/\r?\n/u);
+  const patchmeshComment = "# PatchMesh ledger, journal and snapshot";
+  const patchmeshEntry = ".patchmesh/";
+  const hasEntry = lines.some((line) => {
+    const trimmed = line.trim();
+    return trimmed === patchmeshComment || trimmed === patchmeshEntry;
+  });
+  if (!hasEntry) {
+    return { outcome: "unchanged", detail: "no .patchmesh/ entry in .gitignore" };
+  }
+  return { outcome: "removed", detail: ".patchmesh/ entry from .gitignore" };
+}
+
 export function exitRepository(options: ExitOptions): ExitResult {
   const dryRun = !options.yes;
   const steps: ExitStep[] = [];
@@ -175,12 +234,12 @@ export function exitRepository(options: ExitOptions): ExitResult {
       existsSync(join(options.worktreeRoot, ".patchmesh"))
         ? { outcome: "removed", detail: ".patchmesh/ (ledger, journal, session data)" }
         : { outcome: "unchanged", detail: ".patchmesh/ not found" },
-      { outcome: "removed", detail: "PatchMesh hooks from .claude/settings.local.json" },
-      { outcome: "removed", detail: "patchmesh entry from .mcp.json" },
+      dryCheckHooks(options.worktreeRoot),
+      dryCheckMcp(options.worktreeRoot),
       existsSync(join(options.worktreeRoot, ".opencode", "plugins", OPENCODE_PLUGIN))
         ? { outcome: "removed", detail: "OpenCode plugin" }
         : { outcome: "unchanged", detail: "OpenCode plugin not found" },
-      { outcome: "removed", detail: ".patchmesh/ entry from .gitignore" },
+      dryCheckGitignore(options.worktreeRoot),
     );
   } else {
     steps.push(

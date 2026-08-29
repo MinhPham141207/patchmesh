@@ -185,9 +185,35 @@ test("exit JSON output is stable", () => {
       exitRepository({ worktreeRoot: root, yes: false }),
       true,
     );
-    const parsed = JSON.parse(json) as { steps: unknown[]; dryRun: boolean };
+    const parsed = JSON.parse(json) as { steps: { outcome: string; detail: string }[]; dryRun: boolean };
     assert.equal(parsed.dryRun, true);
     assert.ok(Array.isArray(parsed.steps));
+    assert.equal(parsed.steps.length, 5, "exit always reports 5 steps");
+    for (const step of parsed.steps) {
+      assert.ok(step.outcome === "removed" || step.outcome === "unchanged", `valid outcome: ${step.outcome}`);
+      assert.equal(typeof step.detail, "string");
+      assert.ok(step.detail.length > 0);
+    }
+    // On a clean repo dry-run reports nothing to remove
+    const allUnchanged = parsed.steps.every((step) => step.outcome === "unchanged");
+    assert.equal(allUnchanged, true, "clean repo dry-run should report all unchanged");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("exit JSON reports removed outcomes after init", () => {
+  const root = monorepoCheckout();
+  try {
+    initializeRepository({ worktreeRoot: root, packageRoot: root, host: "opencode" });
+    mkdirSync(join(root, ".patchmesh"), { recursive: true });
+    const json = renderExit(exitRepository({ worktreeRoot: root, yes: false }), true);
+    const parsed = JSON.parse(json) as { steps: { outcome: string; detail: string }[]; dryRun: boolean };
+    assert.equal(parsed.dryRun, true);
+    assert.equal(parsed.steps.length, 5);
+    const removed = parsed.steps.filter((step) => step.outcome === "removed").length;
+    assert.ok(removed > 0, "dry-run after init should report removals");
+    assert.equal(JSON.parse(json).steps.length, 5);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -248,6 +274,46 @@ test("exit is idempotent — running twice produces same result", () => {
     const removedCount = second.steps.filter((step) => step.outcome === "removed").length;
     assert.equal(removedCount, 0, "second run removes nothing");
     assert.match(renderExit(second, false), /Already clean/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("exit preserves other plugins", () => {
+  const root = monorepoCheckout();
+  try {
+    initializeRepository({ worktreeRoot: root, packageRoot: root, host: "opencode" });
+    const otherPlugin = join(root, ".opencode", "plugins", "other.mjs");
+    writeFileSync(otherPlugin, "// other plugin\n", "utf8");
+    assert.equal(existsSync(otherPlugin), true, "precondition: other plugin exists");
+    assert.equal(existsSync(join(root, ".opencode", "plugins", "patchmesh.mjs")), true);
+
+    exitRepository({ worktreeRoot: root, yes: true });
+
+    assert.equal(existsSync(otherPlugin), true, "other plugin survives");
+    assert.equal(existsSync(join(root, ".opencode", "plugins", "patchmesh.mjs")), false, "patchmesh plugin removed");
+    assert.equal(existsSync(join(root, ".opencode", "plugins")), true, "plugins dir survives when other plugins remain");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("exit --yes --json via CLI produces valid JSON on stdout with exit 0", async () => {
+  const root = monorepoCheckout();
+  try {
+    initializeRepository({ worktreeRoot: root, packageRoot: root });
+    mkdirSync(join(root, ".patchmesh"), { recursive: true });
+    writeFileSync(join(root, ".patchmesh", "ledger.db"), "", "utf8");
+
+    const result = await runCli(["exit", "--yes", "--json"], { services, worktreeRoot: root });
+    assert.equal(result.exitCode, 0);
+    const parsed = JSON.parse(result.stdout) as { steps: { outcome: string; detail: string }[]; dryRun: boolean };
+    assert.equal(parsed.dryRun, false);
+    assert.equal(parsed.steps.length, 5);
+    for (const step of parsed.steps) {
+      assert.ok(step.outcome === "removed" || step.outcome === "unchanged");
+    }
+    assert.equal(result.stderr, "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
