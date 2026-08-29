@@ -310,12 +310,13 @@ function nestedCallCovering(
   if (covering.length === 1) return covering[0]!;
   // Multiple calls cover this mtime. Prefer a child over its parent.
   for (const candidate of covering) {
-    if (candidate.agentId === null) continue;
+    const candidateId = candidate.agentId;
+    if (candidateId === null) continue;
     const isChild = covering.some(
       (other) =>
         other !== candidate &&
         other.agentId !== null &&
-        isDescendant(candidate.agentId, other.agentId),
+        isDescendant(candidateId, other.agentId),
     );
     if (isChild) return candidate;
   }
