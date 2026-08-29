@@ -8,6 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import type { TaskId } from "patchmesh-protocol";
 import { SqliteEventStore } from "patchmesh-storage";
@@ -147,6 +148,70 @@ export function ingestJournal(options: IngestJournalOptions): IngestResult {
   writeTurnState(turnStatePath, turnTasks, now());
 
   return { ingested, skipped, turns, closedTurn: soleTurnOf(turnTasks, activeSessions), calls, ledgerPath };
+}
+
+/**
+ * Propagate task attribution within correlation groups that have exactly one task.
+ *
+ * Where a correlation has exactly one non-null taskId among its events, that task is
+ * assigned to every null-attribution event in the group. Groups with zero tasks or
+ * multiple tasks stay unchanged — the former is honest absence, the latter is
+ * ambiguous.
+ *
+ * Events are stored as JSON blobs (`canonical_event`) and reconstructed from that blob
+ * on read. Updating only the `task_id` column would leave the JSON unchanged, so this
+ * function also patches the JSON and recomputes the content digest.
+ */
+export function backfillAttribution(ledgerPath: string): void {
+  const store = SqliteEventStore.open(ledgerPath);
+  try {
+    // Find correlation groups with exactly one distinct non-null task.
+    const groups = store.handle.prepare(`
+      SELECT correlation_id, GROUP_CONCAT(DISTINCT task_id) as tasks
+      FROM events
+      WHERE correlation_id IS NOT NULL
+      GROUP BY correlation_id
+      HAVING COUNT(DISTINCT task_id) = 1
+         AND MAX(task_id) IS NOT NULL
+    `).all() as Array<{ correlation_id: string; tasks: string }>;
+
+    const updateTask = store.handle.prepare(`
+      UPDATE events SET task_id = ?
+      WHERE event_id = ?
+    `);
+    const updateBlob = store.handle.prepare(`
+      UPDATE events SET canonical_event = ?, content_digest = ?
+      WHERE event_id = ?
+    `);
+
+    for (const group of groups) {
+      const task = group.tasks;
+
+      // Find null-attribution rows in this correlation group.
+      const rows = store.handle.prepare(`
+        SELECT event_id, canonical_event
+        FROM events
+        WHERE correlation_id = ? AND task_id IS NULL
+      `).all(group.correlation_id) as Array<{ event_id: string; canonical_event: Uint8Array | string }>;
+
+      for (const row of rows) {
+        // Patch the task_id column.
+        updateTask.run(task, row.event_id);
+
+        // Patch the canonical_event JSON blob so read() returns the updated taskId.
+        const bytes = typeof row.canonical_event === "string"
+          ? new TextEncoder().encode(row.canonical_event)
+          : new Uint8Array(row.canonical_event);
+        const event = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+        event.taskId = task;
+        const patched = JSON.stringify(event);
+        const digest = createHash("sha256").update(patched).digest("hex");
+        updateBlob.run(patched, digest, row.event_id);
+      }
+    }
+  } finally {
+    store.close();
+  }
 }
 
 /**
