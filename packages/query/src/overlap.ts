@@ -384,7 +384,7 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
   );
   // Opaque calls carry no path, so a path-scoped question cannot exclude them and they are
   // counted whatever the scope.
-  return {
+  const result: OverlapResult = {
     overlaps,
     live,
     liveOpaqueCalls: opaque,
@@ -395,6 +395,17 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
     withinMinutes,
     eventsObserved: events.length,
   };
+
+  // Persist findings is best-effort: overlaps are still returned on failure.
+  if (options.ledgerPath && overlaps.length > 0) {
+    try {
+      persistFindings(options.ledgerPath, overlaps, identity.repositoryId);
+    } catch {
+      // Finding persistence is advisory; overlaps are the primary answer.
+    }
+  }
+
+  return result;
 }
 
 /**
