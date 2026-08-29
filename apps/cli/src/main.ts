@@ -63,7 +63,7 @@ export interface CliDependencies {
    * the command answers about the repository the user is standing in rather than about a
    * database path. Tests inject it; the binary derives it from the working directory.
    */
-  readonly worktreeRoot?: string;
+   readonly worktreeRoot?: string | null;
   /**
    * Reads overlapping work. Injected like the writers above so the CLI stays testable without
    * a real checkout and a real ledger on disk - `overlaps` is the one report that does not go
@@ -182,7 +182,11 @@ async function renderCommand(
   }
   if (parsed.command === "exit") {
     if (worktreeRoot === null) throw new ReadServiceError("usage", "exit must be run inside a git repository");
-    return renderExit(exitRepository({ worktreeRoot, yes: parsed.exitYes }), parsed.json);
+    if (!parsed.exitYes) {
+      const dryResult = exitRepository({ worktreeRoot, yes: false });
+      throw new ReadServiceError("usage", renderExit(dryResult, parsed.json));
+    }
+    return renderExit(exitRepository({ worktreeRoot, yes: true }), parsed.json);
   }
   if (parsed.command === "prune") {
     if (pruner === undefined) throw new ReadServiceError("unavailable", "prune requires a writable event store");
@@ -360,7 +364,7 @@ async function renderCommand(
 export async function runCli(argv: readonly string[], dependencies: CliDependencies): Promise<CliResult> {
   try {
     const parsed = parseArgs(argv);
-    const worktreeRoot = dependencies.worktreeRoot ?? findWorktreeRoot(process.cwd());
+    const worktreeRoot = dependencies.worktreeRoot !== undefined ? dependencies.worktreeRoot : findWorktreeRoot(process.cwd());
     // Handled before `renderCommand` because it is the one report whose exit code carries the
     // answer. Every other command exits 0 when it successfully reports bad news; a health check
     // that did the same could not be used to gate anything.
