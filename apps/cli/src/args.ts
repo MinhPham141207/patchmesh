@@ -1,7 +1,7 @@
 import type { DecisionDelivery, DecisionId, EventType, FindingId, FindingFeedback } from "patchmesh-protocol";
 import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters, type SendMailOptions } from "patchmesh-query";
 
-export type CommandName = "init" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "console" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "send" | "inbox" | "ack" | "help";
+export type CommandName = "init" | "exit" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "console" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "send" | "inbox" | "ack" | "help";
 
 export interface ParsedArgs {
   readonly command: CommandName;
@@ -38,6 +38,7 @@ export interface ParsedArgs {
    */
   readonly verify?: boolean;
   readonly init: { readonly hooks: boolean; readonly gitignore: boolean; readonly force: boolean; readonly host: string | null };
+  readonly exitYes: boolean;
   /** Retention cutoff for `prune`, in days. Null means the command was not asked for one. */
   readonly olderThanDays: number | null;
   readonly feedback: {
@@ -74,7 +75,7 @@ export interface ParsedArgs {
   } | null;
 }
 
-export const commands = new Set<CommandName>(["init", "doctor", "prune", "status", "recap", "agents", "events", "console", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "send", "inbox", "ack", "help"]);
+export const commands = new Set<CommandName>(["init", "exit", "doctor", "prune", "status", "recap", "agents", "events", "console", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "send", "inbox", "ack", "help"]);
 const eventTypes = new Set<EventType>([
   "tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read",
   "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected",
@@ -92,6 +93,7 @@ export function usageText(): string {
     "Setup:",
     "  init                       Wire PatchMesh into this repository (--force, --no-hooks,",
     "                             --no-gitignore, --host opencode)",
+    "  exit --yes                 Remove PatchMesh from this repository (reverses init)",
     "  doctor                     Check that recording is actually working here",
     "",
     "  prune --older-than <days> Delete events past a retention cutoff, keeping replay intact",
@@ -184,6 +186,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       recapMetrics: false,
       olderThanDays: null,
       init: { hooks: true, gitignore: true, force: false, host: null },
+      exitYes: false,
       json: false,
       raw: false,
       follow: false,
@@ -240,6 +243,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let includeDelivered = false;
   let ackMessageId: string | null = null;  let ackDisposition: "accepted" | "declined" | null = null;
   let ackNote: string | null = null;
+  let exitYes = false;
 
   for (let index = 1; index < argv.length; index += 1) {
     const option = argv[index];
@@ -358,6 +362,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     }
     if (option === "--note" && command === "ack") { ackNote = value(argv, index, option); index += 1; continue; }
     if (option === "--include-delivered" && command === "inbox") { includeDelivered = true; continue; }
+    if (option === "--yes" && command === "exit") { exitYes = true; continue; }
     if (option === "--type" && command === "events") {
       const type = value(argv, index, option);
       if (!eventTypes.has(type as EventType)) throw new ReadServiceError("usage", `unknown event type: ${type}`);
@@ -453,6 +458,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       ...(resourceId === undefined ? {} : { resourceId }),
     },
     decisionId,
+    exitYes,
     feedback: command === "feedback" ? {
       findingId: findingId!,
       decisionId: feedbackDecisionId,
