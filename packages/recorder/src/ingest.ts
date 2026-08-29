@@ -8,10 +8,9 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import type { TaskId } from "patchmesh-protocol";
-import { SqliteEventStore } from "patchmesh-storage";
+import { canonicalDigest, SqliteEventStore } from "patchmesh-storage";
 import type { AgentId } from "patchmesh-protocol";
 import { observationRequestId, observeTurnEffects, type EffectAttributionCall } from "./effects.js";
 import { buildHookEvents, declaredLogicalPath, type HookPayload } from "./hook.js";
@@ -205,7 +204,7 @@ export function backfillAttribution(ledgerPath: string): void {
         const event = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
         event.taskId = task;
         const patched = JSON.stringify(event);
-        const digest = createHash("sha256").update(patched).digest("hex");
+        const digest = canonicalDigest(event);
         updateBlob.run(patched, digest, row.event_id);
       }
     }
