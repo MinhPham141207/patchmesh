@@ -377,6 +377,34 @@ function checkLedger(worktreeRoot: string, ledgerPath: string, shared: boolean, 
   };
 }
 
+function checkAttribution(ledgerPath: string): DoctorCheck {
+  if (!existsSync(ledgerPath)) {
+    return { name: "attribution", status: "warn", detail: "no ledger \u2014 attribution unknown" };
+  }
+  try {
+    const store = SqliteEventStore.open(ledgerPath);
+    try {
+      const total = store.count();
+      if (total === 0) {
+        return { name: "attribution", status: "ok", detail: "0 events \u2014 nothing to attribute" };
+      }
+      const attributed = store.handle.prepare(
+        "SELECT COUNT(*) as n FROM events WHERE task_id IS NOT NULL",
+      ).get() as { n: number };
+      const rate = Math.round((attributed.n / total) * 100);
+      return {
+        name: "attribution",
+        status: rate >= 80 ? "ok" : "warn",
+        detail: `${rate}% of events carry a task (${attributed.n}/${total})`,
+      };
+    } finally {
+      store.close();
+    }
+  } catch {
+    return { name: "attribution", status: "warn", detail: "could not read ledger" };
+  }
+}
+
 /**
  * Replay the whole ledger and validate every event, which is the one check that can say the
  * history itself is intact rather than merely present.
@@ -488,6 +516,7 @@ export function diagnose(options: DoctorOptions): DoctorReport {
   checks.push(checkGitignore(worktreeRoot, ledgerRoot));
   const ledgerPath = ledgerPathFor(worktreeRoot);
   checks.push(checkLedger(worktreeRoot, ledgerPath, shared, options.largeLedgerBytes ?? LEDGER_LARGE_BYTES));
+  checks.push(checkAttribution(ledgerPath));
   // Only when the ledger-existence check above had something to look at: replaying a file
   // that is not there would create one, and this command never creates what it diagnoses.
   if (existsSync(ledgerPath)) checks.push(replayCheck(ledgerPath));
