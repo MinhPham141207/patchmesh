@@ -282,6 +282,10 @@ function soleCallCovering(
   return found;
 }
 
+/**
+ * Tests whether `childId` is a descendant of `parentId` in the agent ID hierarchy.
+ * Child IDs follow the pattern `parent.sub.<N>` — a dot-separated suffix indicates nesting.
+ */
 function isDescendant(childId: string, parentId: string): boolean {
   return childId.startsWith(`${parentId}.`);
 }
