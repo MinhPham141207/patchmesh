@@ -30,6 +30,7 @@ import { renderConsoleBanner, renderGraphServerBanner, startGraphServer, type Gr
 import { collapseEvents } from "./console-model.js";
 import { diagnose, renderDoctor } from "./doctor.js";
 import { initializeRepository, renderInit } from "./init.js";
+import { exitRepository, renderExit } from "./exit.js";
 import {
   renderAckResponse,
   renderAgents,
@@ -178,6 +179,10 @@ async function renderCommand(
       }),
       parsed.json,
     );
+  }
+  if (parsed.command === "exit") {
+    if (worktreeRoot === null) throw new ReadServiceError("usage", "exit must be run inside a git repository");
+    return renderExit(exitRepository({ worktreeRoot, yes: parsed.exitYes }), parsed.json);
   }
   if (parsed.command === "prune") {
     if (pruner === undefined) throw new ReadServiceError("unavailable", "prune requires a writable event store");
@@ -433,7 +438,7 @@ function needsNoStore(argv: readonly string[]): boolean {
   // either. Resolving a database first meant `patchmesh frobnicate` outside a repository
   // complained about the missing repository instead of about the typo the user made.
   if (command === undefined || !commands.has(command as CommandName)) return true;
-  return command === "init" || command === "doctor" || command === "help";
+  return command === "init" || command === "exit" || command === "doctor" || command === "help";
 }
 
 /**
