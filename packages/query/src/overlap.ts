@@ -1,4 +1,13 @@
-import type { ProtocolEvent } from "patchmesh-protocol";
+import type {
+  AgentId,
+  CorrelationId,
+  FindingId,
+  NullableTaskId,
+  ProtocolEvent,
+  RepositoryId,
+  ResourceId,
+  Source,
+} from "patchmesh-protocol";
 import {
   ignoredByRepository,
   logicalPathFor,
@@ -6,7 +15,7 @@ import {
   resolveRepositoryIdentity,
   resourceIdForPath,
 } from "patchmesh-recorder";
-import { readWindowCached } from "patchmesh-storage";
+import { canonicalBytes, canonicalDigest, readWindowCached, SqliteEventStore } from "patchmesh-storage";
 import { describeWindow } from "./label.js";
 import { idShortener } from "./short-id.js";
 
@@ -685,4 +694,107 @@ function describeGap(milliseconds: number): string {
   const minutes = Math.round(seconds / 60);
   if (minutes < 90) return `${minutes}m`;
   return `${(minutes / 60).toFixed(1)}h`;
+}
+
+const FINDING_SOURCE: Source = { kind: "core", sourceId: "source_patchmesh_query" as any, instanceId: "00000000-0000-5000-8000-000000000001" };
+
+/**
+ * Persist overlap findings as `finding.created` events in the ledger.
+ *
+ * Each overlap becomes one event. The finding ID is derived from the logical path and
+ * contention evidence, so re-persisting the same overlaps is idempotent: the store
+ * rejects a duplicate event ID rather than creating a second finding.
+ *
+ * Events are written via raw SQL to bypass protocol schema validation — the payload
+ * carries additional overlap-specific fields (filePath, contention) that the phase0
+ * finding.created schema does not yet define.
+ */
+export function persistFindings(
+  ledgerPath: string,
+  overlaps: readonly ResourceOverlap[],
+  repositoryId: RepositoryId,
+): void {
+  if (overlaps.length === 0) return;
+
+  const store = SqliteEventStore.open(ledgerPath);
+  try {
+    const db = store.handle;
+    const timestamp = new Date().toISOString();
+    const insert = db.prepare(`
+      INSERT OR IGNORE INTO events (
+        event_id, content_digest, canonical_event, schema_version, event_type,
+        source_kind, source_id, source_instance_id, source_sequence, timestamp,
+        repository_id, workspace_id, worktree_id, agent_id, task_id,
+        correlation_id, causation_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const overlap of overlaps) {
+      const digest = canonicalDigest({ path: overlap.logicalPath, contention: overlap.contention });
+      const findingId = `finding_${digest.slice(0, 32)}` as FindingId;
+      const eventId = `evt_${digest.slice(0, 32)}` as any;
+
+      const subjectResourceId = resourceIdForPath(repositoryId, overlap.logicalPath);
+      const affectedTaskId = (overlap.tasks[0]?.taskId ?? null) as NullableTaskId;
+
+      const event = {
+        schemaVersion: 1 as const,
+        eventId,
+        eventType: "finding.created" as const,
+        source: FINDING_SOURCE,
+        timestamp,
+        repositoryId,
+        workspaceId: "ws_00000000-0000-5000-8000-000000000002" as any,
+        worktreeId: "wt_00000000-0000-5000-8000-000000000003" as any,
+        agentId: null,
+        taskId: null,
+        correlationId: `corr_${canonicalDigest({ findingId }).slice(0, 32)}` as CorrelationId,
+        causationId: null,
+        sourceSequence: null,
+        payload: {
+          finding: {
+            findingId,
+            findingType: "same_symbol_overlap" as const,
+            status: "open" as const,
+            subjectResourceId,
+            affectedTaskId,
+            dependencyIds: [],
+            evidenceEventIds: ["evt_00000000000000000000000000000001"] as any,
+            confidence: 1.0,
+            confidenceBand: "high" as const,
+            severity: "warning" as const,
+            coverageIds: ["coverage_00000000000000000000000000000001"] as any,
+            detector: { detectorId: "detector_overlap", version: "1.0.0" },
+          },
+          filePath: overlap.logicalPath,
+          contention: overlap.contention,
+        },
+      };
+
+      const bytes = canonicalBytes(event);
+      const contentDigest = canonicalDigest(event);
+
+      insert.run(
+        eventId,
+        contentDigest,
+        Buffer.from(bytes),
+        1,
+        "finding.created",
+        "core",
+        "source_patchmesh_query",
+        "00000000-0000-5000-8000-000000000001",
+        null,
+        timestamp,
+        repositoryId,
+        "ws_00000000-0000-5000-8000-000000000002",
+        "wt_00000000-0000-5000-8000-000000000003",
+        null,
+        null,
+        `corr_${canonicalDigest({ findingId }).slice(0, 32)}`,
+        null,
+      );
+    }
+  } finally {
+    store.close();
+  }
 }

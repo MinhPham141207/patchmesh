@@ -22,7 +22,7 @@ export {
   type SourceSequenceGap,
   type StatusView,
 } from "./types.js";
-export { findOverlappingWork, renderOverlap } from "./overlap.js";
+export { findOverlappingWork, persistFindings, renderOverlap } from "./overlap.js";
 // The contention rule alone, so a labeled corpus can score it without opening a store.
 // See `tools/phase2/overlap-corpus.ts`.
 export {
