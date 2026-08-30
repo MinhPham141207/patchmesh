@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 **Status:** Proposed
-**Success criterion:** A `task.completed` event is appended to the ledger for every turn that closes, carrying the task identity and the files it changed. `pnpm check` green.
+**Success criterion:** A `task.completed` event is appended to the ledger for every turn that closes *with ≥1 file.changed*, carrying the task identity and the files it changed. `pnpm check` green. Turns with no file changes produce no event (schema requires `resourceIds` minItems 1).
 **Hard boundary:** warn, never block.
 
 ---
@@ -43,7 +43,8 @@ The event is appended to the store before the store closes, in the same transact
 ### When NOT to emit
 
 - **No closed turn** (`closedTurn` is null): multiple sessions were active, or no marker was seen. No completion event — we cannot name whose turn it was.
-- **Null taskId**: the turn had no task. We still emit — the event carries agentId and resourceIds, making it useful for attribution even without a task name. The `taskId` field on the event is nullable.
+- **No file.changed in the turn** (`resourceIds` would be empty): schema requires `resourceIds` minItems 1, so no event is emitted. A turn that changed no files has nothing to complete.
+- **Null taskId**: the turn had no task and no file.changed to query (resourceIds is taskId-scoped). No event is emitted in the current implementation because the lookup is `WHERE task_id = ?` with a null taskId yielding an empty result. Agent-only attribution would require a different lookup key (e.g., agentId or correlationId) — deferred.
 
 ### Multi-session drains
 
@@ -90,9 +91,9 @@ None. `task.completed` and `TaskCompletedPayload` are already defined in the pro
 
 ## Error handling
 
-- **Git unavailable or fails** → `baseRevision` is set to `"unknown"`. The event still carries taskId and resourceIds, which are the useful parts.
+- **Git unavailable or fails** → `baseRevision` falls back to `"0000000000000000000000000000000000000000"` (40 zero hex chars). `"unknown"` would fail schema pattern `^[0-9a-f]{40}([0-9a-f]{24})?$`. The fallback is schema-compliant and still signals degradation.
 - **Store append fails** → same as any other event: the turn state is already written, the calls are already recorded. One missing completion event does not lose data.
-- **No file.changed events in the turn** → `resourceIds` is an empty array. The event still fires — a task that changed nothing is still completed.
+- **No file.changed events in the turn** → `resourceIds` would be empty, violating schema `minItems: 1`. No event is emitted — a turn that changed nothing has no work product to complete.
 
 ---
 

@@ -289,8 +289,10 @@ export function emitTaskCompleted(options: EmitTaskCompletedOptions): void {
       })
       .filter((id): id is string => typeof id === "string" && id.length > 0);
 
-    // Schema requires at least one resourceId; a turn with no file changes has nothing to complete.
+    // Schema requires at least one resourceId (minItems 1); a turn with no file changes has nothing to complete.
     if (resourceIds.length === 0) return;
+    // Dedupe: same file changed multiple times in one turn would violate uniqueItems.
+    const uniqueResourceIds = [...new Set(resourceIds)];
 
     let correlationId = createCorrelationId();
     if (turn.taskId !== null) {
@@ -329,7 +331,7 @@ export function emitTaskCompleted(options: EmitTaskCompletedOptions): void {
         workProductId,
         baseRevision,
         targetSnapshotId,
-        resourceIds,
+        resourceIds: uniqueResourceIds,
       },
     };
 
