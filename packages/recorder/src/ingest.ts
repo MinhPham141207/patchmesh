@@ -289,8 +289,11 @@ export function emitTaskCompleted(options: EmitTaskCompletedOptions): void {
       })
       .filter((id): id is string => typeof id === "string" && id.length > 0);
 
+    // Schema requires at least one resourceId; a turn with no file changes has nothing to complete.
+    if (resourceIds.length === 0) return;
+
     let correlationId = createCorrelationId();
-    if (turn.taskId !== null && resourceIds.length > 0) {
+    if (turn.taskId !== null) {
       const row = store.handle.prepare(`
         SELECT correlation_id FROM events
         WHERE event_type = 'file.changed' AND task_id = ?
