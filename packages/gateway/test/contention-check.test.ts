@@ -1,190 +1,100 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
-import { appendJournalEntry, journalPathFor, readInFlightCalls } from "patchmesh-recorder";
+import type { InFlightCall } from "patchmesh-recorder";
+import { filterContentionCalls, renderContentionCheck } from "../src/index.js";
 
-const OTHER_SESSION = "7a1033a6-93c4-46e2-a83c-c471f26765c2";
-const OWN_SESSION = "3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17";
-const OTHER_AGENT = "agent_7a1033a6-93c4-46e2-a83c-c471f26765c2";
-const OWN_AGENT = "agent_3f1b9a0c-7d2e-4a55-9c31-8b6f0e2d4a17";
-
-function tmpDir(): string {
-  const root = mkdtempSync(join(tmpdir(), "patchmesh-contention-check-"));
-  mkdirSync(join(root, ".patchmesh"));
-  mkdirSync(join(root, ".git"));
-  return root;
+function call(overrides: Partial<InFlightCall> = {}): InFlightCall {
+  return {
+    at: "2026-08-31T11:59:50.000Z",
+    agentId: "agent_7a1033a6-93c4-46e2-a83c-c471f26765c2",
+    hostToolName: "Edit",
+    operation: null,
+    filePath: "src/auth.ts",
+    runningForMs: 10_000,
+    ...overrides,
+  };
 }
 
-const NOW = () => new Date("2026-08-31T12:00:00.000Z");
+// --- filterContentionCalls ---
 
-test("readInFlightCalls returns in-flight calls from other agents", () => {
-  const root = tmpDir();
-  try {
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_other_1",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/auth.ts" },
-    }, "2026-08-31T11:59:50.000Z");
-
-    const inFlight = readInFlightCalls({ worktreeRoot: root, now: NOW });
-    assert.equal(inFlight.length, 1);
-    assert.equal(inFlight[0]!.filePath, "src/auth.ts");
-    assert.equal(inFlight[0]!.hostToolName, "Edit");
-    assert.ok(inFlight[0]!.runningForMs > 0);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("filterContentionCalls matches by filePath", () => {
+  const calls = [
+    call({ filePath: "src/auth.ts" }),
+    call({ filePath: "src/clean.ts" }),
+  ];
+  assert.equal(filterContentionCalls(calls, "src/auth.ts").length, 1);
+  assert.equal(filterContentionCalls(calls, "src/auth.ts")[0]!.filePath, "src/auth.ts");
 });
 
-test("readInFlightCalls returns empty for a path with no activity", () => {
-  const root = tmpDir();
-  try {
-    const inFlight = readInFlightCalls({ worktreeRoot: root, now: NOW });
-    assert.equal(inFlight.length, 0);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("filterContentionCalls matches by operation when filePath is null", () => {
+  const calls = [
+    call({ operation: "pnpm check", filePath: null }),
+    call({ operation: "git status", filePath: null }),
+  ];
+  assert.equal(filterContentionCalls(calls, "pnpm check").length, 1);
+  assert.equal(filterContentionCalls(calls, "pnpm check")[0]!.operation, "pnpm check");
 });
 
-test("readInFlightCalls excludes own agent's calls when excludeAgentId is set", () => {
-  const root = tmpDir();
-  try {
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OWN_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_own_1",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/self.ts" },
-    }, "2026-08-31T11:59:50.000Z");
-
-    const all = readInFlightCalls({ worktreeRoot: root, now: NOW });
-    assert.equal(all.length, 1, "own call is visible without excludeAgentId");
-
-    const filtered = readInFlightCalls({ worktreeRoot: root, now: NOW, excludeAgentId: OWN_AGENT });
-    assert.equal(filtered.length, 0, "own call is excluded with excludeAgentId");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("filterContentionCalls returns empty for no match", () => {
+  const calls = [call({ filePath: "src/auth.ts" })];
+  assert.equal(filterContentionCalls(calls, "src/missing.ts").length, 0);
 });
 
-test("readInFlightCalls matches by operation (command) when file_path is absent", () => {
-  const root = tmpDir();
-  try {
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_cmd_1",
-      tool_name: "Bash",
-      tool_input: { command: "pnpm check" },
-    }, "2026-08-31T11:59:50.000Z");
-
-    const inFlight = readInFlightCalls({ worktreeRoot: root, now: NOW });
-    assert.equal(inFlight.length, 1);
-    assert.equal(inFlight[0]!.operation, "pnpm check");
-    assert.equal(inFlight[0]!.filePath, null, "Bash commands have no filePath");
-    assert.equal(inFlight[0]!.hostToolName, "Bash");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("filterContentionCalls matches operation when filePath is set but does not match path", () => {
+  const calls = [
+    call({ filePath: "src/other.ts", operation: "Edit src/other.ts" }),
+  ];
+  assert.equal(filterContentionCalls(calls, "Edit src/other.ts").length, 1);
 });
 
-test("readInFlightCalls excludes abandoned calls after 15 minutes", () => {
-  const root = tmpDir();
-  try {
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_old_1",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/stale.ts" },
-    }, "2026-08-31T11:40:00.000Z");
-
-    const inFlight = readInFlightCalls({ worktreeRoot: root, now: NOW });
-    assert.equal(inFlight.length, 0, "calls older than 15 minutes are abandoned");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("filterContentionCalls matches operation when filePath does not match path", () => {
+  const calls = [
+    call({ filePath: "src/other.ts", operation: "pnpm check" }),
+  ];
+  assert.equal(filterContentionCalls(calls, "pnpm check").length, 1);
 });
 
-test("readInFlightCalls excludes finished calls (PreToolUse + PostToolUse)", () => {
-  const root = tmpDir();
-  try {
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_done_1",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/done.ts" },
-    }, "2026-08-31T11:59:50.000Z");
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PostToolUse",
-      tool_use_id: "call_done_1",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/done.ts" },
-    }, "2026-08-31T11:59:55.000Z");
-
-    const inFlight = readInFlightCalls({ worktreeRoot: root, now: NOW });
-    assert.equal(inFlight.length, 0, "finished calls are not in-flight");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("filterContentionCalls handles empty list", () => {
+  assert.equal(filterContentionCalls([], "src/any.ts").length, 0);
 });
 
-test("readInFlightCalls sorts by longest-running first", () => {
-  const root = tmpDir();
-  try {
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_short",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/short.ts" },
-    }, "2026-08-31T11:59:55.000Z");
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_long",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/long.ts" },
-    }, "2026-08-31T11:59:30.000Z");
+// --- renderContentionCheck ---
 
-    const inFlight = readInFlightCalls({ worktreeRoot: root, now: NOW });
-    assert.equal(inFlight.length, 2);
-    assert.equal(inFlight[0]!.filePath, "src/long.ts", "longest-running comes first");
-    assert.equal(inFlight[1]!.filePath, "src/short.ts");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("renderContentionCheck returns 'No agents' message when empty", () => {
+  const text = renderContentionCheck([], "src/clean.ts");
+  assert.equal(text, "No agents currently modifying `src/clean.ts`.");
 });
 
-test("readInFlightCalls filters by path when tool_input has file_path", () => {
-  const root = tmpDir();
-  try {
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_a",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/auth.ts" },
-    }, "2026-08-31T11:59:50.000Z");
-    appendJournalEntry(journalPathFor(root, ".patchmesh"), {
-      session_id: OTHER_SESSION,
-      hook_event_name: "PreToolUse",
-      tool_use_id: "call_b",
-      tool_name: "Edit",
-      tool_input: { file_path: "src/clean.ts" },
-    }, "2026-08-31T11:59:50.000Z");
+test("renderContentionCheck formats a single contention call", () => {
+  const calls = [call({ agentId: "agent_abc", hostToolName: "Edit", runningForMs: 30_000 })];
+  const text = renderContentionCheck(calls, "src/auth.ts");
+  assert.ok(text.includes("agent_abc"), `expected agent id: ${text}`);
+  assert.ok(text.includes("Edit"), `expected tool name: ${text}`);
+  assert.ok(text.includes("30s"), `expected seconds: ${text}`);
+  assert.ok(text.includes("src/auth.ts"), `expected path: ${text}`);
+  assert.ok(text.includes("still running"), `expected running indicator: ${text}`);
+});
 
-    const inFlight = readInFlightCalls({ worktreeRoot: root, now: NOW });
-    const authCalls = inFlight.filter((c) => c.filePath === "src/auth.ts");
-    assert.equal(authCalls.length, 1, "only src/auth.ts matches");
-    assert.equal(authCalls[0]!.filePath, "src/auth.ts");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("renderContentionCheck formats multiple contention calls", () => {
+  const calls = [
+    call({ agentId: "agent_a", hostToolName: "Edit", runningForMs: 10_000 }),
+    call({ agentId: "agent_b", hostToolName: "Bash", runningForMs: 5_000 }),
+  ];
+  const text = renderContentionCheck(calls, "src/file.ts");
+  const lines = text.split("\n");
+  assert.equal(lines.length, 2);
+  assert.ok(lines[0]!.includes("agent_a"));
+  assert.ok(lines[1]!.includes("agent_b"));
+});
+
+test("renderContentionCheck uses 'unidentified agent' when agentId is null", () => {
+  const calls = [call({ agentId: null })];
+  const text = renderContentionCheck(calls, "src/auth.ts");
+  assert.ok(text.includes("unidentified agent"), `expected fallback: ${text}`);
+});
+
+test("renderContentionCheck rounds sub-second calls to 0s", () => {
+  const calls = [call({ runningForMs: 499 })];
+  const text = renderContentionCheck(calls, "src/auth.ts");
+  assert.ok(text.includes("0s"), `expected 0s: ${text}`);
 });

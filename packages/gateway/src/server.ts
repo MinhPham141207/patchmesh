@@ -521,8 +521,8 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       title: "Check file contention",
       description:
         "**Call this before editing a file to check if another agent is currently modifying it.** " +
-        "Returns in-flight calls from other agents touching the same path, plus recent completed " +
-        "writes. This is the voluntary version of the automatic hook-based warning: use it when " +
+        "Returns in-flight calls from other agents touching the same path. " +
+        "This is the voluntary version of the automatic hook-based warning: use it when " +
         "you want to check before the hook fires, or for paths not covered by Edit/Write hooks.",
       inputSchema: {
         path: z.string().describe("Repository-relative or absolute file path to check."),
@@ -539,18 +539,7 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
           worktreeRoot: options.worktreeRoot,
           excludeAgentId,
         });
-        const contentions = inFlight.filter(
-          (call) => call.filePath === path || call.operation === path,
-        );
-        const text = contentions.length === 0
-          ? `No agents currently modifying \`${path}\`.`
-          : contentions
-              .map((c) => {
-                const agent = c.agentId ?? "unidentified agent";
-                const seconds = Math.max(Math.round(c.runningForMs / 1000), 0);
-                return `- ${agent}: ${c.hostToolName} on \`${path}\` (${seconds}s ago, still running)`;
-              })
-              .join("\n");
+        const text = renderContentionCheck(filterContentionCalls(inFlight, path), path);
         return { content: [{ type: "text" as const, text }] };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "unknown failure";
@@ -599,4 +588,37 @@ function renderInbox(
     return lines.join("\n");
   });
   return [header, ...blocks].join("\n\n");
+}
+
+/**
+ * Filter in-flight calls to those matching the given path, by `filePath` or `operation`.
+ *
+ * Extracted so the filtering logic is testable independently of the MCP handler and heavy
+ * module loading.
+ */
+export function filterContentionCalls(
+  inFlight: readonly import("patchmesh-recorder").InFlightCall[],
+  path: string,
+): readonly import("patchmesh-recorder").InFlightCall[] {
+  return inFlight.filter((call) => call.filePath === path || call.operation === path);
+}
+
+/**
+ * Render filtered contention calls into the tool's text response.
+ *
+ * Returns "No agents currently modifying ..." when the list is empty, or a bullet list of
+ * matching calls with agent, tool, and runtime.
+ */
+export function renderContentionCheck(
+  contentions: readonly import("patchmesh-recorder").InFlightCall[],
+  path: string,
+): string {
+  if (contentions.length === 0) return `No agents currently modifying \`${path}\`.`;
+  return contentions
+    .map((c) => {
+      const agent = c.agentId ?? "unidentified agent";
+      const seconds = Math.max(Math.round(c.runningForMs / 1000), 0);
+      return `- ${agent}: ${c.hostToolName} on \`${path}\` (${seconds}s ago, still running)`;
+    })
+    .join("\n");
 }
