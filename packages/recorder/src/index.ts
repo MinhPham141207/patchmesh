@@ -73,3 +73,5 @@ export type { InFlightCall, ReadInFlightOptions } from "./inflight.js";
 export { computeContentionAdvisory, computePostWriteAdvisory, computeTurnStartAdvisory } from "./advisory.js";
 export type { ComputeAdvisoryOptions, ContentionAdvisory, TurnStartAdvisory } from "./advisory.js";
 export { main as codexRelayMain, translateCodexPayload } from "./codex-relay.js";
+export { writePendingAdvisory, readAndDeletePendingAdvisory, cleanupPendingAdvisories, PENDING_DIR } from "./sidecar.js";
+export type { PendingAdvisory } from "./sidecar.js";
