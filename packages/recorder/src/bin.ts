@@ -12,12 +12,14 @@ import { appendJournalEntry, journalPathFor } from "./journal.js";
 import { redactHookPayload } from "./redact.js";
 import { advanceWatermark } from "./recent-writes.js";
 import { claudeCodeAdapter, isKnownHost, opencodeAdapter, translateOpencodeRecord } from "./hosts/index.js";
+import { writePendingAdvisory, readAndDeletePendingAdvisory, cleanupPendingAdvisories, PENDING_DIR } from "./sidecar.js";
 
 /**
  * Hook entry point, on the agent's critical path.
  *
- * It imports only `./advisory.js`, `./identity.js`, `./journal.js`, `./redact.js`, and
- * `./hosts/index.js`, none of which pull anything beyond Node builtins and each other.
+ * It imports only `./advisory.js`, `./identity.js`, `./journal.js`, `./redact.js`,
+ * `./hosts/index.js`, and `./sidecar.js`, none of which pull anything beyond Node builtins
+ * and each other.
  * Importing `patchmesh-protocol` or `patchmesh-storage` here would add roughly 400ms of Ajv
  * import and schema compilation to every single tool call; that work belongs in
  * `patchmesh-ingest`, which pays it once. Keep this module's import graph flat.
@@ -107,6 +109,18 @@ export function emitAdvisory(
         },
       })}\n`,
     );
+    // Write sidecar so PostToolUse can inject the same finding into additionalContext
+    const toolUseId = payload["tool_use_id"];
+    if (typeof toolUseId === "string" && toolUseId !== "") {
+      const pendingDir = join(worktreeRoot, ".patchmesh", PENDING_DIR);
+      writePendingAdvisory(pendingDir, toolUseId, {
+        path: advisory.path,
+        agentId: advisory.agentId,
+        hostToolName: advisory.hostToolName,
+        runningForMs: advisory.runningForMs,
+        detectedAt: new Date().toISOString(),
+      });
+    }
     advanceDeliveredFact(advisory);
   } catch (error) {
     debug(error instanceof Error ? `advisory failed: ${error.message}` : "unknown advisory failure");
@@ -147,18 +161,52 @@ export function emitPostWriteAdvisory(
   compute: typeof computePostWriteAdvisory = computePostWriteAdvisory,
 ): void {
   try {
+    // First: emit the standard PostToolUse advisory (existing behavior)
     const advisory = compute({ worktreeRoot, payload });
-    if (advisory === null) return;
-    debug(`post-write contention: ${advisory.message}`);
-    process.stdout.write(
-      `${JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext: advisory.message,
-        },
-      })}\n`,
-    );
-    advanceDeliveredFact(advisory);
+    if (advisory !== null) {
+      debug(`post-write contention: ${advisory.message}`);
+      process.stdout.write(
+        `${JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "PostToolUse",
+            additionalContext: advisory.message,
+          },
+        })}\n`,
+      );
+      advanceDeliveredFact(advisory);
+      return;
+    }
+
+    // Second: check if PreToolUse wrote a sidecar for this call
+    // Only on PostToolUse — on PreToolUse both emitAdvisory and emitPostWriteAdvisory run in
+    // the same invocation, so reading the sidecar here would consume it before PostToolUse fires.
+    const hookEventName = isRecord(payload) && typeof payload["hook_event_name"] === "string"
+      ? payload["hook_event_name"]
+      : null;
+    if (hookEventName === "PostToolUse") {
+      const toolUseId = payload["tool_use_id"];
+      if (typeof toolUseId === "string" && toolUseId !== "") {
+        const pendingDir = join(worktreeRoot, ".patchmesh", PENDING_DIR);
+        const pending = readAndDeletePendingAdvisory(pendingDir, toolUseId);
+        if (pending !== null) {
+          const agentLabel = pending.agentId ?? "an unidentified agent";
+          const seconds = Math.max(Math.round(pending.runningForMs / 1000), 0);
+          const message =
+            `${agentLabel} has a call in flight (${pending.hostToolName}) that started touching \`${pending.path}\` `
+            + `${seconds}s ago and has not finished. You just wrote \`${pending.path}\` too. `
+            + `Same file does not mean same work.`;
+          debug(`sidecar-derived contention: ${message}`);
+          process.stdout.write(
+            `${JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "PostToolUse",
+                additionalContext: message,
+              },
+            })}\n`,
+          );
+        }
+      }
+    }
   } catch (error) {
     debug(error instanceof Error ? `post-write advisory failed: ${error.message}` : "unknown post-write advisory failure");
   }
@@ -197,6 +245,15 @@ export function emitTurnStartAdvisory(
     advanceDeliveredFact(advisory);
   } catch (error) {
     debug(error instanceof Error ? `turn-start advisory failed: ${error.message}` : "unknown turn-start advisory failure");
+  }
+}
+
+function emitSessionEndCleanup(worktreeRoot: string): void {
+  try {
+    const pendingDir = join(worktreeRoot, ".patchmesh", PENDING_DIR);
+    cleanupPendingAdvisories(pendingDir);
+  } catch {
+    // Best-effort cleanup. Never block session end.
   }
 }
 
@@ -270,6 +327,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     emitAdvisory(worktreeRoot, safe);
     emitPostWriteAdvisory(worktreeRoot, safe);
     emitTurnStartAdvisory(worktreeRoot, safe);
+    if (isRecord(payload) && payload["hook_event_name"] === "SessionEnd") {
+      emitSessionEndCleanup(worktreeRoot);
+    }
     return 0;
   } catch (error) {
     debug(error instanceof Error ? error.message : "unknown recording failure");
