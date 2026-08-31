@@ -87,6 +87,9 @@ let heavy:
       readonly acknowledgeMessage: (
         options: AcknowledgeMessageOptions,
       ) => { readonly ok: boolean; readonly reason?: string };
+      readonly readInFlightCalls: (
+        options: import("patchmesh-recorder").ReadInFlightOptions,
+      ) => readonly import("patchmesh-recorder").InFlightCall[];
     }>
   | undefined;
 
@@ -117,6 +120,7 @@ function loadHeavy(): NonNullable<typeof heavy> {
     renderUntrustedMessage: mailboxInject.renderUntrustedMessage,
     recordMailboxMarkFailure: mailboxInject.recordMailboxMarkFailure,
     acknowledgeMessage: query.acknowledgeMessage,
+    readInFlightCalls: recorder.readInFlightCalls,
   }));
   return heavy;
 }
@@ -507,6 +511,50 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
         };
       } catch (error) {
         return errorResult(`Acknowledgement failed: ${failureReason(error)}`);
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_contention_check",
+    {
+      title: "Check file contention",
+      description:
+        "**Call this before editing a file to check if another agent is currently modifying it.** " +
+        "Returns in-flight calls from other agents touching the same path, plus recent completed " +
+        "writes. This is the voluntary version of the automatic hook-based warning: use it when " +
+        "you want to check before the hook fires, or for paths not covered by Edit/Write hooks.",
+      inputSchema: {
+        path: z.string().describe("Repository-relative or absolute file path to check."),
+        excludeAgentId: z
+          .string()
+          .optional()
+          .describe("Omit this agent's own calls, so a caller does not see itself as contention."),
+      },
+    },
+    async ({ path, excludeAgentId }) => {
+      try {
+        const modules = await loadHeavy();
+        const inFlight = modules.readInFlightCalls({
+          worktreeRoot: options.worktreeRoot,
+          excludeAgentId,
+        });
+        const contentions = inFlight.filter(
+          (call) => call.filePath === path || call.operation === path,
+        );
+        const text = contentions.length === 0
+          ? `No agents currently modifying \`${path}\`.`
+          : contentions
+              .map((c) => {
+                const agent = c.agentId ?? "unidentified agent";
+                const seconds = Math.max(Math.round(c.runningForMs / 1000), 0);
+                return `- ${agent}: ${c.hostToolName} on \`${path}\` (${seconds}s ago, still running)`;
+              })
+              .join("\n");
+        return { content: [{ type: "text" as const, text }] };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "unknown failure";
+        return { content: [{ type: "text" as const, text: `No PatchMesh data available (${reason}).` }] };
       }
     },
   );
