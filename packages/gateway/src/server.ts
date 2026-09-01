@@ -90,6 +90,12 @@ let heavy:
       readonly readInFlightCalls: (
         options: import("patchmesh-recorder").ReadInFlightOptions,
       ) => readonly import("patchmesh-recorder").InFlightCall[];
+      readonly claimFile: (options: import("patchmesh-recorder").ClaimOptions) => import("patchmesh-recorder").Claim;
+      readonly releaseClaims: (options: import("patchmesh-recorder").ReleaseClaimsOptions) => void;
+      readonly readActiveClaims: (options: import("patchmesh-recorder").ReadClaimsOptions) => readonly import("patchmesh-recorder").Claim[];
+      readonly checkContention: (options: import("patchmesh-recorder").ContentionCheckOptions) => import("patchmesh-recorder").ContentionResult;
+      readonly readRetryState: (options: import("patchmesh-recorder").RetryOptions) => import("patchmesh-recorder").RetryState | null;
+      readonly cleanupExpiredClaims: (options: import("patchmesh-recorder").ReadClaimsOptions) => number;
     }>
   | undefined;
 
@@ -121,6 +127,12 @@ function loadHeavy(): NonNullable<typeof heavy> {
     recordMailboxMarkFailure: mailboxInject.recordMailboxMarkFailure,
     acknowledgeMessage: query.acknowledgeMessage,
     readInFlightCalls: recorder.readInFlightCalls,
+    claimFile: recorder.claimFile,
+    releaseClaims: recorder.releaseClaims,
+    readActiveClaims: recorder.readActiveClaims,
+    checkContention: recorder.checkContention,
+    readRetryState: recorder.readRetryState,
+    cleanupExpiredClaims: recorder.cleanupExpiredClaims,
   }));
   return heavy;
 }
@@ -225,7 +237,10 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
           withinMinutes,
           excludeAgentId,
         });
-        return { content: [{ type: "text" as const, text: modules.renderActiveWork(result) }] };
+        cleanupExpired(options.worktreeRoot);
+        const claims = modules.readActiveClaims({ worktreeRoot: options.worktreeRoot });
+        const text = renderActiveWorkWithClaims(result, claims, excludeAgentId, modules.renderActiveWork);
+        return { content: [{ type: "text" as const, text }] };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "unknown failure";
         return { content: [{ type: "text" as const, text: `No PatchMesh ledger available (${reason}).` }] };
@@ -548,6 +563,128 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
     },
   );
 
+  server.registerTool(
+    "patchmesh_claim",
+    {
+      title: "Claim files for editing",
+      description:
+        "**Call this before running Bash or long operations that will modify files.** " +
+        "Declares intent to edit files, persisting until released or TTL expires. " +
+        "Other agents see your claim via `patchmesh_resolve` or `patchmesh_active_work`. " +
+        "Default TTL is 5 minutes, max 30 minutes.",
+      inputSchema: {
+        paths: z
+          .array(z.string())
+          .min(1)
+          .describe("Repository-relative file paths to claim."),
+        ttl_seconds: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Time-to-live in seconds. Default 300, max 1800."),
+        from: z
+          .string()
+          .describe("Your agent id as the session-start context named it."),
+      },
+    },
+    async ({ paths, ttl_seconds, from }) => {
+      try {
+        const modules = await loadHeavy();
+        cleanupExpired(options.worktreeRoot);
+        const claimOpts = ttl_seconds !== undefined
+          ? { worktreeRoot: options.worktreeRoot, agentId: from, paths, ttlSeconds: ttl_seconds }
+          : { worktreeRoot: options.worktreeRoot, agentId: from, paths };
+        const claim = modules.claimFile(claimOpts);
+        const ttl = Math.round((new Date(claim.expires).getTime() - Date.now()) / 1000);
+        const text = `Claimed ${paths.length} file(s) for agent ${from}. Expires in ${ttl}s.`;
+        return { content: [{ type: "text" as const, text }] };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "unknown failure";
+        return { content: [{ type: "text" as const, text: `Claim failed (${reason}).` }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_release",
+    {
+      title: "Release file claims",
+      description:
+        "Release claims on files you previously claimed. Releases all claims for the agent when " +
+        "no paths are specified.",
+      inputSchema: {
+        paths: z
+          .array(z.string())
+          .describe("Repository-relative file paths to release claims for. Omit to release all."),
+        from: z
+          .string()
+          .describe("Your agent id as the session-start context named it."),
+      },
+    },
+    async ({ paths, from }) => {
+      try {
+        const modules = await loadHeavy();
+        const resolvedPaths = paths.length > 0
+          ? paths
+          : (modules.readActiveClaims({ worktreeRoot: options.worktreeRoot })
+              .filter((c) => c.agentId === from)
+              .flatMap((c) => [...c.paths]));
+        if (resolvedPaths.length === 0) {
+          return { content: [{ type: "text" as const, text: "No active claims to release." }] };
+        }
+        modules.releaseClaims({
+          worktreeRoot: options.worktreeRoot,
+          agentId: from,
+          paths: resolvedPaths,
+        });
+        const text = `Released claims for ${resolvedPaths.length} file(s).`;
+        return { content: [{ type: "text" as const, text }] };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "unknown failure";
+        return { content: [{ type: "text" as const, text: `Release failed (${reason}).` }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_resolve",
+    {
+      title: "Resolve file contention",
+      description:
+        "**Call this when you encounter contention on a file.** Checks who has claims or in-flight " +
+        "calls on the file, whether line ranges overlap, retry count, and suggests an action. " +
+        "Returns a decision: proceed, wait, or redirect.",
+      inputSchema: {
+        path: z.string().describe("Repository-relative file path to resolve contention for."),
+        from: z
+          .string()
+          .describe("Your agent id as the session-start context named it."),
+      },
+    },
+    async ({ path, from }) => {
+      try {
+        const modules = await loadHeavy();
+        cleanupExpired(options.worktreeRoot);
+        const contention = modules.checkContention({
+          worktreeRoot: options.worktreeRoot,
+          path,
+          agentId: from,
+        });
+        const retry = modules.readRetryState({
+          worktreeRoot: options.worktreeRoot,
+          path,
+          agentId: from,
+        });
+        const text = renderContentionResolution(contention, retry, path, from);
+        return { content: [{ type: "text" as const, text }] };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "unknown failure";
+        return { content: [{ type: "text" as const, text: `Resolution check failed (${reason}).` }] };
+      }
+    },
+  );
+
   return server;
 }
 
@@ -621,4 +758,78 @@ export function renderContentionCheck(
       return `- ${agent}: ${c.hostToolName} on \`${path}\` (${seconds}s ago, still running)`;
     })
     .join("\n");
+}
+
+function cleanupExpired(
+  worktreeRoot: string,
+): void {
+  try {
+    heavy?.then((modules) => {
+      modules.cleanupExpiredClaims({ worktreeRoot });
+    });
+  } catch {
+    // best effort
+  }
+}
+
+function renderContentionResolution(
+  contention: import("patchmesh-recorder").ContentionResult,
+  retry: import("patchmesh-recorder").RetryState | null,
+  path: string,
+  agentId: string,
+): string {
+  if (!contention.hasContention) {
+    return `No contention on \`${path}\`. You may proceed.`;
+  }
+
+  const lines: string[] = [`Contention detected on \`${path}\`:`];
+
+  for (const claim of contention.claims) {
+    const ttl = Math.round((new Date(claim.expires).getTime() - Date.now()) / 1000);
+    lines.push(`- ${claim.agentId} has an active claim (${ttl}s remaining)`);
+  }
+
+  for (const call of contention.inFlight) {
+    const agent = call.agentId ?? "unidentified agent";
+    const seconds = Math.max(Math.round(call.runningForMs / 1000), 0);
+    lines.push(`- ${agent} has a call in flight: ${call.hostToolName} (${seconds}s ago)`);
+  }
+
+  const retryCount = retry?.retryCount ?? 0;
+  lines.push(`\nRetry count: ${retryCount}/3`);
+
+  if (retryCount >= 3) {
+    lines.push("Decision: PROCEED — retry limit reached (fail-open).");
+  } else if (contention.overlapping) {
+    const backoff = Math.pow(2, retryCount);
+    lines.push(`Decision: WAIT — overlapping claims. Wait ${backoff}s before retrying.`);
+  } else {
+    lines.push("Decision: PROCEED — no overlapping ranges detected.");
+  }
+
+  return lines.join("\n");
+}
+
+function renderActiveWorkWithClaims(
+  result: import("patchmesh-query").ActiveWork,
+  claims: readonly import("patchmesh-recorder").Claim[],
+  excludeAgentId: string | undefined,
+  renderFn: (result: import("patchmesh-query").ActiveWork) => string,
+): string {
+  const existing = renderFn(result);
+  const filteredClaims = excludeAgentId
+    ? claims.filter((c) => c.agentId !== excludeAgentId)
+    : claims;
+
+  if (filteredClaims.length === 0) {
+    return existing;
+  }
+
+  const claimLines = filteredClaims.map((c) => {
+    const ttl = Math.round((new Date(c.expires).getTime() - Date.now()) / 1000);
+    const pathList = c.paths.join(", ");
+    return `- ${c.agentId} has an active claim on ${pathList} (${ttl}s remaining)`;
+  });
+
+  return `${existing}\n\nActive claims:\n${claimLines.join("\n")}`;
 }

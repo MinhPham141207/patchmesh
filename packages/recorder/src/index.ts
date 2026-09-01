@@ -83,3 +83,11 @@ export {
   releaseClaims,
 } from "./claims.js";
 export type { Claim, ClaimOptions, ReadClaimsOptions, ReleaseClaimsOptions } from "./claims.js";
+export {
+  checkContention,
+  incrementRetry,
+  readRetryState,
+  shouldAllow,
+  MAX_RETRIES,
+} from "./leader.js";
+export type { ContentionCheckOptions, ContentionResult, RetryOptions, RetryState } from "./leader.js";

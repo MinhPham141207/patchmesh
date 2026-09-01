@@ -72,11 +72,19 @@ function readRetryFile(filePath: string): RetryState | null {
 export function checkContention(options: ContentionCheckOptions): ContentionResult {
   const { worktreeRoot, directory, path, agentId } = options;
 
-  const claims = readActiveClaims({ worktreeRoot, directory }).filter(
+  const claimsOpts = directory !== undefined
+    ? { worktreeRoot, directory }
+    : { worktreeRoot };
+  const claims = readActiveClaims(claimsOpts).filter(
     (c) => (agentId === undefined || c.agentId !== agentId) && c.paths.includes(path),
   );
 
-  const inFlight = readInFlightCalls({ worktreeRoot, directory, excludeAgentId: agentId }).filter(
+  const inFlightOpts = {
+    worktreeRoot,
+    ...(directory !== undefined ? { directory } : {}),
+    ...(agentId !== undefined ? { excludeAgentId: agentId } : {}),
+  };
+  const inFlight = readInFlightCalls(inFlightOpts).filter(
     (call) => call.filePath === path,
   );
 
