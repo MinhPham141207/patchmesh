@@ -230,7 +230,7 @@ test("end to end: the hook binary still journals the call when the advisory path
   }
 });
 
-test("end to end: the hook binary emits a non-blocking allow with the advisory reason on genuine contention", () => {
+test("end to end: the hook binary emits a deny with the advisory reason on genuine contention", () => {
   const root = worktree();
   try {
     seedInFlight(root, OTHER_SESSION, "Edit", { file_path: "src/shared.ts" }, new Date().toISOString());
@@ -246,9 +246,9 @@ test("end to end: the hook binary emits a non-blocking allow with the advisory r
       hookSpecificOutput: { hookEventName: string; permissionDecision: string; permissionDecisionReason: string };
     };
     assert.equal(parsed.hookSpecificOutput.hookEventName, "PreToolUse");
-    // Non-blocking: "allow" is the only permissionDecision this binary ever emits.
-    assert.equal(parsed.hookSpecificOutput.permissionDecision, "allow");
-    assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /has a call in flight/u);
+    // Coordination: deny on contention to pause the agent and let it resolve
+    assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
+    assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /Contention detected/u);
 
     // The call that triggered the advisory is itself journalled too -- recording happened
     // first, and the advisory did not replace it.

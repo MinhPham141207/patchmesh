@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   computeContentionAdvisory,
@@ -7,12 +8,15 @@ import {
   computeTurnStartAdvisory,
   type DeliveredFact,
 } from "./advisory.js";
-import { findWorktreeRoot } from "./identity.js";
+import { agentIdForSession, findWorktreeRoot } from "./identity.js";
 import { appendJournalEntry, journalPathFor } from "./journal.js";
 import { redactHookPayload } from "./redact.js";
 import { advanceWatermark } from "./recent-writes.js";
 import { claudeCodeAdapter, isKnownHost, opencodeAdapter, translateOpencodeRecord } from "./hosts/index.js";
 import { writePendingAdvisory, readAndDeletePendingAdvisory, cleanupPendingAdvisories, PENDING_DIR } from "./sidecar.js";
+import { readActiveClaims, releaseClaims, cleanupExpiredClaims } from "./claims.js";
+import { checkContention, incrementRetry, shouldAllow, cleanupRetryFiles, MAX_RETRIES } from "./leader.js";
+import { takeSnapshot, diffSnapshots } from "./snapshot.js";
 
 /**
  * Hook entry point, on the agent's critical path.
@@ -97,15 +101,64 @@ export function emitAdvisory(
   compute: typeof computeContentionAdvisory = computeContentionAdvisory,
 ): void {
   try {
+    const hookEventName = typeof payload["hook_event_name"] === "string" ? payload["hook_event_name"] : null;
+    if (hookEventName !== "PreToolUse") return;
+
+    const hostToolName = typeof payload["tool_name"] === "string" ? payload["tool_name"] : null;
+    const toolInput = isRecord(payload["tool_input"]) ? payload["tool_input"] : {};
+    const filePath = typeof toolInput["file_path"] === "string" ? toolInput["file_path"] : null;
+    if (hostToolName === null || filePath === null) return;
+
+    const sessionId = typeof payload["session_id"] === "string" ? payload["session_id"] : null;
+    const ownAgentId = sessionId !== null ? agentIdForSession(sessionId) : undefined;
+
+    // Check in-flight contention (existing behavior)
     const advisory = compute({ worktreeRoot, payload });
-    if (advisory === null) return;
-    debug(`contention: ${advisory.message}`);
+
+    // Check claims contention (new: coordination system)
+    const contentionOpts = ownAgentId !== undefined
+      ? { worktreeRoot, path: filePath, agentId: ownAgentId as string }
+      : { worktreeRoot, path: filePath };
+    const contention = checkContention(contentionOpts);
+
+    const hasContention = advisory !== null || contention.hasContention;
+    if (!hasContention) return;
+
+    // Determine path and agentId for the deny message
+    const path = advisory?.path ?? filePath;
+    const otherAgentId = advisory?.agentId ?? contention.claims[0]?.agentId ?? contention.inFlight[0]?.agentId ?? null;
+
+    // Check retry count: if retry >= MAX_RETRIES, allow (fail-open)
+    const agentId = ownAgentId ?? "unknown";
+    if (shouldAllow({ worktreeRoot, path, agentId })) {
+      debug(`contention on ${path} but retry limit reached, allowing`);
+      // Still write sidecar for PostToolUse
+      const toolUseId = payload["tool_use_id"];
+      if (typeof toolUseId === "string" && toolUseId !== "") {
+        const pendingDir = join(worktreeRoot, ".patchmesh", PENDING_DIR);
+        writePendingAdvisory(pendingDir, toolUseId, {
+          path,
+          agentId: otherAgentId,
+          hostToolName,
+          runningForMs: advisory?.runningForMs ?? 0,
+          detectedAt: new Date().toISOString(),
+        });
+      }
+      if (advisory !== null) advanceDeliveredFact(advisory);
+      return;
+    }
+
+    // Increment retry and deny
+    const retryState = incrementRetry({ worktreeRoot, path, agentId });
+    const retryNum = retryState.retryCount;
+    const denyReason = `Contention detected on ${path}. Call patchmesh_resolve to check and retry. Retry ${retryNum}/${MAX_RETRIES}.`;
+    debug(`denying edit on ${path}: ${denyReason}`);
     process.stdout.write(
       `${JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
-          permissionDecision: "allow",
-          permissionDecisionReason: advisory.message,
+          permissionDecision: "deny",
+          permissionDecisionReason: denyReason,
         },
       })}\n`,
     );
@@ -114,14 +167,14 @@ export function emitAdvisory(
     if (typeof toolUseId === "string" && toolUseId !== "") {
       const pendingDir = join(worktreeRoot, ".patchmesh", PENDING_DIR);
       writePendingAdvisory(pendingDir, toolUseId, {
-        path: advisory.path,
-        agentId: advisory.agentId,
-        hostToolName: advisory.hostToolName,
-        runningForMs: advisory.runningForMs,
+        path,
+        agentId: otherAgentId,
+        hostToolName,
+        runningForMs: advisory?.runningForMs ?? 0,
         detectedAt: new Date().toISOString(),
       });
     }
-    advanceDeliveredFact(advisory);
+    if (advisory !== null) advanceDeliveredFact(advisory);
   } catch (error) {
     debug(error instanceof Error ? `advisory failed: ${error.message}` : "unknown advisory failure");
   }
@@ -178,8 +231,6 @@ export function emitPostWriteAdvisory(
     }
 
     // Second: check if PreToolUse wrote a sidecar for this call
-    // Only on PostToolUse — on PreToolUse both emitAdvisory and emitPostWriteAdvisory run in
-    // the same invocation, so reading the sidecar here would consume it before PostToolUse fires.
     const hookEventName = isRecord(payload) && typeof payload["hook_event_name"] === "string"
       ? payload["hook_event_name"]
       : null;
@@ -187,24 +238,95 @@ export function emitPostWriteAdvisory(
       const toolUseId = payload["tool_use_id"];
       if (typeof toolUseId === "string" && toolUseId !== "") {
         const pendingDir = join(worktreeRoot, ".patchmesh", PENDING_DIR);
-        const pending = readAndDeletePendingAdvisory(pendingDir, toolUseId);
-        if (pending !== null) {
-          const agentLabel = pending.agentId ?? "an unidentified agent";
-          const seconds = Math.max(Math.round(pending.runningForMs / 1000), 0);
-          const message =
-            `${agentLabel} has a call in flight (${pending.hostToolName}) that started touching \`${pending.path}\` `
-            + `${seconds}s ago and has not finished. You just wrote \`${pending.path}\` too. `
-            + `Same file does not mean same work.`;
-          debug(`sidecar-derived contention: ${message}`);
-          process.stdout.write(
-            `${JSON.stringify({
-              hookSpecificOutput: {
-                hookEventName: "PostToolUse",
-                additionalContext: message,
-              },
-            })}\n`,
+        try {
+          const pending = readAndDeletePendingAdvisory(pendingDir, toolUseId);
+          if (pending !== null) {
+            const agentLabel = pending.agentId ?? "an unidentified agent";
+            const seconds = Math.max(Math.round(pending.runningForMs / 1000), 0);
+            const message =
+              `${agentLabel} has a call in flight (${pending.hostToolName}) that started touching \`${pending.path}\` `
+              + `${seconds}s ago and has not finished. You just wrote \`${pending.path}\` too. `
+              + `Same file does not mean same work.`;
+            debug(`sidecar-derived contention: ${message}`);
+            process.stdout.write(
+              `${JSON.stringify({
+                hookSpecificOutput: {
+                  hookEventName: "PostToolUse",
+                  additionalContext: message,
+                },
+              })}\n`,
+            );
+          }
+        } catch {
+          // Sidecar read is best-effort; proceed to coordination logic
+        }
+      }
+    }
+
+    // Coordination: auto-release claims for Edit/Write tools (PostToolUse only)
+    if (hookEventName === "PostToolUse") {
+      const hostToolName = typeof payload["tool_name"] === "string" ? payload["tool_name"] : null;
+      const sessionId = typeof payload["session_id"] === "string" ? payload["session_id"] : null;
+      if (hostToolName === "Edit" || hostToolName === "Write") {
+        try {
+          const toolInput = isRecord(payload["tool_input"]) ? payload["tool_input"] : {};
+          const filePath = typeof toolInput["file_path"] === "string" ? toolInput["file_path"] : null;
+          if (filePath !== null && sessionId !== null) {
+            const agentId = agentIdForSession(sessionId) as string;
+            releaseClaims({ worktreeRoot, agentId, paths: [filePath] });
+            debug(`released claims for ${agentId} on ${filePath}`);
+          }
+        } catch (error) {
+          debug(error instanceof Error ? `claim release failed: ${error.message}` : "unknown claim release failure");
+        }
+      }
+    }
+
+    // Coordination: filesystem snapshot for Bash commands (PostToolUse only)
+    const postToolName = typeof payload["tool_name"] === "string" ? payload["tool_name"] : null;
+    if (postToolName === "Bash" && hookEventName === "PostToolUse") {
+      try {
+        const snapshotDir = join(worktreeRoot, ".patchmesh", "snapshots");
+        const previousPath = join(snapshotDir, "previous.json");
+
+        // Read previous snapshot if it exists
+        let previousSnapshots: readonly import("./snapshot.js").FileSnapshot[] = [];
+        if (existsSync(previousPath)) {
+          try {
+            const raw = readFileSync(previousPath, "utf8");
+            previousSnapshots = JSON.parse(raw) as readonly import("./snapshot.js").FileSnapshot[];
+          } catch {
+            // Corrupt snapshot, treat as empty
+          }
+        }
+
+        // Take current snapshot
+        const currentSnapshots = takeSnapshot(worktreeRoot);
+
+        // Diff
+        const diff = diffSnapshots(previousSnapshots, currentSnapshots);
+        const changed = [...diff.added, ...diff.modified, ...diff.deleted];
+
+        if (changed.length > 0) {
+          debug(`bash snapshot: ${changed.length} file(s) changed: ${changed.join(", ")}`);
+          // Write diff to sidecar for agent access
+          if (!existsSync(snapshotDir)) {
+            mkdirSync(snapshotDir, { recursive: true });
+          }
+          writeFileSync(
+            join(snapshotDir, "last-diff.json"),
+            JSON.stringify({ changed, diff, timestamp: new Date().toISOString() }),
+            "utf8",
           );
         }
+
+        // Store current snapshot as previous for next comparison
+        if (!existsSync(snapshotDir)) {
+          mkdirSync(snapshotDir, { recursive: true });
+        }
+        writeFileSync(previousPath, JSON.stringify(currentSnapshots), "utf8");
+      } catch (error) {
+        debug(error instanceof Error ? `bash snapshot failed: ${error.message}` : "unknown bash snapshot failure");
       }
     }
   } catch (error) {
@@ -252,6 +374,16 @@ function emitSessionEndCleanup(worktreeRoot: string): void {
   try {
     const pendingDir = join(worktreeRoot, ".patchmesh", PENDING_DIR);
     cleanupPendingAdvisories(pendingDir);
+  } catch {
+    // Best-effort cleanup. Never block session end.
+  }
+  try {
+    cleanupExpiredClaims({ worktreeRoot });
+  } catch {
+    // Best-effort cleanup. Never block session end.
+  }
+  try {
+    cleanupRetryFiles({ worktreeRoot });
   } catch {
     // Best-effort cleanup. Never block session end.
   }
