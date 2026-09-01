@@ -75,3 +75,11 @@ export type { ComputeAdvisoryOptions, ContentionAdvisory, TurnStartAdvisory } fr
 export { main as codexRelayMain, translateCodexPayload } from "./codex-relay.js";
 export { writePendingAdvisory, readAndDeletePendingAdvisory, cleanupPendingAdvisories, PENDING_DIR } from "./sidecar.js";
 export type { PendingAdvisory } from "./sidecar.js";
+export {
+  claimFile,
+  claimsDirectory,
+  cleanupExpiredClaims,
+  readActiveClaims,
+  releaseClaims,
+} from "./claims.js";
+export type { Claim, ClaimOptions, ReadClaimsOptions, ReleaseClaimsOptions } from "./claims.js";
