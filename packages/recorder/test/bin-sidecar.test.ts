@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,12 +32,13 @@ function seedInFlight(root: string, sessionId: string, toolName: string, toolInp
   );
 }
 
-test("PreToolUse writes a sidecar when contention is detected", () => {
+test("PreToolUse denies and writes a sidecar when contention is detected", () => {
   const root = worktree();
   try {
-    seedInFlight(root, OTHER_SESSION, "Edit", { file_path: "src/shared.ts" }, "2026-08-31T12:00:00.000Z");
+    const recentAt = new Date(Date.now() - 5_000).toISOString();
+    seedInFlight(root, OTHER_SESSION, "Edit", { file_path: "src/shared.ts" }, recentAt);
 
-    execFileSync(process.execPath, [binPath], {
+    const output = execFileSync(process.execPath, [binPath], {
       input: JSON.stringify({
         session_id: OWN_SESSION,
         hook_event_name: "PreToolUse",
@@ -48,6 +49,15 @@ test("PreToolUse writes a sidecar when contention is detected", () => {
       cwd: root,
       encoding: "utf8",
     });
+
+    // Should deny on contention
+    const lines = output.trim().split("\n").filter((l) => l !== "");
+    assert.ok(lines.length >= 1, "PreToolUse emits output");
+    const parsed = JSON.parse(lines[0]!) as {
+      hookSpecificOutput: { hookEventName: string; permissionDecision: string; permissionDecisionReason: string };
+    };
+    assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
+    assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /Contention detected/u);
 
     // Sidecar should exist for this tool_use_id
     const sidecarPath = join(root, ".patchmesh", "pending-advisories", "call_test_pre.json");
@@ -62,8 +72,9 @@ test("PreToolUse writes a sidecar when contention is detected", () => {
 test("PostToolUse reads and deletes the sidecar, emitting additionalContext", () => {
   const root = worktree();
   try {
-    // Seed contention + write sidecar via PreToolUse
-    seedInFlight(root, OTHER_SESSION, "Edit", { file_path: "src/shared.ts" }, "2026-08-31T12:00:00.000Z");
+    // Seed contention + write sidecar via PreToolUse deny
+    const recentAt = new Date(Date.now() - 5_000).toISOString();
+    seedInFlight(root, OTHER_SESSION, "Edit", { file_path: "src/shared.ts" }, recentAt);
     execFileSync(process.execPath, [binPath], {
       input: JSON.stringify({
         session_id: OWN_SESSION,
@@ -76,21 +87,21 @@ test("PostToolUse reads and deletes the sidecar, emitting additionalContext", ()
       encoding: "utf8",
     });
 
-    // Mark the seeded call as finished so the standard PostToolUse path
-    // does not detect it as in-flight — forcing the sidecar path instead.
-    appendJournalEntry(
-      journalPathFor(root, ".patchmesh"),
-      {
-        session_id: OTHER_SESSION,
-        hook_event_name: "PostToolUse",
-        tool_use_id: `call_${OTHER_SESSION}_2026-08-31T12:00:00.000Z`,
-        tool_name: "Edit",
-        tool_input: { file_path: "src/shared.ts" },
-      },
-      "2026-08-31T12:01:00.000Z",
-    );
+    // Delete the journal entries from OTHER_SESSION so computePostWriteAdvisory
+    // won't find a recent write and will fall through to the sidecar path.
+    const journalPath = join(root, ".patchmesh", "journal.ndjson");
+    const lines = readFileSync(journalPath, "utf8").trim().split("\n");
+    const filtered = lines.filter((line) => {
+      try {
+        const parsed = JSON.parse(line) as { payload?: { session_id?: string } };
+        return parsed.payload?.session_id !== OTHER_SESSION;
+      } catch {
+        return true;
+      }
+    });
+    writeFileSync(journalPath, filtered.join("\n") + "\n");
 
-    // Now PostToolUse for the same tool_use_id
+    // Now PostToolUse for the same tool_use_id — should use the sidecar
     const output = execFileSync(process.execPath, [binPath], {
       input: JSON.stringify({
         session_id: OWN_SESSION,
@@ -105,9 +116,9 @@ test("PostToolUse reads and deletes the sidecar, emitting additionalContext", ()
     });
 
     // Should emit additionalContext with the sidecar's message
-    const lines = output.trim().split("\n").filter((l) => l !== "");
-    assert.ok(lines.length >= 1, "PostToolUse emits output");
-    const parsed = JSON.parse(lines[0]!) as {
+    const outLines = output.trim().split("\n").filter((l) => l !== "");
+    assert.ok(outLines.length >= 1, "PostToolUse emits output");
+    const parsed = JSON.parse(outLines[0]!) as {
       hookSpecificOutput: { hookEventName: string; additionalContext?: string };
     };
     assert.equal(parsed.hookSpecificOutput.hookEventName, "PostToolUse");
