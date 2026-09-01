@@ -369,7 +369,7 @@ export async function runCli(argv: readonly string[], dependencies: CliDependenc
     // answer. Every other command exits 0 when it successfully reports bad news; a health check
     // that did the same could not be used to gate anything.
     if (parsed.command === "doctor") {
-      const report = diagnose({ worktreeRoot });
+      const report = await diagnose({ worktreeRoot });
       return { exitCode: report.healthy ? 0 : 3, stdout: renderDoctor(report, parsed.json), stderr: "" };
     }
     // Reports answer about now, so the journal is drained before they read. Deliberately after

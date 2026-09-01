@@ -25,7 +25,7 @@ function makeJournalEntry(overrides: { taskId?: string | null } = {}): Record<st
   };
 }
 
-test("doctor reports attribution rate when ledger exists", () => {
+test("doctor reports attribution rate when ledger exists", async () => {
   const root = temporaryRepository();
   try {
     const journalPath = journalPathFor(root, LEDGER_DIRECTORY);
@@ -41,7 +41,7 @@ test("doctor reports attribution rate when ledger exists", () => {
       ledgerPath: ledgerPathFor(root),
     });
 
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     const attrCheck = report.checks.find((c) => c.name === "attribution");
     assert.ok(attrCheck, "attribution check should exist");
     assert.match(attrCheck.detail, /\d+%/);
@@ -51,10 +51,10 @@ test("doctor reports attribution rate when ledger exists", () => {
   }
 });
 
-test("doctor attribution check degrades gracefully with no ledger", () => {
+test("doctor attribution check degrades gracefully with no ledger", async () => {
   const root = temporaryRepository();
   try {
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     const attrCheck = report.checks.find((c) => c.name === "attribution");
     assert.ok(attrCheck, "attribution check should exist even without ledger");
     assert.equal(attrCheck.status, "warn");

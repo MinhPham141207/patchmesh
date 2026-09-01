@@ -4,6 +4,54 @@ import { LEDGER_DIRECTORY, ledgerPathFor, ledgerRootFor, resolveSourceHost } fro
 import { SqliteEventStore, projectWorkGraphCached } from "patchmesh-storage";
 import { HOOK_EVENTS, onPath, ownsCommand, resolveHookTarget } from "./init.js";
 
+const INSTALLED_VERSION = readInstalledVersion();
+
+function readInstalledVersion(): string {
+  try {
+    // package.json lives next to dist/ when installed globally via npm.
+    const candidate = join(import.meta.dirname, "..", "package.json");
+    const raw = readFileSync(candidate, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return typeof parsed["version"] === "string" ? parsed["version"] : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Fetch the latest version from the npm registry with a short timeout.
+ *
+ * Network failures are not doctor's job: this is a convenience check, not a gate.
+ * A timeout or fetch error returns null, and the check stays informational.
+ */
+async function fetchLatestVersion(packageName: string, timeoutMs = 3000): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetch(`https://registry.npmjs.org/${packageName}/latest`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    const data = await response.json() as Record<string, unknown>;
+    return typeof data["version"] === "string" ? data["version"] : null;
+  } catch {
+    return null;
+  }
+}
+
+function compareVersions(a: string, b: string): -1 | 0 | 1 {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na < nb) return -1;
+    if (na > nb) return 1;
+  }
+  return 0;
+}
+
 /**
  * Is PatchMesh actually recording here?
  *
@@ -43,6 +91,10 @@ export interface DoctorOptions {
   /** Overridden by tests, which cannot afford to write a real 64MiB ledger to observe a warning. */
   readonly largeLedgerBytes?: number;
   readonly now?: () => Date;
+  /** Overridden by tests to avoid network calls. */
+  readonly installedVersion?: string;
+  /** Overridden by tests. Null means the fetch failed. */
+  readonly latestVersion?: string | null;
 }
 
 /** `node:sqlite`'s DatabaseSync, which the event store is built on, does not exist before 24. */
@@ -480,7 +532,25 @@ function checkJournal(worktreeRoot: string, now: Date): readonly DoctorCheck[] {
   return checks;
 }
 
-export function diagnose(options: DoctorOptions): DoctorReport {
+function checkVersion(installed: string, latest: string | null): DoctorCheck {
+  if (installed === "unknown") {
+    return { name: "version", status: "ok", detail: "installed version unknown" };
+  }
+  if (latest === null) {
+    return { name: "version", status: "ok", detail: `installed ${installed} (could not check npm for updates)` };
+  }
+  if (compareVersions(installed, latest) < 0) {
+    return {
+      name: "version",
+      status: "warn",
+      detail: `installed ${installed}, latest ${latest}`,
+      fix: `update with: npm install -g patchmesh@latest`,
+    };
+  }
+  return { name: "version", status: "ok", detail: `installed ${installed} (up to date)` };
+}
+
+export async function diagnose(options: DoctorOptions): Promise<DoctorReport> {
   const now = (options.now ?? (() => new Date()))();
   const checks: DoctorCheck[] = [
     checkNode(options.nodeVersion ?? process.version),
@@ -521,6 +591,14 @@ export function diagnose(options: DoctorOptions): DoctorReport {
   // that is not there would create one, and this command never creates what it diagnoses.
   if (existsSync(ledgerPath)) checks.push(replayCheck(ledgerPath));
   checks.push(...checkJournal(worktreeRoot, now));
+
+  // Version check: compare installed version against the latest on npm.
+  // Tests inject both values; production fetches live. A failed fetch is informational only.
+  const installed = options.installedVersion ?? INSTALLED_VERSION;
+  const latest = options.latestVersion !== undefined
+    ? options.latestVersion
+    : await fetchLatestVersion("patchmesh");
+  checks.push(checkVersion(installed, latest));
 
   return { checks, healthy: !checks.some((check) => check.status === "fail") };
 }

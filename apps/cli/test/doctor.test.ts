@@ -36,10 +36,10 @@ function writeHooks(root: string, command: string, events: readonly string[]): v
 
 const ALL_HOOKS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
 
-test("an unwired repository is reported as not recording, not as empty", () => {
+test("an unwired repository is reported as not recording, not as empty", async () => {
   const root = temporaryRepository();
   try {
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     // The distinction the whole command exists for. Before this, a repository whose hooks were
     // never installed and one that had simply not been worked in yet produced the same
     // observable: an empty ledger and no explanation.
@@ -51,7 +51,7 @@ test("an unwired repository is reported as not recording, not as empty", () => {
   }
 });
 
-test("a wired repository with no ledger yet is healthy, because nothing is wrong with it", () => {
+test("a wired repository with no ledger yet is healthy, because nothing is wrong with it", async () => {
   const root = temporaryRepository();
   try {
     const binary = join(root, "recorder", "dist", "bin.js");
@@ -59,7 +59,7 @@ test("a wired repository with no ledger yet is healthy, because nothing is wrong
     writeFileSync(binary, "", "utf8");
     writeHooks(root, `node "${binary}"`, ALL_HOOKS);
 
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     // Warnings, not failures: a configured repository whose agent has not run yet is the
     // expected state directly after `init`, and telling that user something is broken would
     // send them to fix a working install.
@@ -72,11 +72,11 @@ test("a wired repository with no ledger yet is healthy, because nothing is wrong
   }
 });
 
-test("hooks naming a binary that is not there are reported as recording nothing", () => {
+test("hooks naming a binary that is not there are reported as recording nothing", async () => {
   const root = temporaryRepository();
   try {
     writeHooks(root, `node "${join(root, "recorder", "dist", "bin.js")}"`, ALL_HOOKS);
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     // The install failure that motivated this: `npm install -g patchmesh` links only the CLI's
     // own bin, so the config is written correctly and every hook it names is inert.
     assert.equal(report.healthy, false);
@@ -86,7 +86,7 @@ test("hooks naming a binary that is not there are reported as recording nothing"
   }
 });
 
-test("a command the host expands is not reported as broken", () => {
+test("a command the host expands is not reported as broken", async () => {
   const root = temporaryRepository();
   try {
     const binary = join(root, "packages", "recorder", "dist", "bin.js");
@@ -94,7 +94,7 @@ test("a command the host expands is not reported as broken", () => {
     writeFileSync(binary, "", "utf8");
     writeHooks(root, 'node "$CLAUDE_PROJECT_DIR/packages/recorder/dist/bin.js"', ALL_HOOKS);
 
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     // Regression. This exact config -- the one this repository runs, recording thousands of
     // events -- was reported as five broken hooks, because the check compared the unexpanded
     // string against the filesystem. A health check that fails a healthy install is worse than
@@ -106,11 +106,11 @@ test("a command the host expands is not reported as broken", () => {
   }
 });
 
-test("a variable this tool cannot expand is unverified rather than broken", () => {
+test("a variable this tool cannot expand is unverified rather than broken", async () => {
   const root = temporaryRepository();
   try {
     writeHooks(root, 'node "$SOME_OTHER_HOST_DIR/recorder/dist/bin.js"', ALL_HOOKS);
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     assert.equal(report.healthy, true);
     assert.match(detailOf(report, "recorder"), /resolved by the host/u);
   } finally {
@@ -118,14 +118,14 @@ test("a variable this tool cannot expand is unverified rather than broken", () =
   }
 });
 
-test("partly installed hooks are named, because a missing drain records nothing durable", () => {
+test("partly installed hooks are named, because a missing drain records nothing durable", async () => {
   const root = temporaryRepository();
   try {
     const binary = join(root, "recorder", "dist", "bin.js");
     mkdirSync(join(root, "recorder", "dist"), { recursive: true });
     writeFileSync(binary, "", "utf8");
     writeHooks(root, `node "${binary}"`, ["PostToolUse"]);
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     assert.equal(statusOf(report, "hooks"), "warn");
     assert.match(detailOf(report, "hooks"), /missing .*Stop/u);
   } finally {
@@ -133,7 +133,7 @@ test("partly installed hooks are named, because a missing drain records nothing 
   }
 });
 
-test("a journal that has waited a day means the drain is not running", () => {
+test("a journal that has waited a day means the drain is not running", async () => {
   const root = temporaryRepository();
   try {
     const binary = join(root, "recorder", "dist", "bin.js");
@@ -146,21 +146,21 @@ test("a journal that has waited a day means the drain is not running", () => {
     // Entries waiting are normal mid-session and abnormal a day later; only the clock
     // separates the two, so the clock is injected rather than waited on.
     const later = () => new Date(Date.now() + 48 * 3_600_000);
-    const report = diagnose({ worktreeRoot: root, now: later });
+    const report = await diagnose({ worktreeRoot: root, now: later });
     assert.equal(statusOf(report, "journal"), "warn");
     assert.match(detailOf(report, "journal"), /not draining/u);
 
-    const fresh = diagnose({ worktreeRoot: root });
+    const fresh = await diagnose({ worktreeRoot: root });
     assert.equal(statusOf(fresh, "journal"), "ok");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("an old Node is a failure, because the event store cannot open at all", () => {
+test("an old Node is a failure, because the event store cannot open at all", async () => {
   const root = temporaryRepository();
   try {
-    const report = diagnose({ worktreeRoot: root, nodeVersion: "v20.11.0" });
+    const report = await diagnose({ worktreeRoot: root, nodeVersion: "v20.11.0" });
     assert.equal(statusOf(report, "node"), "fail");
     assert.equal(report.healthy, false);
   } finally {
@@ -168,16 +168,16 @@ test("an old Node is a failure, because the event store cannot open at all", () 
   }
 });
 
-test("the report names the host events are stamped with", () => {
+test("the report names the host events are stamped with", async () => {
   const previous = process.env.PATCHMESH_HOST;
   try {
     delete process.env.PATCHMESH_HOST;
-    const report = diagnose({ worktreeRoot: null });
+    const report = await diagnose({ worktreeRoot: null });
     assert.equal(statusOf(report, "host"), "ok");
     assert.equal(detailOf(report, "host"), "claude-code");
 
     process.env.PATCHMESH_HOST = "opencode";
-    const overridden = diagnose({ worktreeRoot: null });
+    const overridden = await diagnose({ worktreeRoot: null });
     assert.equal(detailOf(overridden, "host"), "opencode");
     assert.match(renderDoctor(overridden, false), /host: opencode/u);
   } finally {
@@ -186,14 +186,14 @@ test("the report names the host events are stamped with", () => {
   }
 });
 
-test("outside a git repository the report says so instead of guessing", () => {
-  const report = diagnose({ worktreeRoot: null });
+test("outside a git repository the report says so instead of guessing", async () => {
+  const report = await diagnose({ worktreeRoot: null });
   assert.equal(report.healthy, false);
   assert.equal(statusOf(report, "repository"), "fail");
 });
 
-test("the report is machine-readable on request", () => {
-  const report = diagnose({ worktreeRoot: null });
+test("the report is machine-readable on request", async () => {
+  const report = await diagnose({ worktreeRoot: null });
   const parsed = JSON.parse(renderDoctor(report, true)) as DoctorReport;
   assert.equal(parsed.healthy, false);
   assert.equal(Array.isArray(parsed.checks), true);
@@ -223,10 +223,10 @@ function recordedRepository(): string {
   return root;
 }
 
-test("the ledger's size is reported before it is a problem, so growth is visible", () => {
+test("the ledger's size is reported before it is a problem, so growth is visible", async () => {
   const root = recordedRepository();
   try {
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     assert.equal(statusOf(report, "ledger"), "ok");
     // Nothing prunes on its own, so the number a user would act on has to be on the screen
     // during the months in which acting is still cheap.
@@ -236,10 +236,10 @@ test("the ledger's size is reported before it is a problem, so growth is visible
   }
 });
 
-test("a ledger past the size budget is a warning that names the command, never an automatic delete", () => {
+test("a ledger past the size budget is a warning that names the command, never an automatic delete", async () => {
   const root = recordedRepository();
   try {
-    const report = diagnose({ worktreeRoot: root, largeLedgerBytes: 1 });
+    const report = await diagnose({ worktreeRoot: root, largeLedgerBytes: 1 });
     assert.equal(statusOf(report, "ledger"), "warn");
     assert.match(detailOf(report, "ledger"), /nothing prunes the ledger on its own/u);
     // Retention deletes history, and history is the product. The fix is offered, not taken.
@@ -263,10 +263,10 @@ function wiredRepository(): string {
   return root;
 }
 
-test("an uninstalled OpenCode host is plain information, never a failure", () => {
+test("an uninstalled OpenCode host is plain information, never a failure", async () => {
   const root = wiredRepository();
   try {
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     assert.equal(statusOf(report, "opencode"), "ok");
     assert.match(detailOf(report, "opencode"), /not installed/u);
     // OpenCode is a second host beside the Claude hooks; not having it says nothing about
@@ -277,7 +277,7 @@ test("an uninstalled OpenCode host is plain information, never a failure", () =>
   }
 });
 
-test("an OpenCode plugin pointing at an existing binary is reported as installed", () => {
+test("an OpenCode plugin pointing at an existing binary is reported as installed", async () => {
   const root = wiredRepository();
   try {
     // The repo-relative committed form, resolved against the worktree like every hook command.
@@ -290,14 +290,14 @@ test("an OpenCode plugin pointing at an existing binary is reported as installed
       `const RECORDER_BIN = "${relativeBinary.replaceAll("\\\\", "/")}";\n`,
       "utf8",
     );
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     assert.equal(statusOf(report, "opencode"), "ok");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("an OpenCode plugin naming a missing recorder warns but never fails doctor", () => {
+test("an OpenCode plugin naming a missing recorder warns but never fails doctor", async () => {
   const root = wiredRepository();
   try {
     mkdirSync(join(root, ".opencode", "plugins"), { recursive: true });
@@ -306,7 +306,7 @@ test("an OpenCode plugin naming a missing recorder warns but never fails doctor"
       `const RECORDER_BIN = ${JSON.stringify(join(root, "absent", "bin.js"))};\n`,
       "utf8",
     );
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     assert.equal(statusOf(report, "opencode"), "warn");
     assert.match(detailOf(report, "opencode"), /records nothing/u);
     // The Claude-side recording this verdict is about is untouched by a stale optional plugin.
@@ -317,7 +317,7 @@ test("an OpenCode plugin naming a missing recorder warns but never fails doctor"
 });
 
 // The EINVAL refusal is Node-on-Windows behavior; elsewhere a bare name on the PATH is fine.
-test("a bare recorder name reachable only through a .cmd shim warns instead of being blessed", { skip: process.platform !== "win32" }, () => {
+test("a bare recorder name reachable only through a .cmd shim warns instead of being blessed", { skip: process.platform !== "win32" }, async () => {
   const root = wiredRepository();
   const shimDirectory = mkdtempSync(join(tmpdir(), "patchmesh-doctor-shim-"));
   const previousPath = process.env["PATH"];
@@ -330,7 +330,7 @@ test("a bare recorder name reachable only through a .cmd shim warns instead of b
       "utf8",
     );
     process.env["PATH"] = shimDirectory;
-    const report = diagnose({ worktreeRoot: root });
+    const report = await diagnose({ worktreeRoot: root });
     // The name is on the PATH, but only as the kind of shim the plugin's spawn is refused;
     // saying ok here would bless an install that records nothing.
     assert.equal(statusOf(report, "opencode"), "warn");
@@ -340,6 +340,63 @@ test("a bare recorder name reachable only through a .cmd shim warns instead of b
     if (previousPath === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previousPath;
     rmSync(shimDirectory, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("version check reports up to date when installed matches latest", async () => {
+  const root = temporaryRepository();
+  try {
+    const report = await diagnose({ worktreeRoot: root, installedVersion: "1.2.3", latestVersion: "1.2.3" });
+    assert.equal(statusOf(report, "version"), "ok");
+    assert.match(detailOf(report, "version"), /up to date/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("version check warns when a newer version is available", async () => {
+  const root = temporaryRepository();
+  try {
+    const report = await diagnose({ worktreeRoot: root, installedVersion: "1.2.3", latestVersion: "1.3.0" });
+    assert.equal(statusOf(report, "version"), "warn");
+    assert.match(detailOf(report, "version"), /installed 1\.2\.3, latest 1\.3\.0/u);
+    const fix = report.checks.find((check) => check.name === "version")?.fix ?? "";
+    assert.match(fix, /npm install -g patchmesh@latest/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("version check warns on major version behind", async () => {
+  const root = temporaryRepository();
+  try {
+    const report = await diagnose({ worktreeRoot: root, installedVersion: "0.3.2", latestVersion: "2.0.0" });
+    assert.equal(statusOf(report, "version"), "warn");
+    assert.match(detailOf(report, "version"), /installed 0\.3\.2, latest 2\.0\.0/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("version check is ok when fetch fails", async () => {
+  const root = temporaryRepository();
+  try {
+    const report = await diagnose({ worktreeRoot: root, installedVersion: "1.2.3", latestVersion: null });
+    assert.equal(statusOf(report, "version"), "ok");
+    assert.match(detailOf(report, "version"), /could not check npm/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("version check is ok when installed version is unknown", async () => {
+  const root = temporaryRepository();
+  try {
+    const report = await diagnose({ worktreeRoot: root, installedVersion: "unknown", latestVersion: "1.0.0" });
+    assert.equal(statusOf(report, "version"), "ok");
+    assert.match(detailOf(report, "version"), /installed version unknown/u);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
