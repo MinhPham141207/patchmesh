@@ -1235,6 +1235,23 @@ test("init --host all detects codex when codex.json exists", () => {
   }
 });
 
+test("init --host all with zero detected hosts installs Claude Code hooks and generic-mcp", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-all-empty-"));
+  try {
+    const result = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "all" });
+
+    const details = result.steps.map((s) => s.detail);
+    assert.ok(details.some((d) => d.includes("Claude Code hooks")), "Claude Code hooks should be installed");
+    assert.ok(details.some((d) => d.includes("Generic MCP")), "Generic MCP tools should be installed");
+
+    // No OpenCode or Codex detected
+    assert.ok(!details.some((d) => d.includes("OpenCode")), "OpenCode should not be installed without .opencode directory");
+    assert.ok(!details.some((d) => d.includes("Codex")), "Codex should not be installed without .codex directory or codex.json");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("init --host rejects unsupported host values", async () => {
   const result = await runCli(["init", "--host", "unsupported-host"], dependencies);
 

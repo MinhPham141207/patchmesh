@@ -696,9 +696,11 @@ export function initializeRepository(options: InitOptions): InitResult {
   if (options.host === "all") {
     // Detect which hosts are present in the worktree and install for each.
     // Always install Claude Code hooks (default behavior).
-    if (options.installHooks !== false) {
-      steps.push(installHooks(options.worktreeRoot, binaries, force));
-    }
+    steps.push(
+      options.installHooks === false
+        ? { outcome: "skipped", detail: "Claude Code hooks skipped" }
+        : installHooks(options.worktreeRoot, binaries, force),
+    );
     // Detect OpenCode: look for .opencode directory
     if (existsSync(join(options.worktreeRoot, ".opencode"))) {
       steps.push(

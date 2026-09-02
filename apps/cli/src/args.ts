@@ -92,7 +92,7 @@ export function usageText(): string {
     "",
     "Setup:",
     "  init                       Wire PatchMesh into this repository (--force, --no-hooks,",
-    "                             --no-gitignore, --host opencode|codex|generic-mcp|all)",
+    "                             --no-gitignore, --host opencode|codex|claude-code|generic-mcp|all)",
     "  exit --yes                 Remove PatchMesh from this repository (reverses init)",
     "  doctor                     Check that recording is actually working here",
     "",
