@@ -1122,3 +1122,122 @@ test("init --force replaces PatchMesh's wiring without discarding the rest of th
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("init --host codex installs the codex MCP server once", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-codex-"));
+  try {
+    const first = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "codex" });
+    const configPath = join(root, ".mcp.json");
+    assert.equal(existsSync(configPath), true);
+    // .mcp.json is created by registerServer (the standard MCP server), so the Codex
+    // entry is "updated" (added to an existing file) rather than "created".
+    assert.equal(
+      first.steps.find((step) => step.detail.includes("Codex"))?.outcome,
+      "updated",
+      "the first run reports the Codex server as updated (added to existing .mcp.json)",
+    );
+
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as
+      { mcpServers: Record<string, { command: string; args: readonly string[] }> };
+    assert.ok(config.mcpServers["patchmesh-codex"], "Codex MCP server must be registered");
+    assert.equal(config.mcpServers["patchmesh-codex"]!.type, "stdio");
+
+    const again = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "codex" });
+    assert.equal(again.steps.some((step) => step.outcome === "unchanged"), true, "a second run reports unchanged");
+    assert.equal(again.steps.some((step) => step.outcome === "created"), false, "a second run installs nothing twice");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init --host generic-mcp registers the mcp tools once", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-generic-"));
+  try {
+    const first = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "generic-mcp" });
+    const configPath = join(root, ".mcp.json");
+    assert.equal(existsSync(configPath), true);
+    // .mcp.json is created by registerServer (the standard MCP server), so the generic-mcp
+    // entry is "updated" (added to an existing file) rather than "created".
+    assert.equal(
+      first.steps.find((step) => step.detail.includes("Generic MCP"))?.outcome,
+      "updated",
+      "the first run reports the generic MCP tools as updated (added to existing .mcp.json)",
+    );
+
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as
+      { mcpServers: Record<string, { command: string; description?: string }> };
+    assert.ok(config.mcpServers["patchmesh-generic-mcp"], "Generic MCP tools must be registered");
+    assert.equal(config.mcpServers["patchmesh-generic-mcp"]!.type, "stdio");
+    assert.equal(config.mcpServers["patchmesh-generic-mcp"]!.command, "patchmesh-mcp");
+    assert.equal(
+      config.mcpServers["patchmesh-generic-mcp"]!.description,
+      "Self-reported participation for MCP-only hosts (declared tier)",
+    );
+
+    const again = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "generic-mcp" });
+    assert.equal(again.steps.some((step) => step.outcome === "unchanged"), true, "a second run reports unchanged");
+    assert.equal(again.steps.some((step) => step.outcome === "created"), false, "a second run installs nothing twice");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init --host all installs for detected hosts", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-all-"));
+  try {
+    // Set up OpenCode presence (create .opencode directory)
+    mkdirSync(join(root, ".opencode"), { recursive: true });
+
+    const result = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "all" });
+
+    // Should have Claude Code hooks, OpenCode plugin, Generic MCP tools
+    const details = result.steps.map((s) => s.detail);
+    assert.ok(details.some((d) => d.includes("Claude Code hooks")), "Claude Code hooks should be installed");
+    assert.ok(details.some((d) => d.includes("OpenCode")), "OpenCode plugin should be installed");
+    assert.ok(details.some((d) => d.includes("Generic MCP")), "Generic MCP tools should be installed");
+
+    // Codex should not be detected (no .codex directory)
+    assert.ok(!details.some((d) => d.includes("Codex")), "Codex should not be installed without .codex directory");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init --host all detects codex when .codex directory exists", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-all-codex-"));
+  try {
+    // Set up Codex presence (create .codex directory)
+    mkdirSync(join(root, ".codex"), { recursive: true });
+
+    const result = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "all" });
+
+    const details = result.steps.map((s) => s.detail);
+    assert.ok(details.some((d) => d.includes("Claude Code hooks")), "Claude Code hooks should be installed");
+    assert.ok(details.some((d) => d.includes("Codex")), "Codex MCP server should be installed");
+    assert.ok(details.some((d) => d.includes("Generic MCP")), "Generic MCP tools should be installed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init --host all detects codex when codex.json exists", () => {
+  const root = mkdtempSync(join(tmpdir(), "patchmesh-init-all-codexjson-"));
+  try {
+    // Set up Codex presence (create codex.json)
+    writeFileSync(join(root, "codex.json"), "{}", "utf8");
+
+    const result = initializeRepository({ worktreeRoot: root, packageRoot: "/pkg", host: "all" });
+
+    const details = result.steps.map((s) => s.detail);
+    assert.ok(details.some((d) => d.includes("Codex")), "Codex MCP server should be installed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init --host rejects unsupported host values", async () => {
+  const result = await runCli(["init", "--host", "unsupported-host"], dependencies);
+
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /unsupported host: unsupported-host/);
+});

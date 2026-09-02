@@ -26,10 +26,11 @@ export interface InitOptions {
   /** Replace PatchMesh's own entries rather than leaving existing ones alone. */
   readonly force?: boolean;
   /**
-   * An additional host to wire beside Claude Code. Only `opencode` is supported today; the
-   * parser rejects anything else rather than writing a plugin no host would load.
+   * An additional host to wire beside Claude Code. `opencode` installs a relay plugin;
+   * `codex` and `generic-mcp` register MCP servers; `all` detects present hosts and
+   * installs for each.
    */
-  readonly host?: "opencode";
+  readonly host?: "opencode" | "codex" | "generic-mcp" | "claude-code" | "all";
   /** Where the recorder and gateway binaries live. Resolved from this package by default. */
   readonly packageRoot?: string;
 }
@@ -562,6 +563,68 @@ function installOpencodePlugin(worktreeRoot: string, binaries: Binaries, force: 
 }
 
 /**
+ * Register the PatchMesh gateway as a Codex MCP server in `.mcp.json`.
+ *
+ * Codex uses MCP servers for its integrations. Without a host-specific config format,
+ * the gateway is registered under a `patchmesh-codex` key so it can be distinguished from
+ * the Claude Code registration. This is idempotent and additive: existing entries are
+ * never removed.
+ */
+function installCodexHooks(worktreeRoot: string, binaries: Binaries, force: boolean): InitStep {
+  const CODEX_KEY = "patchmesh-codex";
+  const configPath = join(worktreeRoot, ".mcp.json");
+  const existed = existsSync(configPath);
+  const config = readJson(configPath);
+  const servers = isRecord(config["mcpServers"]) ? { ...config["mcpServers"] } : {};
+
+  if (servers[CODEX_KEY] !== undefined && !force) {
+    return { outcome: "unchanged", detail: "Codex MCP server already registered" };
+  }
+
+  const existing = isRecord(servers[CODEX_KEY]) ? servers[CODEX_KEY] : {};
+  servers[CODEX_KEY] = {
+    ...existing,
+    type: "stdio",
+    command: binaries.server.command,
+    args: [...binaries.server.args],
+  };
+  writeJson(configPath, { ...config, mcpServers: servers });
+  return { outcome: existed ? "updated" : "created", detail: `Codex MCP server in ${relative(worktreeRoot, configPath)}` };
+}
+
+/**
+ * Register the generic-mcp self-reporting tools in `.mcp.json`.
+ *
+ * The generic-mcp adapter is `declared` tier — participation is self-reported rather than
+ * observed. The three MCP tools (`patchmesh_session_begin`, `patchmesh_checkin`,
+ * `patchmesh_session_end`) let any MCP host report its own calls without requiring a
+ * host-specific hook adapter. Registered under a `patchmesh-generic-mcp` key so it can
+ * be distinguished from other registrations.
+ */
+function installGenericMcp(worktreeRoot: string, force: boolean): InitStep {
+  const GENERIC_MCP_KEY = "patchmesh-generic-mcp";
+  const configPath = join(worktreeRoot, ".mcp.json");
+  const existed = existsSync(configPath);
+  const config = readJson(configPath);
+  const servers = isRecord(config["mcpServers"]) ? { ...config["mcpServers"] } : {};
+
+  if (servers[GENERIC_MCP_KEY] !== undefined && !force) {
+    return { outcome: "unchanged", detail: "Generic MCP tools already registered" };
+  }
+
+  const existing = isRecord(servers[GENERIC_MCP_KEY]) ? servers[GENERIC_MCP_KEY] : {};
+  servers[GENERIC_MCP_KEY] = {
+    ...existing,
+    type: "stdio",
+    command: "patchmesh-mcp",
+    args: [],
+    description: "Self-reported participation for MCP-only hosts (declared tier)",
+  };
+  writeJson(configPath, { ...config, mcpServers: servers });
+  return { outcome: existed ? "updated" : "created", detail: `Generic MCP tools in ${relative(worktreeRoot, configPath)}` };
+}
+
+/**
  * Keep the ledger out of version control.
  *
  * `.patchmesh/` holds a SQLite database, a live journal and a filesystem snapshot - per-machine
@@ -607,6 +670,59 @@ export function initializeRepository(options: InitOptions): InitResult {
       options.installHooks === false
         ? { outcome: "skipped", detail: "OpenCode plugin skipped" }
         : installOpencodePlugin(options.worktreeRoot, binaries, force),
+    );
+  }
+  if (options.host === "codex") {
+    steps.push(
+      options.installHooks === false
+        ? { outcome: "skipped", detail: "Codex MCP server skipped" }
+        : installCodexHooks(options.worktreeRoot, binaries, force),
+    );
+  }
+  if (options.host === "generic-mcp") {
+    steps.push(
+      options.installHooks === false
+        ? { outcome: "skipped", detail: "Generic MCP tools skipped" }
+        : installGenericMcp(options.worktreeRoot, force),
+    );
+  }
+  if (options.host === "claude-code") {
+    steps.push(
+      options.installHooks === false
+        ? { outcome: "skipped", detail: "Claude Code hooks skipped" }
+        : installHooks(options.worktreeRoot, binaries, force),
+    );
+  }
+  if (options.host === "all") {
+    // Detect which hosts are present in the worktree and install for each.
+    // Always install Claude Code hooks (default behavior).
+    if (options.installHooks !== false) {
+      steps.push(installHooks(options.worktreeRoot, binaries, force));
+    }
+    // Detect OpenCode: look for .opencode directory
+    if (existsSync(join(options.worktreeRoot, ".opencode"))) {
+      steps.push(
+        options.installHooks === false
+          ? { outcome: "skipped", detail: "OpenCode plugin skipped" }
+          : installOpencodePlugin(options.worktreeRoot, binaries, force),
+      );
+    }
+    // Detect Codex: look for .codex directory or codex.json
+    if (
+      existsSync(join(options.worktreeRoot, ".codex")) ||
+      existsSync(join(options.worktreeRoot, "codex.json"))
+    ) {
+      steps.push(
+        options.installHooks === false
+          ? { outcome: "skipped", detail: "Codex MCP server skipped" }
+          : installCodexHooks(options.worktreeRoot, binaries, force),
+      );
+    }
+    // Generic MCP is always present as a declared-tier participant
+    steps.push(
+      options.installHooks === false
+        ? { outcome: "skipped", detail: "Generic MCP tools skipped" }
+        : installGenericMcp(options.worktreeRoot, force),
     );
   }
 

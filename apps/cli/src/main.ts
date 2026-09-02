@@ -175,7 +175,7 @@ async function renderCommand(
         installHooks: parsed.init.hooks,
         updateGitignore: parsed.init.gitignore,
         force: parsed.init.force,
-        ...(parsed.init.host === null ? {} : { host: parsed.init.host as "opencode" }),
+        ...(parsed.init.host === null ? {} : { host: parsed.init.host as "opencode" | "codex" | "generic-mcp" | "claude-code" | "all" }),
       }),
       parsed.json,
     );

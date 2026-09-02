@@ -92,7 +92,7 @@ export function usageText(): string {
     "",
     "Setup:",
     "  init                       Wire PatchMesh into this repository (--force, --no-hooks,",
-    "                             --no-gitignore, --host opencode)",
+    "                             --no-gitignore, --host opencode|codex|generic-mcp|all)",
     "  exit --yes                 Remove PatchMesh from this repository (reverses init)",
     "  doctor                     Check that recording is actually working here",
     "",
@@ -270,9 +270,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     if (option === "--force" && command === "init") { initForce = true; continue; }
     if (option === "--host" && command === "init") {
       const host = value(argv, index, option);
+      const supportedHosts = ["opencode", "codex", "generic-mcp", "claude-code", "all"];
       // Rejected rather than written anyway: a plugin naming a host no adapter exists for is
       // a file on disk that records nothing and says why to nobody.
-      if (host !== "opencode") throw new ReadServiceError("usage", `unsupported host: ${host} (supported: opencode)`);
+      if (!supportedHosts.includes(host)) throw new ReadServiceError("usage", `unsupported host: ${host} (supported: ${supportedHosts.join(", ")})`);
       initHost = host;
       index += 1;
       continue;
