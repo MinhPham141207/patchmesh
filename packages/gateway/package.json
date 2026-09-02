@@ -1,6 +1,6 @@
 {
   "name": "patchmesh-gateway",
-  "version": "0.3.2",
+  "version": "1.0.0",
   "type": "module",
   "files": [
     "dist"
@@ -29,7 +29,7 @@
     "patchmesh-storage": "workspace:*",
     "zod": "^4.4.3"
   },
-  "description": "MCP server exposing the PatchMesh ledger back to coding agents.",
+  "description": "MCP server exposing PatchMesh conflict detection, file claims, and inter-agent messaging to coding agents.",
   "license": "MIT",
   "author": "MinhPham141207",
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "patchmesh",
-  "version": "0.3.2",
+  "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -24,13 +24,17 @@
     "patchmesh-recorder": "workspace:*",
     "patchmesh-storage": "workspace:*"
   },
-  "description": "A shared work ledger for coding agents: records what agents did, and hands it back so the next one does not repeat it.",
+  "description": "MCP server for parallel coding agents: detects file contention, coordinates claims, and prevents conflicts between agents working in the same repository.",
   "keywords": [
     "ai",
     "agent",
     "claude-code",
     "mcp",
     "coding-agent",
+    "conflict-detection",
+    "file-claims",
+    "multi-agent",
+    "coordination",
     "ledger",
     "observability"
   ],
