@@ -1,4 +1,4 @@
-import type { HostAdapter } from "./types.js";
+import type { HostAdapter, HostCheck } from "./types.js";
 
 /**
  * A stand-in for MCP-only hosts whose tool calls reach PatchMesh through a gateway rather
@@ -11,4 +11,12 @@ export const genericMcpAdapter: HostAdapter = {
   displayName: "Generic MCP",
   tier: "declared",
   parse: () => null,
+  check(_worktreeRoot: string): HostCheck[] {
+    return [{
+      name: "generic-mcp",
+      status: "ok",
+      detail: "generic MCP calls record through their gateway as declared-tier participation"
+        + " (self-reported; no effects are observed at the protocol level)",
+    }];
+  },
 };

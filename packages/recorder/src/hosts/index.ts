@@ -4,7 +4,7 @@ import { claudeCodeAdapter, normalizeClaudeTool } from "./claude-code.js";
 import { codexAdapter, normalizeCodexTool } from "./codex.js";
 import { genericMcpAdapter } from "./generic-mcp.js";
 import { normalizeOpencodeTool, opencodeAdapter } from "./opencode.js";
-import type { CoverageTier, HostAdapter, HostId, HostProvenance, HostRecord } from "./types.js";
+import type { CoverageTier, HostAdapter, HostCheck, HostId, HostProvenance, HostRecord } from "./types.js";
 
 /**
  * The hosts this recorder knows how to parse. Three adapters are registered here. An
@@ -22,6 +22,11 @@ export function resolveHostAdapter(host: string): HostAdapter {
 /** Whether `--host <id>` names an adapter this build actually ships. */
 export function isKnownHost(host: string): boolean {
   return HOST_ADAPTERS.some((adapter) => adapter.id === host);
+}
+
+/** All registered host adapters, for iteration by doctor and other diagnostics. */
+export function allHostAdapters(): readonly HostAdapter[] {
+  return HOST_ADAPTERS;
 }
 
 /**
@@ -76,7 +81,7 @@ export function tierForSourceId(sourceId: string): CoverageTier | null {
   return hostForSourceId(sourceId)?.tier ?? null;
 }
 
-export type { CoverageTier, HostAdapter, HostId, HostProvenance, HostRecord } from "./types.js";
+export type { CoverageTier, HostAdapter, HostCheck, HostId, HostProvenance, HostRecord } from "./types.js";
 export { claudeCodeAdapter, normalizeClaudeTool } from "./claude-code.js";
 export { codexAdapter, normalizeCodexTool, parseCodexEnvelope } from "./codex.js";
 export { normalizeOpencodeTool, opencodeAdapter, translateOpencodeRecord } from "./opencode.js";

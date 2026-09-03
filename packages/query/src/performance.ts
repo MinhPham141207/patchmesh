@@ -72,7 +72,7 @@ interface ChangeRecord {
 
 function changeOf(event: ProtocolEvent): ChangeRecord | null {
   if (event.eventType !== "file.changed") return null;
-  const payload = event.payload as Record<string, unknown>;
+  const payload = event.payload as unknown as Record<string, unknown>;
   const resource = payload["resource"] as { resourceId?: unknown; locator?: unknown } | undefined;
   if (typeof resource?.resourceId !== "string") return null;
   return {

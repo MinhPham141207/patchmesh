@@ -5,7 +5,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "eventId": { "$ref": "./identities.schema.json#/$defs/eventId" },
-    "eventType": { "enum": ["tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read", "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected", "finding.created", "decision.created", "validity.changed", "decision.delivery.changed", "agent.message.sent", "agent.message.delivered", "agent.message.acknowledged"] },
+    "eventType": { "enum": ["tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read", "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected", "finding.created", "decision.created", "validity.changed", "decision.delivery.changed", "agent.message.sent", "agent.message.delivered", "agent.message.acknowledged", "agent.role.claimed"] },
     "source": { "type": "object", "properties": { "kind": { "enum": ["gateway", "adapter", "watcher", "analyzer", "core"] }, "sourceId": { "type": "string", "pattern": "^source_[a-z0-9][a-z0-9._-]{0,63}$" }, "instanceId": { "type": "string", "format": "uuid" } }, "required": ["kind", "sourceId", "instanceId"], "additionalProperties": false },
     "timestamp": { "type": "string", "format": "date-time" },
     "repositoryId": { "$ref": "./identities.schema.json#/$defs/repositoryId" },
@@ -16,7 +16,7 @@
     "correlationId": { "type": "string", "pattern": "^corr_[0-9a-f]{32}$" },
     "causationId": { "oneOf": [{ "$ref": "./identities.schema.json#/$defs/eventId" }, { "type": "null" }] },
     "sourceSequence": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
-    "payload": { "oneOf": [{ "$ref": "./event-payloads.schema.json#/$defs/toolRequested" }, { "$ref": "./event-payloads.schema.json#/$defs/toolCompleted" }, { "$ref": "./event-payloads.schema.json#/$defs/resourceObserved" }, { "$ref": "./event-payloads.schema.json#/$defs/resourceChanged" }, { "$ref": "./event-payloads.schema.json#/$defs/taskCompleted" }, { "$ref": "./event-payloads.schema.json#/$defs/dependencyChanged" }, { "$ref": "./event-payloads.schema.json#/$defs/attributionCorrected" }, { "$ref": "./event-payloads.schema.json#/$defs/findingCreated" }, { "$ref": "./event-payloads.schema.json#/$defs/decisionCreated" }, { "$ref": "./event-payloads.schema.json#/$defs/validityChanged" }, { "$ref": "./event-payloads.schema.json#/$defs/decisionDeliveryChanged" }, { "$ref": "./event-payloads.schema.json#/$defs/agentMessageSent" }, { "$ref": "./event-payloads.schema.json#/$defs/agentMessageDelivered" }, { "$ref": "./event-payloads.schema.json#/$defs/agentMessageAcknowledged" }] }
+    "payload": { "oneOf": [{ "$ref": "./event-payloads.schema.json#/$defs/toolRequested" }, { "$ref": "./event-payloads.schema.json#/$defs/toolCompleted" }, { "$ref": "./event-payloads.schema.json#/$defs/resourceObserved" }, { "$ref": "./event-payloads.schema.json#/$defs/resourceChanged" }, { "$ref": "./event-payloads.schema.json#/$defs/taskCompleted" }, { "$ref": "./event-payloads.schema.json#/$defs/dependencyChanged" }, { "$ref": "./event-payloads.schema.json#/$defs/attributionCorrected" }, { "$ref": "./event-payloads.schema.json#/$defs/findingCreated" }, { "$ref": "./event-payloads.schema.json#/$defs/decisionCreated" }, { "$ref": "./event-payloads.schema.json#/$defs/validityChanged" }, { "$ref": "./event-payloads.schema.json#/$defs/decisionDeliveryChanged" }, { "$ref": "./event-payloads.schema.json#/$defs/agentMessageSent" }, { "$ref": "./event-payloads.schema.json#/$defs/agentMessageDelivered" }, { "$ref": "./event-payloads.schema.json#/$defs/agentMessageAcknowledged" }, { "$ref": "./event-payloads.schema.json#/$defs/agentRoleClaimed" }] }
   },
   "oneOf": [
     { "properties": { "eventType": { "const": "tool.requested" }, "payload": { "$ref": "./event-payloads.schema.json#/$defs/toolRequested" } } },
@@ -34,7 +34,8 @@
     { "properties": { "eventType": { "const": "decision.delivery.changed" }, "payload": { "$ref": "./event-payloads.schema.json#/$defs/decisionDeliveryChanged" } } },
     { "properties": { "eventType": { "const": "agent.message.sent" }, "payload": { "$ref": "./event-payloads.schema.json#/$defs/agentMessageSent" } } },
     { "properties": { "eventType": { "const": "agent.message.delivered" }, "payload": { "$ref": "./event-payloads.schema.json#/$defs/agentMessageDelivered" } } },
-    { "properties": { "eventType": { "const": "agent.message.acknowledged" }, "payload": { "$ref": "./event-payloads.schema.json#/$defs/agentMessageAcknowledged" } } }
+    { "properties": { "eventType": { "const": "agent.message.acknowledged" }, "payload": { "$ref": "./event-payloads.schema.json#/$defs/agentMessageAcknowledged" } } },
+    { "properties": { "eventType": { "const": "agent.role.claimed" }, "payload": { "$ref": "./event-payloads.schema.json#/$defs/agentRoleClaimed" } } }
   ],
   "required": ["schemaVersion", "eventId", "eventType", "source", "timestamp", "repositoryId", "workspaceId", "worktreeId", "agentId", "taskId", "correlationId", "causationId", "sourceSequence", "payload"],
   "additionalProperties": false

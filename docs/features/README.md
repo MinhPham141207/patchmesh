@@ -23,4 +23,4 @@ same convention the problem files use.
 
 | # | Feature | Status | Target |
 | --- | --- | --- | --- |
-| [F-01](F-01-multi-host-agent-workspace.md) | The multi-host agent workspace — host adapters, mailbox, roles, performance | `proposed` | 0.3.0 / 0.4.0 |
+| [F-01](F-01-multi-host-agent-workspace.md) | The multi-host agent workspace — host adapters, mailbox, roles, performance | `design-reviewed` | 0.3.0 / 0.4.0 |

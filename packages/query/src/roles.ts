@@ -69,7 +69,7 @@ export function claimRole(options: ClaimRoleOptions): { roleId: string } {
     throw new ReadServiceError("usage", `unknown role ${options.roleId}`);
   }
   const method = options.method ?? "mcp";
-  const now = (options.now ?? (() => new Date())()).toISOString();
+  const now = (options.now ?? (() => new Date()))().toISOString();
   const identity = resolveRepositoryIdentity(options.worktreeRoot);
   const event: AgentRoleClaimedEvent = {
     schemaVersion: 1,

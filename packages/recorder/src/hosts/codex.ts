@@ -1,6 +1,8 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { NormalizedTool } from "../tool-mapping.js";
 import { GIT_COMMIT } from "./claude-code.js";
-import type { HostAdapter, HostRecord } from "./types.js";
+import type { HostAdapter, HostCheck, HostRecord } from "./types.js";
 
 const HOST_TOOLS: Readonly<Record<string, NormalizedTool>> = {
   read_file: { toolName: "read_file", pathProperty: "path", opaque: false },
@@ -90,4 +92,38 @@ export const codexAdapter: HostAdapter = {
   displayName: "Codex",
   tier: "observed",
   parse: parseCodexEnvelope,
+  check(worktreeRoot: string): HostCheck[] {
+    const configPath = join(worktreeRoot, ".mcp.json");
+    if (!existsSync(configPath)) {
+      return [{
+        name: "codex",
+        status: "ok",
+        detail: "Codex MCP server not installed (optional; install with: patchmesh init --host codex)",
+      }];
+    }
+    try {
+      const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+      const servers = typeof raw["mcpServers"] === "object" && raw["mcpServers"] !== null
+        ? raw["mcpServers"] as Record<string, unknown>
+        : {};
+      if (servers["patchmesh-codex"] === undefined) {
+        return [{
+          name: "codex",
+          status: "ok",
+          detail: "Codex MCP server not registered in .mcp.json (optional)",
+        }];
+      }
+      return [{
+        name: "codex",
+        status: "ok",
+        detail: "Codex MCP server registered in .mcp.json",
+      }];
+    } catch {
+      return [{
+        name: "codex",
+        status: "warn",
+        detail: ".mcp.json exists but could not be read",
+      }];
+    }
+  },
 };

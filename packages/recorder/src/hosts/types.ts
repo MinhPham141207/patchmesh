@@ -26,12 +26,21 @@ export interface HostRecord {
   readonly errored?: boolean;
 }
 
+export interface HostCheck {
+  readonly name: string;
+  readonly status: "ok" | "warn" | "fail";
+  readonly detail: string;
+  readonly fix?: string;
+}
+
 export interface HostAdapter {
   readonly id: HostId;
   readonly displayName: string;
   readonly tier: CoverageTier;
   /** Envelope -> normalized record. Null for an envelope this host does not own. */
   parse(envelope: unknown): HostRecord | null;
+  /** Inspect the worktree for this host's configuration and return diagnostic checks. */
+  check(worktreeRoot: string): HostCheck[];
 }
 
 /** What a recorded source id resolves to on the read side: a named host and its coverage tier. */

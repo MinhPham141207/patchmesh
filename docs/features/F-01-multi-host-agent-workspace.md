@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Status** | `proposed` |
+| **Status** | `design-reviewed` |
 | **Target** | 0.3.0 (Waves A–B), 0.4.0 (Waves C–E) |
 | **Depends on** | [PM-04](../problems/PM-04-attribution-fails-under-concurrency.md), [PM-09](../problems/PM-09-null-attribution.md), the two live-audit defects in [§3](#3-hard-blockers-inherited-from-the-live-audit) |
 | **Touches** | `packages/recorder`, `packages/query`, `packages/gateway`, `apps/cli`, `docs/THREAT_MODEL.md` |
@@ -178,6 +178,11 @@ Three rules follow, and they belong in code, not only in this document:
 2. `patchmesh agents` and `patchmesh status` print the host and its tier beside every agent.
 3. No cross-host comparison is rendered without both tiers on screen. A `session`-tier agent has
    fewer observed calls *by construction*, not by working less.
+4. The `overlaps` output includes a `precision:` field per reported file, stating whether
+   attribution is per-call (`observed` tier), per-window (`session` tier), or absent (`declared`
+   tier). Mixed-tier contention prints both tiers on the line. This prevents false precision:
+   a `session`-tier agent's changes are bound to a time window, not a call, and the output says
+   so.
 
 ### 4.5 Which hosts, and what must be verified first
 
@@ -443,7 +448,7 @@ Steps 2 and 3 are worth doing whether or not this feature ships.
 host records end to end from a fixture envelope; `patchmesh agents` names both hosts and both
 tiers.
 
-### Wave B — the second real host (0.3.0)
+### Wave B — the second real host (0.3.0) — **shipped 2026-08-26**
 
 Whichever host Wave 0 shows has a genuine per-call surface — expected to be OpenCode — plus the
 `generic-mcp` floor adapter.
@@ -452,7 +457,7 @@ Whichever host Wave 0 shows has a genuine per-call surface — expected to be Op
 cross-host contention on a file both touched. This is the acceptance test that matters; everything
 before it is scaffolding.
 
-**Shipped 2026-08-26 (Wave B gate run):**
+**Shipped (Wave B gate run):**
 [tools/concurrency/cross-host-scenario.ts](../../tools/concurrency/cross-host-scenario.ts) replays
 the two-host timeline through the real recorder pipeline — a Claude Code agent writing at T+0 and
 still active at T+40, an OpenCode agent (null task, no turn marker) writing the same file at T+20,
@@ -468,18 +473,22 @@ plugin itself, which only a live session can observe. **Live-session dogfood (on
 session alongside a Claude session editing nearby files) is still pending**, so acceptance rests on
 manufactured-but-real-pipeline traffic rather than genuine cross-host traffic yet.
 
-### Wave C — mailbox (0.4.0) — **shipped 2026-08-26**
+### Wave C — mailbox (0.4.0) — **partially shipped 2026-08-26**
 
 Events, `patchmesh send`/`inbox`/`ack`, the three MCP tools, `SessionStart` injection,
-rate-limited `PostToolUse` injection, undelivered count in `status`, threat-model update.
+undelivered count in `status`, threat-model update.
 
 **Shipped:** the events, the CLI and MCP surfaces, session-start delivery with delimited
 untrusted bodies, the undelivered count in `status`/console, and
 [the threat-model update](../THREAT_MODEL.md) (spec:
 [mailbox design](../superpowers/specs/2026-08-25-mailbox-design.md)). The committed protocol
 governs where the prose sketch differs: audience is agent-or-broadcast; role addressing ships
-with Wave D. **Reserved for a later wave:** `post_tool_use` delivery, which stays in the
-channel enum but needs its own rate-limit design before anything injects through it.
+with Wave D.
+
+**Not yet shipped:** `post_tool_use` delivery — stays in the channel enum but needs its own
+rate-limit design before anything injects through it. Per §11.3 recommendation 4, this should be
+completed within Wave C rather than deferred further, because it is the only delivery path for
+`session`- and `declared`-tier hosts.
 
 **Acceptance:** a message sent from a terminal appears in a Claude session's context, the ack is
 recorded, and an expired undelivered message is reported as undelivered rather than disappearing.
@@ -512,10 +521,94 @@ is driven by the declared contract rather than by path heuristics.
 2. **What identity does a session-tier host give an MCP server?** If a host exposes no session
    identity, every one of its calls collapses onto one agent — the exact failure `subagentIdFor`
    was written to fix — and its tier drops to `declared`.
-3. **Is `session`-tier attribution good enough for overlap detection?** The effects walk binds a
-   change to a window, not a call. Cross-host contention between an `observed` agent and a
-   `session` agent may be detectable in principle and too coarse in practice. Wave B's acceptance
-   test is what answers this, and a negative answer is a legitimate result.
+3. ~~**Is `session`-tier attribution good enough for overlap detection?**~~ **Decided in §11.3
+   recommendation 3:** contention between mixed-tier pairs is reported with a coarser grain, and
+   the grain is named in the output. The `overlaps` output adds a `precision:` field that states
+   whether attribution is per-call (`observed` tier), per-window (`session` tier), or absent
+   (`declared` tier). A mixed-tier pair prints both tiers on the line. This avoids both false
+   silence and false precision.
 4. **Where does a role live when the same repository is used by two teams?** `patchmesh.roles.json`
    is committed, so it is shared. A per-developer override file is an obvious follow-up and is
    deliberately not in Wave D.
+
+---
+
+## 11. Design review (2026-09-02)
+
+Reviewed against the current codebase and `README.md` "What is not proven" section.
+
+### 11.1 What is strong
+
+**Coupling analysis (§2) is the design's foundation.** The finding that `source.sourceId` already
+exists on every event and is simply never read back means capability A needs no schema change. This
+prevented months of unnecessary protocol work and is the kind of discovery that validates the
+approach of tracing the real code before designing.
+
+**Coverage tiers are the right abstraction.** Not every host can be observed at the same depth.
+Honestly reporting tier alongside every number (observed, session, declared) avoids the trap of
+treating fewer events as less work. A `session`-tier agent producing 10% of an `observed` agent's
+events is an integration artifact, and the design makes that visible by construction.
+
+**The mailbox avoids building infrastructure.** Messages are ledger events; the inbox is a query.
+No daemon, no broker, no polling. Delivery happens at the points where a host already hands
+PatchMesh the floor (session start, post-tool-use, MCP pull). This is the minimal design that
+could work.
+
+**Hot-path constraint (§4.3) is real and measured.** The regression test that walks the transitive
+import graph exists because it keeps the hook at p50 108ms. A host registry that is a table
+lookup, not a plugin loader, is the right trade-off: rigidity on the cold path for speed on the
+hot path.
+
+**Roles are advisory, not enforcing (§6.3).** This aligns with the core principle that both hook
+binaries always exit 0. An enforcing role system would have to block tool calls to work, and
+blocking is architecturally forbidden. Roles produce findings and messages, not denials.
+
+**Acceptance criteria per wave are concrete.** "Claude Code output is byte-identical to 0.2.0 on
+the same frozen ledger" is a testable claim, not a hope.
+
+### 11.2 What is risky
+
+**Wave 0 is incomplete and load-bearing.** The tier claims for Codex, Gemini, and Cursor are still
+"believed" — the table in §4.5 says "To verify" for every host except Claude Code. If no host
+besides Claude exposes per-tool-call hooks, the feature promise changes from "multi-host" to
+"Claude Code plus observed-effects participation for others." Wave 0 must run before any adapter
+code is written, and its results may rewrite §4.5 entirely.
+
+**Prerequisite bugs (§3) are not fixed.** `overlap.ts:285` drops 30% of events with null task IDs.
+The contention advisory fires only inside a ~1s window. Both are documented as prerequisites, but
+neither has a linked fix. Cross-host work is the exact case where null-task attribution is most
+likely (a session-tier host has no turn boundary), so shipping multi-host on top of these bugs
+guarantees the headline case works worst.
+
+**Session-tier attribution is coarse by construction.** The effects walk (681–949ms per invocation)
+binds changes to a time window, not a call. This is acknowledged but unresolved: cross-host
+contention between an `observed` agent and a `session` agent may be detectable in principle and
+too coarse in practice. The design does not say what happens if the answer is "too coarse."
+
+**Post-tool-use delivery is deferred.** The mailbox delivers at session start and on MCP pull.
+`session`- and `declared`-tier hosts can only pull — they cannot receive timely notifications.
+This limits the mailbox's utility to hosts that already have good hooks, which is a tighter
+constraint than the design's framing suggests.
+
+**Agent ID collision is documented, not resolved.** Two hosts minting the same session identifier
+would collide. The design records the risk and says "in practice session ids are UUID-shaped and
+collision is remote." This is probably true, but it is a known gap in a feature designed around
+cross-host coordination.
+
+### 11.3 Recommendations
+
+1. **Wave 0 must ship first.** Fetch each candidate host's integration docs, rewrite §4.5 from
+   evidence. If the result is that only Claude Code has per-call hooks, say so explicitly in §1
+   and set expectations accordingly.
+2. **Fix §3 prerequisites before Wave A.** The overlap null-task bug and the contention advisory
+   window are worth doing regardless of this feature, and they unblock the acceptance tests that
+   matter.
+3. **Decide what happens when session-tier attribution is too coarse.** The design should say
+   "contention is reported with a coarser grain and the grain is named in the output" or "contention
+   is not reported for mixed-tier pairs" — pick one, don't leave it as an open question.
+4. **Move post-tool-use delivery to Wave C, not later.** It is the only path for session-tier
+   hosts to receive timely messages. Deferring it means the mailbox only works well for the host
+   that already has the best integration.
+5. **State the promise honestly in §1.** If Wave 0 reveals that most hosts are session- or
+   declared-tier, the opening sentence should say "PatchMesh records what agents do and reports
+   it back, with honesty about how much it can see" rather than implying all hosts are equal.
