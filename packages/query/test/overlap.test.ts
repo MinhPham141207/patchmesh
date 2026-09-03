@@ -12,7 +12,7 @@ import {
   resourceIdForPath,
 } from "patchmesh-recorder";
 import { SqliteEventStore } from "patchmesh-storage";
-import { findOverlappingWork, renderOverlap } from "patchmesh-query";
+import { findOverlappingWork, renderOverlap, type AttributionPrecision } from "patchmesh-query";
 
 const OTHER_SESSION = "9c2d4e6a-1b3f-4d78-8e05-2a7c1f9b3d64";
 
@@ -292,6 +292,230 @@ test("two worktrees with no agent and no task still contend, and render", () => 
     assert.ok(result.overlaps[0]!.tasks.every((task) => task.taskId === null && task.agentId === null));
     const rendered = renderOverlap(result, undefined);
     assert.match(rendered, /changed by two workers at once/u);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+function sourceChangeEvent(
+  worktreeId: WorktreeId,
+  at: string,
+  repositoryId: RepositoryId,
+  resourceId: ResourceId,
+  sourceId: string,
+  agentId: AgentId | null,
+  taskId: TaskId | null,
+): ProtocolEvent {
+  rawSequence += 1;
+  const id = (prefix: string) => `${prefix}${rawSequence.toString(16).padStart(32, "0")}`;
+  const version = (eventId: EventId) => ({
+    resourceId,
+    domain: { repositoryId, workspaceId: "ws_22222222-2222-4222-8222-222222222222", worktreeId },
+    kind: "content_hash" as const,
+    value: `sha256:${"a".repeat(64)}`,
+    evidenceEventIds: [eventId],
+  });
+  return {
+    schemaVersion: 1,
+    eventId: id("evt_") as EventId,
+    eventType: "file.changed",
+    causationId: null,
+    correlationId: id("corr_") as CorrelationId,
+    source: { kind: "watcher", sourceId, instanceId: "44444444-4444-4444-8444-444444444444" },
+    timestamp: at,
+    repositoryId,
+    workspaceId: "ws_22222222-2222-4222-8222-222222222222",
+    worktreeId,
+    agentId,
+    taskId,
+    sourceSequence: null,
+    payload: {
+      resource: { kind: "file", locator: "shared.ts", repositoryId, resourceId },
+      beforeVersion: null,
+      afterVersion: version(id("evt_") as EventId),
+      changeKind: "modified",
+    },
+  } as unknown as ProtocolEvent;
+}
+
+function sourceChangeStillWorking(
+  worktreeId: WorktreeId,
+  at: string,
+  repositoryId: RepositoryId,
+  resourceId: ResourceId,
+  sourceId: string,
+  agentId: AgentId | null,
+  taskId: TaskId | null,
+): ProtocolEvent {
+  rawSequence += 1;
+  const id = (prefix: string) => `${prefix}${rawSequence.toString(16).padStart(32, "0")}`;
+  return {
+    schemaVersion: 1,
+    eventId: id("evt_") as EventId,
+    eventType: "tool.requested",
+    causationId: null,
+    correlationId: id("corr_") as CorrelationId,
+    source: { kind: "watcher", sourceId, instanceId: "44444444-4444-4444-8444-444444444444" },
+    timestamp: at,
+    repositoryId,
+    workspaceId: "ws_22222222-2222-4222-8222-222222222222",
+    worktreeId,
+    agentId,
+    taskId,
+    sourceSequence: null,
+    payload: {
+      toolName: "read_file",
+      hostToolName: "Read",
+      operation: "Read shared.ts",
+      targetResourceId: resourceId,
+      opaque: false,
+    },
+  } as unknown as ProtocolEvent;
+}
+
+test("precision is per-call when both agents are observed tier", () => {
+  const repo = repository();
+  try {
+    const base = Date.parse("2026-08-26T10:00:00Z");
+    const at = (offsetMs: number) => new Date(base + offsetMs).toISOString();
+    const repositoryId = "repo_11111111-1111-4111-8111-111111111111" as RepositoryId;
+    const resourceId = resourceIdForPath(repositoryId, "shared.ts");
+    const earlier = sourceChangeEvent(
+      "wt_aaaaaaaa-1111-4111-8111-111111111111" as WorktreeId,
+      at(0), repositoryId, resourceId,
+      "source_claude_code_hook",
+      "agent_aaaa" as AgentId, null,
+    );
+    const later = sourceChangeEvent(
+      "wt_bbbbbbbb-2222-4222-8222-222222222222" as WorktreeId,
+      at(20_000), repositoryId, resourceId,
+      "source_opencode_hook",
+      "agent_bbbb" as AgentId, null,
+    );
+    const stillWorking = sourceChangeStillWorking(
+      "wt_aaaaaaaa-1111-4111-8111-111111111111" as WorktreeId,
+      at(40_000), repositoryId, resourceId,
+      "source_claude_code_hook",
+      "agent_aaaa" as AgentId, null,
+    );
+    mkdirSync(join(repo.root, ".patchmesh"), { recursive: true });
+    const store = SqliteEventStore.open(repo.ledgerPath);
+    try {
+      store.appendAtomic([earlier, later, stillWorking]);
+    } finally {
+      store.close();
+    }
+
+    const result = findOverlappingWork({
+      worktreeRoot: repo.root,
+      ledgerPath: repo.ledgerPath,
+      withinMinutes: 30,
+      now: () => new Date(base + 60_000),
+    });
+
+    assert.equal(result.overlaps.length, 1);
+    assert.equal(result.overlaps[0]!.precision, "per-call" as AttributionPrecision);
+    const rendered = renderOverlap(result, undefined);
+    assert.match(rendered, /precision: per-call/);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test("precision is absent when one agent is declared tier (generic-mcp)", () => {
+  const repo = repository();
+  try {
+    const base = Date.parse("2026-08-26T10:00:00Z");
+    const at = (offsetMs: number) => new Date(base + offsetMs).toISOString();
+    const repositoryId = "repo_11111111-1111-4111-8111-111111111111" as RepositoryId;
+    const resourceId = resourceIdForPath(repositoryId, "shared.ts");
+    const earlier = sourceChangeEvent(
+      "wt_aaaaaaaa-1111-4111-8111-111111111111" as WorktreeId,
+      at(0), repositoryId, resourceId,
+      "source_claude_code_hook",
+      "agent_aaaa" as AgentId, null,
+    );
+    const later = sourceChangeEvent(
+      "wt_bbbbbbbb-2222-4222-8222-222222222222" as WorktreeId,
+      at(20_000), repositoryId, resourceId,
+      "source_generic_mcp",
+      "agent_bbbb" as AgentId, null,
+    );
+    const stillWorking = sourceChangeStillWorking(
+      "wt_aaaaaaaa-1111-4111-8111-111111111111" as WorktreeId,
+      at(40_000), repositoryId, resourceId,
+      "source_claude_code_hook",
+      "agent_aaaa" as AgentId, null,
+    );
+    mkdirSync(join(repo.root, ".patchmesh"), { recursive: true });
+    const store = SqliteEventStore.open(repo.ledgerPath);
+    try {
+      store.appendAtomic([earlier, later, stillWorking]);
+    } finally {
+      store.close();
+    }
+
+    const result = findOverlappingWork({
+      worktreeRoot: repo.root,
+      ledgerPath: repo.ledgerPath,
+      withinMinutes: 30,
+      now: () => new Date(base + 60_000),
+    });
+
+    assert.equal(result.overlaps.length, 1);
+    assert.equal(result.overlaps[0]!.precision, "absent" as AttributionPrecision);
+    const rendered = renderOverlap(result, undefined);
+    assert.match(rendered, /precision: absent/);
+  } finally {
+    rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test("precision is per-window when one agent has no known source", () => {
+  const repo = repository();
+  try {
+    const base = Date.parse("2026-08-26T10:00:00Z");
+    const at = (offsetMs: number) => new Date(base + offsetMs).toISOString();
+    const repositoryId = "repo_11111111-1111-4111-8111-111111111111" as RepositoryId;
+    const resourceId = resourceIdForPath(repositoryId, "shared.ts");
+    // Earlier agent with known source (observed tier)
+    const earlier = sourceChangeEvent(
+      "wt_aaaaaaaa-1111-4111-8111-111111111111" as WorktreeId,
+      at(0), repositoryId, resourceId,
+      "source_claude_code_hook",
+      "agent_aaaa" as AgentId, null,
+    );
+    // Later agent with unknown source → tierForSourceId returns null → absent
+    const later = sourceChangeEvent(
+      "wt_bbbbbbbb-2222-4222-8222-222222222222" as WorktreeId,
+      at(20_000), repositoryId, resourceId,
+      "source_unknown_host",
+      "agent_bbbb" as AgentId, null,
+    );
+    const stillWorking = sourceChangeStillWorking(
+      "wt_aaaaaaaa-1111-4111-8111-111111111111" as WorktreeId,
+      at(40_000), repositoryId, resourceId,
+      "source_claude_code_hook",
+      "agent_aaaa" as AgentId, null,
+    );
+    mkdirSync(join(repo.root, ".patchmesh"), { recursive: true });
+    const store = SqliteEventStore.open(repo.ledgerPath);
+    try {
+      store.appendAtomic([earlier, later, stillWorking]);
+    } finally {
+      store.close();
+    }
+
+    const result = findOverlappingWork({
+      worktreeRoot: repo.root,
+      ledgerPath: repo.ledgerPath,
+      withinMinutes: 30,
+      now: () => new Date(base + 60_000),
+    });
+
+    assert.equal(result.overlaps.length, 1);
+    // Unknown source → tier null → absent precision
+    assert.equal(result.overlaps[0]!.precision, "absent" as AttributionPrecision);
   } finally {
     rmSync(repo.root, { recursive: true, force: true });
   }
