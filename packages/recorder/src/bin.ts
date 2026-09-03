@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+
+const require_ = createRequire(import.meta.url);
 import {
   computeContentionAdvisory,
   computePostWriteAdvisory,
@@ -404,6 +407,11 @@ function emitSessionEndCleanup(worktreeRoot: string): void {
   } catch {
     // Best-effort cleanup. Never block session end.
   }
+  try {
+    cleanupDeliveredMarkers(worktreeRoot);
+  } catch {
+    // Best-effort cleanup. Never block session end.
+  }
 }
 
 /**
@@ -417,17 +425,17 @@ function emitSessionEndCleanup(worktreeRoot: string): void {
 const MAILBOX_DELIVER_EVERY = 8;
 const DELIVERED_DIR = "delivered";
 
-interface PendingMail {
+export interface PendingMail {
   readonly messageId: string;
   readonly from: string;
   readonly subject: string;
   readonly body: string;
 }
 
-function findPendingMail(ledgerPath: string, agentId: string): PendingMail | null {
+export function findPendingMail(ledgerPath: string, agentId: string): PendingMail | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof import("node:sqlite").DatabaseSync };
+    const { DatabaseSync } = require_("node:sqlite") as { DatabaseSync: typeof import("node:sqlite").DatabaseSync };
     const db = new DatabaseSync(ledgerPath, { open: true, readOnly: true } as never);
     try {
       db.exec("PRAGMA busy_timeout = 2000");
@@ -435,11 +443,11 @@ function findPendingMail(ledgerPath: string, agentId: string): PendingMail | nul
         SELECT canonical_event FROM events
         WHERE event_type = 'agent.message.sent'
         ORDER BY insertion_position ASC
-      `).all() as Array<{ readonly canonical_event: Buffer }>;
+      `).all() as Array<{ readonly canonical_event: Uint8Array }>;
       const nowMs = Date.now();
       for (const row of rows) {
         try {
-          const event = JSON.parse(row.canonical_event.toString("utf8")) as Record<string, unknown>;
+          const event = JSON.parse(new TextDecoder().decode(row.canonical_event)) as Record<string, unknown>;
           const payload = event["payload"] as Record<string, unknown> | undefined;
           if (!payload) continue;
           const expiresAt = typeof payload["expiresAt"] === "string" ? Date.parse(payload["expiresAt"]) : NaN;
@@ -465,7 +473,7 @@ function findPendingMail(ledgerPath: string, agentId: string): PendingMail | nul
   }
 }
 
-function isDelivered(ledgerPath: string, messageId: string, agentId: string): boolean {
+export function isDelivered(ledgerPath: string, messageId: string, agentId: string): boolean {
   const patchmeshDir = join(ledgerPath, "..");
   const deliveredDir = join(patchmeshDir, DELIVERED_DIR);
   try {
@@ -476,7 +484,7 @@ function isDelivered(ledgerPath: string, messageId: string, agentId: string): bo
   }
 }
 
-function recordMailDelivery(ledgerPath: string, messageId: string, agentId: string): void {
+export function recordMailDelivery(ledgerPath: string, messageId: string, agentId: string): void {
   const patchmeshDir = join(ledgerPath, "..");
   const deliveredDir = join(patchmeshDir, DELIVERED_DIR);
   try {
@@ -487,6 +495,33 @@ function recordMailDelivery(ledgerPath: string, messageId: string, agentId: stri
       "utf8",
     );
   } catch { /* best-effort */ }
+}
+
+const DELIVERED_MARKER_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/**
+ * Remove delivered marker files older than `DELIVERED_MARKER_TTL_MS`. Called on session end
+ * so the sidecar directory does not grow without bound. Best-effort: a failed unlink is
+ * silently skipped.
+ */
+export function cleanupDeliveredMarkers(worktreeRoot: string): number {
+  const deliveredDir = join(worktreeRoot, ".patchmesh", DELIVERED_DIR);
+  let cleaned = 0;
+  try {
+    const files = readdirSync(deliveredDir);
+    const nowMs = Date.now();
+    for (const file of files) {
+      try {
+        const filePath = join(deliveredDir, file);
+        const stat = statSync(filePath);
+        if (nowMs - stat.mtimeMs > DELIVERED_MARKER_TTL_MS) {
+          unlinkSync(filePath);
+          cleaned += 1;
+        }
+      } catch { /* skip unreadable files */ }
+    }
+  } catch { /* delivered dir may not exist */ }
+  return cleaned;
 }
 
 function mailboxCallCountPath(worktreeRoot: string): string {
@@ -507,7 +542,7 @@ function incrementMailboxCounter(worktreeRoot: string): number {
   }
 }
 
-function tryMailboxDelivery(worktreeRoot: string, ledgerPath: string, agentId: string): void {
+export function tryMailboxDelivery(worktreeRoot: string, ledgerPath: string, agentId: string): void {
   const count = incrementMailboxCounter(worktreeRoot);
   if (count % MAILBOX_DELIVER_EVERY !== 0) return;
   const mail = findPendingMail(ledgerPath, agentId);

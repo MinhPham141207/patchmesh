@@ -66,6 +66,14 @@ export {
   turnStatePathFor,
   writeTurnState,
 } from "./turn.js";
+export {
+  cleanupDeliveredMarkers,
+  findPendingMail,
+  isDelivered,
+  recordMailDelivery,
+  tryMailboxDelivery,
+  type PendingMail,
+} from "./bin.js";
 export type { OpenTurn, TurnFields } from "./turn.js";
 export type { NormalizedTool } from "./tool-mapping.js";
 export { resolveRoleClaim, ROLE_ENV_VAR } from "./roles.js";
