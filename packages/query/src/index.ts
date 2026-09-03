@@ -40,6 +40,7 @@ export type {
   ResourceOverlap,
   WorkerActivity,
 } from "./overlap.js";
+export type { AttributionPrecision } from "./overlap.js";
 export { idShortener, shortIds } from "./short-id.js";
 export { recapRecentWork, renderRecap } from "./recap.js";
 export type { RecapOptions, RecapResult, RecappedTask } from "./recap.js";
