@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { delimiter, isAbsolute, join, relative } from "node:path";
-import { LEDGER_DIRECTORY, ledgerPathFor, ledgerRootFor, resolveSourceHost } from "patchmesh-recorder";
+import { join, relative } from "node:path";
+import { allHostAdapters, LEDGER_DIRECTORY, ledgerPathFor, ledgerRootFor, resolveSourceHost } from "patchmesh-recorder";
+import type { HostAdapter, HostCheck } from "patchmesh-recorder";
 import { SqliteEventStore, projectWorkGraphCached } from "patchmesh-storage";
-import { HOOK_EVENTS, onPath, ownsCommand, resolveHookTarget } from "./init.js";
 
 const INSTALLED_VERSION = readInstalledVersion();
 
@@ -157,77 +157,6 @@ function readJson(path: string): Record<string, unknown> {
   }
 }
 
-/** Every hook command this repository has that PatchMesh wrote, keyed by host event. */
-function installedHooks(worktreeRoot: string): Map<string, string> {
-  const settings = readJson(join(worktreeRoot, ".claude", "settings.local.json"));
-  const hooks = isRecord(settings["hooks"]) ? settings["hooks"] : {};
-  const found = new Map<string, string>();
-  for (const [event, groups] of Object.entries(hooks)) {
-    if (!Array.isArray(groups)) continue;
-    for (const group of groups) {
-      if (!isRecord(group) || !Array.isArray(group["hooks"])) continue;
-      for (const hook of group["hooks"]) {
-        if (isRecord(hook) && ownsCommand(hook["command"])) found.set(event, String(hook["command"]));
-      }
-    }
-  }
-  return found;
-}
-
-function checkHooks(worktreeRoot: string): readonly DoctorCheck[] {
-  const installed = installedHooks(worktreeRoot);
-  if (installed.size === 0) {
-    return [{
-      name: "hooks",
-      status: "fail",
-      detail: "no PatchMesh hooks in .claude/settings.local.json, so nothing is being recorded",
-      fix: "run: patchmesh init",
-    }];
-  }
-  const missing = HOOK_EVENTS.filter((event) => !installed.has(event));
-  const presence: DoctorCheck = missing.length === 0
-    ? { name: "hooks", status: "ok", detail: `all ${HOOK_EVENTS.length} hooks installed` }
-    : {
-      name: "hooks",
-      status: "warn",
-      // Partial wiring is a real state with real consequences, not a rounding error: without
-      // Stop nothing ever drains, and without UserPromptSubmit every call is unattributed.
-      detail: `${installed.size} of ${HOOK_EVENTS.length} hooks installed; missing ${missing.join(", ")}`,
-      fix: "run: patchmesh init",
-    };
-
-  // The failure this exists for: a config that is syntactically perfect and completely inert,
-  // because the command it names is not on this machine. It records nothing and says nothing.
-  //
-  // Only commands demonstrably absent count. A command whose path the host expands is reported
-  // as unverified rather than broken -- see `resolveHookTarget`, where assuming otherwise
-  // declared a working install dead.
-  const targets = [...installed.entries()].map(
-    ([event, command]) => [event, resolveHookTarget(command, worktreeRoot)] as const,
-  );
-  const broken = targets.filter(([, target]) => target === "missing");
-  if (broken.length > 0) {
-    return [presence, {
-      name: "recorder",
-      status: "fail",
-      detail: `${broken.length} hook command(s) do not resolve here: ${broken.map(([event]) => event).join(", ")}`,
-      fix: "reinstall (npm install -g patchmesh) and re-run: patchmesh init --force",
-    }];
-  }
-  const unverified = targets.filter(([, target]) => target === "unknown");
-  if (unverified.length > 0 && unverified.length === targets.length) {
-    return [presence, {
-      name: "recorder",
-      status: "ok",
-      // Said out loud rather than passed over silently: the check ran and declined to conclude,
-      // which is a different thing from having verified the binaries.
-      detail: "hook commands are resolved by the host, so their targets were not checked here"
-        + " (the ledger below is the evidence that they run)",
-    }];
-  }
-  return [presence];
-}
-
 function checkServer(worktreeRoot: string): DoctorCheck {
   const config = readJson(join(worktreeRoot, ".mcp.json"));
   const servers = isRecord(config["mcpServers"]) ? config["mcpServers"] : {};
@@ -245,101 +174,15 @@ function checkServer(worktreeRoot: string): DoctorCheck {
 }
 
 /**
- * Is the optional OpenCode plugin installed, and does it still point at a real binary?
- *
- * Deliberately never a failure, and absent is not even a warning: OpenCode is a second host
- * beside the Claude hooks this repository is normally wired with, so not having it says
- * nothing about whether recording works here. The one state worth saying out loud is a plugin
- * that exists but names a recorder binary that does not - someone installed it once and the
- * install moved out from under it - and even that stays a warning, because the Claude-side
- * recording this command's verdict is about is untouched by it.
+ * Check a host adapter's configuration and return its diagnostic checks, prefixed with
+ * the host's display name and coverage tier so the doctor output groups results per-host.
  */
-/**
- * Whether a bare command name reaches PATH only through a `.cmd`/`.bat` shim.
- *
- * The gap this names: `onPath` answers "the name is there", but the plugin spawns bare names
- * with `shell: false`, and Node >=18 refuses to spawn `.cmd`/`.bat` shims outright (EINVAL).
- * On Windows an npm-linked `patchmesh-record` is exactly such a shim, so doctor saying "ok"
- * here would bless an install that cannot record. Deferred rather than fixed by rewriting
- * the reference: baking a resolvable absolute path in is Task 6's host-plumbing work, which
- * is where the bare-name form itself should be revisited.
- */
-function resolvesOnlyThroughCmdShim(command: string): boolean {
-  if (process.platform !== "win32") return false;
-  const entries = (process.env["PATH"] ?? "").split(delimiter).filter((entry) => entry !== "");
-  const native = entries.some((entry) =>
-    existsSync(join(entry, command)) || existsSync(join(entry, `${command}.exe`)));
-  if (native) return false;
-  const shims = (process.env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD")
-    .split(";")
-    .filter((value) => value !== "" && value.toLowerCase() !== ".exe");
-  return entries.some((entry) => shims.some((ext) => existsSync(join(entry, command + ext))));
-}
-
-function checkOpencodePlugin(worktreeRoot: string): DoctorCheck {
-  const pluginPath = join(worktreeRoot, ".opencode", "plugins", "patchmesh.mjs");
-  if (!existsSync(pluginPath)) {
-    return {
-      name: "opencode",
-      status: "ok",
-      detail: "OpenCode plugin not installed (optional; install with: patchmesh init --host opencode)",
-    };
-  }
-  const source = readFileSync(pluginPath, "utf8");
-  // The single recorder reference the writer baked in, in any of its three shapes: a quoted
-  // absolute path, a repo-relative path resolved against the worktree like every hook
-  // command is, or a bare command name left to the PATH.
-  const reference = /const RECORDER_BIN = "([^"\r\n]+)"/u.exec(source)?.[1];
-  const bare = reference !== undefined && !reference.includes("/") && !reference.includes("\\");
-  const resolves = reference !== undefined
-    && (isAbsolute(reference)
-      ? existsSync(reference)
-      : !bare
-        ? existsSync(join(worktreeRoot, reference))
-        : onPath(reference));
-  if (reference === undefined) {
-    return {
-      name: "opencode",
-      status: "warn",
-      detail: "the OpenCode plugin is installed but names no recorder binary this doctor can check",
-    };
-  }
-  // A bare name that PATH answers only through a `.cmd` shim is not a working install on
-  // Windows - the plugin's `shell: false` spawn of it is refused by Node. Warned rather than
-  // passed as ok, so doctor cannot bless recording that cannot happen.
-  if (bare && resolvesOnlyThroughCmdShim(reference)) {
-    return {
-      name: "opencode",
-      status: "warn",
-      detail: "the OpenCode plugin names a bare recorder command that Windows resolves only through a .cmd shim,"
-        + " which Node refuses to spawn without a shell, so OpenCode records nothing here",
-      fix: "install the recorder where its real binary resolves, then reinstall with: patchmesh init --host opencode --force",
-    };
-  }
-  return resolves
-    ? { name: "opencode", status: "ok", detail: `OpenCode plugin installed at ${relative(worktreeRoot, pluginPath)}` }
-    : {
-      name: "opencode",
-      status: "warn",
-      detail: "the OpenCode plugin is installed but the recorder binary it names is not here, so OpenCode records nothing",
-      fix: "reinstall with: patchmesh init --host opencode --force",
-    };
-}
-
-/**
- * Nothing about a generic MCP host can be checked, because there is nothing to install:
- * its calls are recorded by whatever gateway it dispatches through, not by wiring on disk
- * this command could inspect. Said anyway, and always `ok`, so a user reading coverage
- * output that counts `declared` participation knows where those rows come from - and that
- * self-reported participation is never evidence of observed effects.
- */
-function checkGenericMcp(): DoctorCheck {
-  return {
-    name: "generic-mcp",
-    status: "ok",
-    detail: "generic MCP calls record through their gateway as declared-tier participation"
-      + " (self-reported; no effects are observed at the protocol level)",
-  };
+function checkHostAdapter(adapter: HostAdapter, worktreeRoot: string): readonly DoctorCheck[] {
+  const hostChecks: HostCheck[] = adapter.check(worktreeRoot);
+  return hostChecks.map((hc: HostCheck) => ({
+    ...hc,
+    name: `${adapter.displayName} (${adapter.tier})`,
+  }));
 }
 
 function checkGitignore(worktreeRoot: string, ledgerRoot: string): DoctorCheck {
@@ -579,10 +422,11 @@ export async function diagnose(options: DoctorOptions): Promise<DoctorReport> {
       ? `${worktreeRoot} (a linked worktree; the ledger lives in ${ledgerRoot})`
       : worktreeRoot,
   });
-  checks.push(...checkHooks(worktreeRoot));
   checks.push(checkServer(worktreeRoot));
-  checks.push(checkOpencodePlugin(worktreeRoot));
-  checks.push(checkGenericMcp());
+  // Iterate all registered host adapters and collect per-host diagnostic checks.
+  for (const adapter of allHostAdapters()) {
+    checks.push(...checkHostAdapter(adapter, worktreeRoot));
+  }
   checks.push(checkGitignore(worktreeRoot, ledgerRoot));
   const ledgerPath = ledgerPathFor(worktreeRoot);
   checks.push(checkLedger(worktreeRoot, ledgerPath, shared, options.largeLedgerBytes ?? LEDGER_LARGE_BYTES));

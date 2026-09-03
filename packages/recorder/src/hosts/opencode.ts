@@ -1,6 +1,8 @@
+import { existsSync, readFileSync } from "node:fs";
+import { delimiter, isAbsolute, join } from "node:path";
 import type { NormalizedTool } from "../tool-mapping.js";
 import { GIT_COMMIT } from "./claude-code.js";
-import type { HostAdapter, HostRecord } from "./types.js";
+import type { HostAdapter, HostCheck, HostRecord } from "./types.js";
 
 /**
  * OpenCode's built-in tool names are lowercase (evidenced by the Task 2 captures in
@@ -87,9 +89,81 @@ export function translateOpencodeRecord(record: HostRecord): Record<string, unkn
   };
 }
 
+function onPath(command: string): boolean {
+  const entries = (process.env["PATH"] ?? "").split(delimiter).filter((entry) => entry !== "");
+  const extensions = process.platform === "win32"
+    ? (process.env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((value) => value !== "")
+    : [];
+  return entries.some((entry) =>
+    existsSync(join(entry, command)) || extensions.some((ext) => existsSync(join(entry, command + ext))));
+}
+
+function resolvesOnlyThroughCmdShim(command: string): boolean {
+  if (process.platform !== "win32") return false;
+  const entries = (process.env["PATH"] ?? "").split(delimiter).filter((entry) => entry !== "");
+  const native = entries.some((entry) =>
+    existsSync(join(entry, command)) || existsSync(join(entry, `${command}.exe`)));
+  if (native) return false;
+  const shims = (process.env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter((value) => value !== "" && value.toLowerCase() !== ".exe");
+  return entries.some((entry) => shims.some((ext) => existsSync(join(entry, command + ext))));
+}
+
 export const opencodeAdapter: HostAdapter = {
   id: "opencode",
   displayName: "OpenCode",
   tier: "observed",
   parse: parseOpencodeEnvelope,
+  check(worktreeRoot: string): HostCheck[] {
+    const pluginPath = join(worktreeRoot, ".opencode", "plugins", "patchmesh.mjs");
+    if (!existsSync(pluginPath)) {
+      return [{
+        name: "opencode",
+        status: "ok",
+        detail: "OpenCode plugin not installed (optional; install with: patchmesh init --host opencode)",
+      }];
+    }
+    try {
+      const source = readFileSync(pluginPath, "utf8");
+      const reference = /const RECORDER_BIN = "([^"\r\n]+)"/u.exec(source)?.[1];
+      const bare = reference !== undefined && !reference.includes("/") && !reference.includes("\\");
+      const resolves = reference !== undefined
+        && (isAbsolute(reference)
+          ? existsSync(reference)
+          : !bare
+            ? existsSync(join(worktreeRoot, reference))
+            : onPath(reference));
+      if (reference === undefined) {
+        return [{
+          name: "opencode",
+          status: "warn",
+          detail: "the OpenCode plugin is installed but names no recorder binary this doctor can check",
+        }];
+      }
+      if (bare && resolvesOnlyThroughCmdShim(reference)) {
+        return [{
+          name: "opencode",
+          status: "warn",
+          detail: "the OpenCode plugin names a bare recorder command that Windows resolves only through a .cmd shim,"
+            + " which Node refuses to spawn without a shell, so OpenCode records nothing here",
+          fix: "install the recorder where its real binary resolves, then reinstall with: patchmesh init --host opencode --force",
+        }];
+      }
+      return [resolves
+        ? { name: "opencode", status: "ok" as const, detail: `OpenCode plugin installed at ${join(".opencode", "plugins", "patchmesh.mjs")}` }
+        : {
+          name: "opencode",
+          status: "warn" as const,
+          detail: "the OpenCode plugin is installed but the recorder binary it names is not here, so OpenCode records nothing",
+          fix: "reinstall with: patchmesh init --host opencode --force",
+        }];
+    } catch {
+      return [{
+        name: "opencode",
+        status: "warn",
+        detail: "OpenCode plugin exists but could not be read",
+      }];
+    }
+  },
 };

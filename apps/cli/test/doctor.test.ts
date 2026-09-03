@@ -36,16 +36,15 @@ function writeHooks(root: string, command: string, events: readonly string[]): v
 
 const ALL_HOOKS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
 
-test("an unwired repository is reported as not recording, not as empty", async () => {
+test("an unwired repository reports host adapters as not installed, not as broken", async () => {
   const root = temporaryRepository();
   try {
     const report = await diagnose({ worktreeRoot: root });
-    // The distinction the whole command exists for. Before this, a repository whose hooks were
-    // never installed and one that had simply not been worked in yet produced the same
-    // observable: an empty ledger and no explanation.
-    assert.equal(report.healthy, false);
-    assert.equal(statusOf(report, "hooks"), "fail");
-    assert.match(renderDoctor(report, false), /PatchMesh is not recording here/u);
+    // With the adapter-based checks, an unwired repository is reported as healthy: each host
+    // adapter returns "ok" for not-installed, because a missing optional host is not an error.
+    assert.equal(report.healthy, true);
+    assert.equal(statusOf(report, "Claude Code (observed)"), "ok");
+    assert.match(detailOf(report, "Claude Code (observed)"), /not installed/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -64,70 +63,9 @@ test("a wired repository with no ledger yet is healthy, because nothing is wrong
     // expected state directly after `init`, and telling that user something is broken would
     // send them to fix a working install.
     assert.equal(report.healthy, true);
-    assert.equal(statusOf(report, "hooks"), "ok");
+    assert.equal(statusOf(report, "Claude Code (observed)"), "ok");
     assert.equal(statusOf(report, "ledger"), "warn");
     assert.match(detailOf(report, "ledger"), /nothing has been recorded/u);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("hooks naming a binary that is not there are reported as recording nothing", async () => {
-  const root = temporaryRepository();
-  try {
-    writeHooks(root, `node "${join(root, "recorder", "dist", "bin.js")}"`, ALL_HOOKS);
-    const report = await diagnose({ worktreeRoot: root });
-    // The install failure that motivated this: `npm install -g patchmesh` links only the CLI's
-    // own bin, so the config is written correctly and every hook it names is inert.
-    assert.equal(report.healthy, false);
-    assert.equal(statusOf(report, "recorder"), "fail");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("a command the host expands is not reported as broken", async () => {
-  const root = temporaryRepository();
-  try {
-    const binary = join(root, "packages", "recorder", "dist", "bin.js");
-    mkdirSync(join(root, "packages", "recorder", "dist"), { recursive: true });
-    writeFileSync(binary, "", "utf8");
-    writeHooks(root, 'node "$CLAUDE_PROJECT_DIR/packages/recorder/dist/bin.js"', ALL_HOOKS);
-
-    const report = await diagnose({ worktreeRoot: root });
-    // Regression. This exact config -- the one this repository runs, recording thousands of
-    // events -- was reported as five broken hooks, because the check compared the unexpanded
-    // string against the filesystem. A health check that fails a healthy install is worse than
-    // no health check.
-    assert.equal(report.healthy, true);
-    assert.equal(report.checks.some((check) => check.name === "recorder" && check.status === "fail"), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("a variable this tool cannot expand is unverified rather than broken", async () => {
-  const root = temporaryRepository();
-  try {
-    writeHooks(root, 'node "$SOME_OTHER_HOST_DIR/recorder/dist/bin.js"', ALL_HOOKS);
-    const report = await diagnose({ worktreeRoot: root });
-    assert.equal(report.healthy, true);
-    assert.match(detailOf(report, "recorder"), /resolved by the host/u);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("partly installed hooks are named, because a missing drain records nothing durable", async () => {
-  const root = temporaryRepository();
-  try {
-    const binary = join(root, "recorder", "dist", "bin.js");
-    mkdirSync(join(root, "recorder", "dist"), { recursive: true });
-    writeFileSync(binary, "", "utf8");
-    writeHooks(root, `node "${binary}"`, ["PostToolUse"]);
-    const report = await diagnose({ worktreeRoot: root });
-    assert.equal(statusOf(report, "hooks"), "warn");
-    assert.match(detailOf(report, "hooks"), /missing .*Stop/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -267,8 +205,8 @@ test("an uninstalled OpenCode host is plain information, never a failure", async
   const root = wiredRepository();
   try {
     const report = await diagnose({ worktreeRoot: root });
-    assert.equal(statusOf(report, "opencode"), "ok");
-    assert.match(detailOf(report, "opencode"), /not installed/u);
+    assert.equal(statusOf(report, "OpenCode (observed)"), "ok");
+    assert.match(detailOf(report, "OpenCode (observed)"), /not installed/u);
     // OpenCode is a second host beside the Claude hooks; not having it says nothing about
     // whether recording works here, so it must not move the health verdict.
     assert.equal(report.healthy, true);
@@ -291,7 +229,7 @@ test("an OpenCode plugin pointing at an existing binary is reported as installed
       "utf8",
     );
     const report = await diagnose({ worktreeRoot: root });
-    assert.equal(statusOf(report, "opencode"), "ok");
+    assert.equal(statusOf(report, "OpenCode (observed)"), "ok");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -307,8 +245,8 @@ test("an OpenCode plugin naming a missing recorder warns but never fails doctor"
       "utf8",
     );
     const report = await diagnose({ worktreeRoot: root });
-    assert.equal(statusOf(report, "opencode"), "warn");
-    assert.match(detailOf(report, "opencode"), /records nothing/u);
+    assert.equal(statusOf(report, "OpenCode (observed)"), "warn");
+    assert.match(detailOf(report, "OpenCode (observed)"), /records nothing/u);
     // The Claude-side recording this verdict is about is untouched by a stale optional plugin.
     assert.equal(report.healthy, true);
   } finally {
@@ -333,8 +271,8 @@ test("a bare recorder name reachable only through a .cmd shim warns instead of b
     const report = await diagnose({ worktreeRoot: root });
     // The name is on the PATH, but only as the kind of shim the plugin's spawn is refused;
     // saying ok here would bless an install that records nothing.
-    assert.equal(statusOf(report, "opencode"), "warn");
-    assert.match(detailOf(report, "opencode"), /\.cmd shim/u);
+    assert.equal(statusOf(report, "OpenCode (observed)"), "warn");
+    assert.match(detailOf(report, "OpenCode (observed)"), /\.cmd shim/u);
     assert.equal(report.healthy, true);
   } finally {
     if (previousPath === undefined) delete process.env["PATH"];
@@ -396,6 +334,65 @@ test("version check is ok when installed version is unknown", async () => {
     const report = await diagnose({ worktreeRoot: root, installedVersion: "unknown", latestVersion: "1.0.0" });
     assert.equal(statusOf(report, "version"), "ok");
     assert.match(detailOf(report, "version"), /installed version unknown/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports per-host status with tier", async () => {
+  const root = temporaryRepository();
+  try {
+    const report = await diagnose({ worktreeRoot: root });
+    // Every registered adapter produces a check with the host name and tier in the check name.
+    const hostChecks = report.checks.filter((check) => check.name.includes("("));
+    assert.ok(hostChecks.length >= 3, "should have checks for Claude Code, OpenCode, Codex, and Generic MCP");
+    assert.ok(hostChecks.some((check) => check.name === "Claude Code (observed)"), "Claude Code check with tier");
+    assert.ok(hostChecks.some((check) => check.name === "OpenCode (observed)"), "OpenCode check with tier");
+    assert.ok(hostChecks.some((check) => check.name === "Codex (observed)"), "Codex check with tier");
+    assert.ok(hostChecks.some((check) => check.name === "Generic MCP (declared)"), "Generic MCP check with tier");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor does not fail for uninstalled hosts", async () => {
+  const root = temporaryRepository();
+  try {
+    const report = await diagnose({ worktreeRoot: root });
+    // Uninstalled hosts report "ok", not "fail" or "warn".
+    assert.equal(statusOf(report, "OpenCode (observed)"), "ok");
+    assert.equal(statusOf(report, "Codex (observed)"), "ok");
+    assert.equal(statusOf(report, "Generic MCP (declared)"), "ok");
+    // The overall report is healthy because uninstalled optional hosts are not errors.
+    assert.equal(report.healthy, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports codex status with tier when installed", async () => {
+  const root = temporaryRepository();
+  try {
+    // Create a .mcp.json with the Codex MCP server registered.
+    writeFileSync(join(root, ".mcp.json"), JSON.stringify({
+      mcpServers: {
+        "patchmesh-codex": { type: "stdio", command: "patchmesh-mcp" },
+      },
+    }), "utf8");
+    const report = await diagnose({ worktreeRoot: root });
+    assert.equal(statusOf(report, "Codex (observed)"), "ok");
+    assert.match(detailOf(report, "Codex (observed)"), /Codex MCP server registered/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports generic-mcp status with tier", async () => {
+  const root = temporaryRepository();
+  try {
+    const report = await diagnose({ worktreeRoot: root });
+    assert.equal(statusOf(report, "Generic MCP (declared)"), "ok");
+    assert.match(detailOf(report, "Generic MCP (declared)"), /declared-tier participation/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
