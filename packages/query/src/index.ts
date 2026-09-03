@@ -63,8 +63,10 @@ export {
   sendMail,
   undeliveredCount,
 } from "./mailbox.js";
-export { claimRole, classifyContention, findRoleForAgent, isWithinScope, loadRoleConfig, ROLES_FILENAME } from "./roles.js";
+export { claimRole, classifyContention, findRoleForAgent, globMatchesPath, isWithinScope, loadRoleConfig, ROLES_FILENAME } from "./roles.js";
 export type { ClaimRoleOptions, ContentionKind, FindRoleOptions, RoleScopeInput } from "./roles.js";
+export { measurePerformance, PERFORMANCE_MIN_SAMPLE, renderPerformance } from "./performance.js";
+export type { AgentPerformance, PerformanceOptions, PerformanceReport } from "./performance.js";
 export type {
   AcknowledgeMessageOptions,
   InboxOptions,

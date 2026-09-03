@@ -1,7 +1,7 @@
 import type { DecisionDelivery, DecisionId, EventType, FindingId, FindingFeedback } from "patchmesh-protocol";
 import { ReadServiceError, type AgentFilters, type EventListQuery, type GraphFilters, type SendMailOptions } from "patchmesh-query";
 
-export type CommandName = "init" | "exit" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "console" | "graph" | "overlaps" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "send" | "inbox" | "ack" | "help";
+export type CommandName = "init" | "exit" | "doctor" | "prune" | "status" | "recap" | "agents" | "events" | "console" | "graph" | "overlaps" | "performance" | "stale" | "contracts" | "explain" | "feedback" | "delivery" | "send" | "inbox" | "ack" | "help";
 
 export interface ParsedArgs {
   readonly command: CommandName;
@@ -67,6 +67,8 @@ export interface ParsedArgs {
   } | null;
   /** Who the inbox is for rides in `agentFilters.agentId`; absent means broadcasts only. */
   readonly inbox: { readonly includeDelivered: boolean } | null;
+  /** Filters for `performance`: a role id and a host match, both optional. Null when not the command. */
+  readonly performance: { readonly role: string | null; readonly host: string | null } | null;
   readonly ack: {
     readonly messageId: string;
     readonly disposition: "accepted" | "declined" | null;
@@ -75,7 +77,7 @@ export interface ParsedArgs {
   } | null;
 }
 
-export const commands = new Set<CommandName>(["init", "exit", "doctor", "prune", "status", "recap", "agents", "events", "console", "graph", "overlaps", "stale", "contracts", "explain", "feedback", "delivery", "send", "inbox", "ack", "help"]);
+export const commands = new Set<CommandName>(["init", "exit", "doctor", "prune", "status", "recap", "agents", "events", "console", "graph", "overlaps", "performance", "stale", "contracts", "explain", "feedback", "delivery", "send", "inbox", "ack", "help"]);
 const eventTypes = new Set<EventType>([
   "tool.requested", "tool.completed", "file.read", "file.changed", "symbol.read",
   "symbol.changed", "task.completed", "dependency.changed", "attribution.corrected",
@@ -112,6 +114,8 @@ export function usageText(): string {
     "  graph                      Serve the console's work map and print its link",
     "                             (--resource, --print, --port <n>)",
     "  overlaps                   Files more than one worker changed (--resource, --within)",
+    "  performance              Per-agent observed work, by host and role (--role, --host,",
+    "                             --within) — figures carry n and tier, never a score",
     "  stale                      Stale-read-before-write findings (needs proxy-recorded",
     "                             read and dependent-write evidence)",
     "  contracts                  Exported-contract invalidation findings (symbol and",
@@ -199,6 +203,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       delivery: null,
       send: null,
       inbox: null,
+      performance: null,
       ack: null,
     };
   }
@@ -244,6 +249,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let ackMessageId: string | null = null;  let ackDisposition: "accepted" | "declined" | null = null;
   let ackNote: string | null = null;
   let exitYes = false;
+  let performanceRole: string | null = null;
+  let performanceHost: string | null = null;
 
   for (let index = 1; index < argv.length; index += 1) {
     const option = argv[index];
@@ -304,7 +311,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       index += 1;
       continue;
     }
-    if (option === "--within" && (command === "overlaps" || command === "recap")) {
+    if (option === "--within" && (command === "overlaps" || command === "recap" || command === "performance")) {
       const minutes = Number(value(argv, index, option));
       if (!Number.isInteger(minutes) || minutes <= 0) throw new ReadServiceError("usage", "--within takes a positive whole number of minutes");
       withinMinutes = minutes;
@@ -362,6 +369,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       continue;
     }
     if (option === "--note" && command === "ack") { ackNote = value(argv, index, option); index += 1; continue; }
+    if (option === "--role" && command === "performance") { performanceRole = value(argv, index, option); index += 1; continue; }
+    if (option === "--host" && command === "performance") { performanceHost = value(argv, index, option); index += 1; continue; }
     if (option === "--include-delivered" && command === "inbox") { includeDelivered = true; continue; }
     if (option === "--yes" && command === "exit") { exitYes = true; continue; }
     if (option === "--type" && command === "events") {
@@ -478,6 +487,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       from: senderId,
     } : null,
     inbox: command === "inbox" ? { includeDelivered } : null,
+    performance: command === "performance" ? { role: performanceRole, host: performanceHost } : null,
     ack: command === "ack" ? {
       messageId: ackMessageId!,
       disposition: ackDisposition,

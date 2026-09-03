@@ -7,11 +7,13 @@ import {
   acknowledgeMessage,
   findOverlappingWork,
   measureAdoption,
+  measurePerformance,
   measureTimeToResume,
   ReadServiceError,
   readInbox,
   recapRecentWork,
   renderAdoption,
+  renderPerformance,
   renderResumeMetrics,
   sendMail,
   treatmentBoundaryFrom,
@@ -267,8 +269,21 @@ async function renderCommand(
       parsed.json,
     );
   }
-  if (parsed.command === "stale" || parsed.command === "contracts") {
-    const missing = missingDetectorEvidence(parsed.command, services.getStatus());
+  if (parsed.command === "performance") {
+    if (worktreeRoot === null) {
+      throw new ReadServiceError("unavailable", "performance needs a git worktree; run it inside the repository the ledger describes");
+    }
+    const filters = parsed.performance ?? { role: null, host: null };
+    const report = measurePerformance({
+      worktreeRoot,
+      ledgerPath: parsed.databasePath ?? "",
+      withinMinutes: parsed.withinMinutes ?? undefined,
+      ...(filters.role === null ? {} : { role: filters.role }),
+      ...(filters.host === null ? {} : { host: filters.host }),
+    });
+    return parsed.json ? `${JSON.stringify(report)}\n` : `${renderPerformance(report)}\n`;
+  }
+  if (parsed.command === "stale" || parsed.command === "contracts") {    const missing = missingDetectorEvidence(parsed.command, services.getStatus());
     if (missing.length > 0) return renderDetectorUnavailable(parsed.command, missing, parsed.json);
     const findingType = parsed.command === "stale" ? "stale_read_before_write" : "exported_contract_invalidation";
     return renderFindings(services.listFindings({ findingType }), parsed.json, parsed.command);

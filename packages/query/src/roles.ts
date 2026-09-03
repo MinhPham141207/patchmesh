@@ -178,6 +178,11 @@ export function isWithinScope(role: RoleDefinition, filePath: string): boolean {
   return role.owns.some((pattern) => globMatches(pattern, filePath));
 }
 
+/** Match a single glob against a repository-relative path. Shared with performance scope math. */
+export function globMatchesPath(glob: string, filePath: string): boolean {
+  return globMatches(glob, filePath);
+}
+
 /**
  * What kind of overlap this is, by role scope.
  *
