@@ -14,10 +14,69 @@ import {
   readInFlightCalls,
   resolveRepositoryIdentity,
   resourceIdForPath,
+  tierForSourceId,
 } from "patchmesh-recorder";
+import type { CoverageTier } from "patchmesh-recorder";
 import { canonicalBytes, canonicalDigest, readWindowCached, SqliteEventStore } from "patchmesh-storage";
 import { describeWindow } from "./label.js";
+import { classifyContention, findRoleForAgent, loadRoleConfig } from "./roles.js";
+import type { ContentionKind, RoleScopeInput } from "./roles.js";
+import type { RoleConfig, RoleDefinition } from "patchmesh-protocol";
 import { idShortener } from "./short-id.js";
+
+/**
+ * Precision of attribution for overlap participants, derived from host coverage tier.
+ *
+ * When two agents with different coverage tiers contend on a file, the reported precision
+ * reflects the coarsest tier among them, preventing false precision when cross-host
+ * contention involves agents with different coverage tiers.
+ */
+export type AttributionPrecision = "per-call" | "per-window" | "absent";
+
+/** Map a coverage tier to its attribution precision. */
+function precisionForTier(tier: CoverageTier | null): AttributionPrecision {
+  switch (tier) {
+    case "observed":
+      return "per-call";
+    case "session":
+      return "per-window";
+    case "declared":
+    case null:
+    default:
+      return "absent";
+  }
+}
+
+/** Human-readable description of the attribution tier. */
+function tierDescription(precision: AttributionPrecision): string {
+  switch (precision) {
+    case "per-call":
+      return "observed-tier attribution";
+    case "per-window":
+      return "session-tier attribution";
+    case "absent":
+      return "declared-tier attribution";
+  }
+}
+
+/**
+ * Compute the worst (coarsest) precision among a set of source ids.
+ *
+ * The worst precision is the one that gives the reader the least confidence about
+ * when exactly the contention occurred: per-call (observed) is finest, per-window
+ * (session) is medium, and absent (declared) is coarsest.
+ */
+function worstPrecision(sourceIds: ReadonlySet<string>): AttributionPrecision {
+  if (sourceIds.size === 0) return "absent";
+  let worst: AttributionPrecision = "per-call";
+  for (const sourceId of sourceIds) {
+    const tier = tierForSourceId(sourceId);
+    const precision = precisionForTier(tier);
+    if (precision === "absent") return "absent";
+    if (precision === "per-window" && worst === "per-call") worst = "per-window";
+  }
+  return worst;
+}
 
 /**
  * Where two units of work touched the same file.
@@ -59,8 +118,7 @@ export interface OverlappingTask {
 export interface ContentionEvidence {
   /** The worker who wrote first and had not finished. */
   readonly earlierWorkerAgentId: string | null;
-  readonly earlierWriteAt: string;
-  /** When that worker was last observed doing anything at all. */
+  readonly earlierWriteAt: string;  /** When that worker was last observed doing anything at all. */
   readonly earlierWorkerLastActiveAt: string;
   /**
    * The earlier worker's nearest observed activity at or before the later write.
@@ -75,6 +133,15 @@ export interface ContentionEvidence {
   /** The worker who wrote while the first was still going. */
   readonly laterWorkerAgentId: string | null;
   readonly laterWriteAt: string;
+  /**
+   * What kind of overlap this is, by role scope. `contention` by default; `boundary`
+   * when a role-holding worker wrote outside its own `owns` scope. Roles are advisory,
+   * so the kind changes the reading, never whether the overlap is reported.
+   */
+  readonly kind: ContentionKind;
+  /** Role each worker held at classification time, null when unassigned. For the render. */
+  readonly earlierWorkerRoleId: string | null;
+  readonly laterWorkerRoleId: string | null;
 }
 
 /**
@@ -127,6 +194,12 @@ export interface ResourceOverlap {
   readonly logicalPath: string;
   readonly tasks: readonly OverlappingTask[];
   readonly contention: ContentionEvidence;
+  /**
+   * Precision of attribution for this overlap, derived from the coverage tiers of the
+   * participants' hosts. Prevents false precision when cross-host contention involves agents
+   * with different coverage tiers.
+   */
+  readonly precision: AttributionPrecision;
 }
 
 export interface OverlapOptions {
@@ -310,6 +383,8 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
   // Group observed changes by the file they touched, keeping the first time each task touched
   // it: what matters is that a task changed this file, not how many times it did.
   const byResource = new Map<string, { locator: string; tasks: Map<string, OverlappingTask> }>();
+  // Map from participant key to the set of source ids that contributed events for that participant.
+  const participantSourceIds = new Map<string, Set<string>>();
   for (const event of events) {
     if (event.eventType !== "file.changed") continue;
     if (new Date(event.timestamp) < since) continue;
@@ -338,6 +413,16 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
       });
     }
     byResource.set(resourceId, entry);
+    // Track source ids for each participant to derive attribution precision.
+    const sourceId = event.source?.sourceId;
+    if (typeof sourceId === "string") {
+      let sourceSet = participantSourceIds.get(participantKey);
+      if (sourceSet === undefined) {
+        sourceSet = new Set();
+        participantSourceIds.set(participantKey, sourceSet);
+      }
+      sourceSet.add(sourceId);
+    }
   }
 
   // One batched question for the whole result, not one per file, and only for files that got
@@ -349,6 +434,41 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
 
   const all: ResourceOverlap[] = [];
   let sequential = 0;
+  // Role scopes for boundary classification: config once, one cached ledger lookup per
+  // agent. Best-effort throughout -- a missing config or failed lookup leaves kind at
+  // the "contention" default contentionAmong already set, never drops the overlap.
+  let roleConfig: RoleConfig | null = null;
+  let rolesAvailable = false;
+  try {
+    const loaded = loadRoleConfig(identity.worktreeRoot);
+    if (loaded !== null) {
+      roleConfig = loaded;
+      rolesAvailable = true;
+    }
+  } catch {
+    rolesAvailable = false;
+  }
+  const roleCache = new Map<string, RoleDefinition | null>();
+  const roleFor = (agentId: string | null): RoleDefinition | null => {
+    if (agentId === null || !rolesAvailable) return null;
+    if (!roleCache.has(agentId)) {
+      let role: RoleDefinition | null = null;
+      try {
+        role = findRoleForAgent({
+          worktreeRoot: identity.worktreeRoot,
+          ledgerPath: options.ledgerPath,
+          agentId,
+          config: roleConfig,
+        });
+      } catch {
+        role = null;
+      }
+      roleCache.set(agentId, role);
+    }
+    return roleCache.get(agentId) ?? null;
+  };
+  const scopeOf = (role: RoleDefinition | null): RoleScopeInput | null =>
+    role === null ? null : { roleId: role.id, owns: role.owns };
   for (const entry of byResource.values()) {
     if (entry.tasks.size < 2) continue;
     if (ignored.has(entry.locator)) continue;
@@ -362,7 +482,30 @@ export function findOverlappingWork(options: OverlapOptions): OverlapResult {
       sequential += 1;
       continue;
     }
-    all.push({ logicalPath: entry.locator, tasks, contention });
+    // Boundary classification: unassigned on either side, or both owning the file, stays
+    // contention; a role-holder writing outside its owns scope makes it a boundary.
+    const earlierRole = roleFor(contention.earlierWorkerAgentId);
+    const laterRole = roleFor(contention.laterWorkerAgentId);
+    const kind: ContentionKind = rolesAvailable
+      ? classifyContention({ earlier: scopeOf(earlierRole), later: scopeOf(laterRole), logicalPath: entry.locator })
+      : "contention";
+    const classified: ContentionEvidence = {
+      ...contention,
+      kind,
+      earlierWorkerRoleId: earlierRole?.id ?? null,
+      laterWorkerRoleId: laterRole?.id ?? null,
+    };
+    // Compute precision for this overlap based on participants' source ids.
+    const participantKeys = tasks.map((task) => participantKeyFor(task.taskId, task.agentId, task.worktreeId));
+    const allSourceIds = new Set<string>();
+    for (const key of participantKeys) {
+      const sourceSet = participantSourceIds.get(key);
+      if (sourceSet) {
+        for (const s of sourceSet) allSourceIds.add(s);
+      }
+    }
+    const precision = worstPrecision(allSourceIds);
+    all.push({ logicalPath: entry.locator, tasks, contention: classified, precision });
   }
 
   all.sort((left, right) => right.tasks[0]!.at.localeCompare(left.tasks[0]!.at));
@@ -507,6 +650,9 @@ export function contentionAmong(
         earlierWorkerIdleGapMs: Math.max(idleGapMs, 0),
         laterWorkerAgentId: later.agentId,
         laterWriteAt: later.at,
+        kind: "contention",
+        earlierWorkerRoleId: null,
+        laterWorkerRoleId: null,
       };
     }
   }
@@ -682,7 +828,11 @@ export function renderOverlap(result: OverlapResult, requestedPath: string | und
       `${overlap.contention.earlierWriteAt} and was still working when ` +
       `${name(overlap.contention.laterWorkerAgentId)} wrote at ${overlap.contention.laterWriteAt} ` +
       `(last seen ${gap} before that write).`;
-    return `- \`${overlap.logicalPath}\` — two workers in flight, of ${overlap.tasks.length} task(s) that changed it:\n${lines.join("\n")}${rest}\n${why}`;
+    const precisionLine = `    precision: ${overlap.precision} (${tierDescription(overlap.precision)})`;
+    const kindLine = overlap.contention.kind === "boundary"
+      ? `    kind: boundary (${name(overlap.contention.laterWorkerAgentId)}${overlap.contention.laterWorkerRoleId !== null ? ` as ${overlap.contention.laterWorkerRoleId}` : ""} wrote outside its role scope)`
+      : `    kind: ${overlap.contention.kind}`;
+    return `- \`${overlap.logicalPath}\` — two workers in flight, of ${overlap.tasks.length} task(s) that changed it:\n${precisionLine}\n${kindLine}\n${lines.join("\n")}${rest}\n${why}`;
   });
 
   const header = `${result.overlaps.length} file(s) in ${scope} were changed by two workers at once, in the last ${window}:`;

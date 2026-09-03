@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseRoleConfig, roleById } from "patchmesh-protocol";
-import { isWithinScope } from "patchmesh-query";
+import { classifyContention, isWithinScope } from "patchmesh-query";
 import { resolveRoleClaim } from "patchmesh-recorder";
 
 const config = parseRoleConfig({
@@ -45,4 +45,36 @@ test("host binding applies when no env claim", () => {
 test("unassigned agent resolves null", () => {
   assert.equal(resolveRoleClaim({ hostId: "opencode", config }), null);
   assert.equal(resolveRoleClaim({ hostId: "codex", config: null }), null);
+});
+
+const builderScope = { roleId: "builder", owns: ["packages/**"] as readonly string[] };
+const reviewerScope = { roleId: "reviewer", owns: ["docs/**"] as readonly string[] };
+
+test("overlap is contention when both workers own the file", () => {
+  assert.equal(
+    classifyContention({
+      earlier: builderScope,
+      later: { roleId: "builder2", owns: ["packages/**"] },
+      logicalPath: "packages/foo.ts",
+    }),
+    "contention",
+  );
+});
+
+test("overlap is boundary when the writer's role does not own the file", () => {
+  assert.equal(
+    classifyContention({ earlier: builderScope, later: reviewerScope, logicalPath: "packages/foo.ts" }),
+    "boundary",
+  );
+});
+
+test("overlap is contention when one worker is unassigned", () => {
+  assert.equal(
+    classifyContention({ earlier: builderScope, later: null, logicalPath: "packages/foo.ts" }),
+    "contention",
+  );
+  assert.equal(
+    classifyContention({ earlier: null, later: null, logicalPath: "packages/foo.ts" }),
+    "contention",
+  );
 });

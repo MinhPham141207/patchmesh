@@ -177,3 +177,33 @@ function globMatches(glob: string, filePath: string): boolean {
 export function isWithinScope(role: RoleDefinition, filePath: string): boolean {
   return role.owns.some((pattern) => globMatches(pattern, filePath));
 }
+
+/**
+ * What kind of overlap this is, by role scope.
+ *
+ * `contention` is the default: roles are advisory, so an unassigned worker or
+ * a file both workers own is still contention, not an excuse. `boundary`
+ * means a role-holding worker wrote outside its own `owns` scope -- a scope
+ * violation riding along with the collision. `expected` is reserved for
+ * handoff pairs and not produced yet.
+ */
+export type ContentionKind = "contention" | "boundary" | "expected";
+
+export interface RoleScopeInput {
+  readonly roleId: string | null;
+  readonly owns: readonly string[];
+}
+
+export function classifyContention(options: {
+  readonly earlier: RoleScopeInput | null;
+  readonly later: RoleScopeInput | null;
+  readonly logicalPath: string;
+}): ContentionKind {
+  const { earlier, later, logicalPath } = options;
+  if (earlier === null || later === null) return "contention";
+  if (earlier.roleId === null || later.roleId === null) return "contention";
+  const earlierOwns = earlier.owns.some((pattern) => globMatches(pattern, logicalPath));
+  const laterOwns = later.owns.some((pattern) => globMatches(pattern, logicalPath));
+  if (!earlierOwns || !laterOwns) return "boundary";
+  return "contention";
+}
