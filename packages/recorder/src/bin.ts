@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import {
   computeContentionAdvisory,
   computePostWriteAdvisory,
@@ -329,6 +330,22 @@ export function emitPostWriteAdvisory(
         debug(error instanceof Error ? `bash snapshot failed: ${error.message}` : "unknown bash snapshot failure");
       }
     }
+
+    // Mailbox delivery: inject undelivered messages via additionalContext (rate-limited)
+    if (hookEventName === "PostToolUse") {
+      const sessionId = typeof payload["session_id"] === "string" ? payload["session_id"] : null;
+      if (sessionId !== null) {
+        try {
+          const agentId = agentIdForSession(sessionId);
+          const ledgerPath = join(worktreeRoot, ".patchmesh", "ledger.db");
+          if (existsSync(ledgerPath)) {
+            tryMailboxDelivery(worktreeRoot, ledgerPath, agentId as string);
+          }
+        } catch (error) {
+          debug(error instanceof Error ? `mailbox delivery failed: ${error.message}` : "unknown mailbox delivery failure");
+        }
+      }
+    }
   } catch (error) {
     debug(error instanceof Error ? `post-write advisory failed: ${error.message}` : "unknown post-write advisory failure");
   }
@@ -387,6 +404,130 @@ function emitSessionEndCleanup(worktreeRoot: string): void {
   } catch {
     // Best-effort cleanup. Never block session end.
   }
+}
+
+/**
+ * Mailbox delivery via PostToolUse additionalContext.
+ *
+ * Opens the ledger directly with node:sqlite to find undelivered messages, avoiding
+ * the 400ms Ajv import cost of patchmesh-storage. Rate-limited to 1 injection per
+ * MAILBOX_DELIVER_EVERY calls. Records delivery in a sidecar file; readInbox checks
+ * both the ledger and sidecar for delivered status.
+ */
+const MAILBOX_DELIVER_EVERY = 8;
+const DELIVERED_DIR = "delivered";
+
+interface PendingMail {
+  readonly messageId: string;
+  readonly from: string;
+  readonly subject: string;
+  readonly body: string;
+}
+
+function findPendingMail(ledgerPath: string, agentId: string): PendingMail | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof import("node:sqlite").DatabaseSync };
+    const db = new DatabaseSync(ledgerPath, { open: true, readOnly: true } as never);
+    try {
+      db.exec("PRAGMA busy_timeout = 2000");
+      const rows = db.prepare(`
+        SELECT canonical_event FROM events
+        WHERE event_type = 'agent.message.sent'
+        ORDER BY insertion_position ASC
+      `).all() as Array<{ readonly canonical_event: Buffer }>;
+      const nowMs = Date.now();
+      for (const row of rows) {
+        try {
+          const event = JSON.parse(row.canonical_event.toString("utf8")) as Record<string, unknown>;
+          const payload = event["payload"] as Record<string, unknown> | undefined;
+          if (!payload) continue;
+          const expiresAt = typeof payload["expiresAt"] === "string" ? Date.parse(payload["expiresAt"]) : NaN;
+          if (Number.isNaN(expiresAt) || expiresAt <= nowMs) continue;
+          const to = payload["to"] as Record<string, unknown> | undefined;
+          const addressed = to?.["kind"] === "broadcast" || (to?.["kind"] === "agent" && to?.["agentId"] === agentId);
+          if (!addressed) continue;
+          const messageId = typeof payload["messageId"] === "string" ? payload["messageId"] : null;
+          if (messageId === null) continue;
+          if (isDelivered(ledgerPath, messageId, agentId)) continue;
+          const from = typeof payload["from"] === "string" ? payload["from"] : "unknown";
+          const subject = typeof payload["subject"] === "string" ? payload["subject"] : "";
+          const body = typeof payload["body"] === "string" ? payload["body"] : "";
+          return { messageId, from, subject, body };
+        } catch { /* skip malformed event */ }
+      }
+      return null;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+function isDelivered(ledgerPath: string, messageId: string, agentId: string): boolean {
+  const patchmeshDir = join(ledgerPath, "..");
+  const deliveredDir = join(patchmeshDir, DELIVERED_DIR);
+  try {
+    const files = readdirSync(deliveredDir);
+    return files.includes(`${messageId}.${agentId}`);
+  } catch {
+    return false;
+  }
+}
+
+function recordMailDelivery(ledgerPath: string, messageId: string, agentId: string): void {
+  const patchmeshDir = join(ledgerPath, "..");
+  const deliveredDir = join(patchmeshDir, DELIVERED_DIR);
+  try {
+    mkdirSync(deliveredDir, { recursive: true });
+    writeFileSync(
+      join(deliveredDir, `${messageId}.${agentId}`),
+      JSON.stringify({ at: new Date().toISOString(), agentId }),
+      "utf8",
+    );
+  } catch { /* best-effort */ }
+}
+
+function mailboxCallCountPath(worktreeRoot: string): string {
+  return join(worktreeRoot, ".patchmesh", "mailbox-counter");
+}
+
+function incrementMailboxCounter(worktreeRoot: string): number {
+  const counterPath = mailboxCallCountPath(worktreeRoot);
+  try {
+    const raw = readFileSync(counterPath, "utf8");
+    const count = Number(raw);
+    const next = (Number.isFinite(count) ? count : 0) + 1;
+    writeFileSync(counterPath, String(next), "utf8");
+    return next;
+  } catch {
+    writeFileSync(counterPath, "1", "utf8");
+    return 1;
+  }
+}
+
+function tryMailboxDelivery(worktreeRoot: string, ledgerPath: string, agentId: string): void {
+  const count = incrementMailboxCounter(worktreeRoot);
+  if (count % MAILBOX_DELIVER_EVERY !== 0) return;
+  const mail = findPendingMail(ledgerPath, agentId);
+  if (mail === null) return;
+  const senderLabel = mail.from.startsWith("agent_") ? mail.from.slice(6, 14) : mail.from;
+  const message =
+    `You have unread mail from ${senderLabel} (${mail.messageId.slice(0, 12)}…).\n`
+    + `Subject: ${mail.subject}\n`
+    + `---\n${mail.body}\n---\n`
+    + `Reply with /patchmesh mail reply ${mail.messageId.slice(0, 12)} <message>.`;
+  debug(`mailbox delivery: ${mail.messageId} to ${agentId}`);
+  process.stdout.write(
+    `${JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: message,
+      },
+    })}\n`,
+  );
+  recordMailDelivery(ledgerPath, mail.messageId, agentId);
 }
 
 /**

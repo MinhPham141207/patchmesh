@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type {
   AgentId,
   AgentMessageAcknowledgedEvent,
@@ -280,6 +280,20 @@ export function readInbox(options: InboxOptions): InboxResult {
       deliveredToSelf.add(delivered.payload.messageId);
     }
   }
+  // Also check sidecar delivery markers (written by PostToolUse mailbox injection)
+  const deliveredDir = join(options.ledgerPath, "..", "delivered");
+  try {
+    if (existsSync(deliveredDir)) {
+      const files = readdirSync(deliveredDir);
+      for (const file of files) {
+        if (!file.endsWith(`.${options.agent}`)) continue;
+        const messageId = file.slice(0, -(options.agent.length + 1));
+        if (messageId.startsWith("msg_")) {
+          deliveredToSelf.add(messageId as MessageId);
+        }
+      }
+    }
+  } catch { /* sidecar read is best-effort */ }
 
   const visible: InboxRow[] = [];
   let expired = 0;
@@ -486,6 +500,22 @@ export function undeliveredCount(ledgerPath: string, now?: () => Date): number {
       delivered.add((event as AgentMessageDeliveredEvent).payload.messageId);
     }
   }
+  // Also check sidecar delivery markers (written by PostToolUse mailbox injection)
+  const deliveredDir = join(ledgerPath, "..", "delivered");
+  try {
+    if (existsSync(deliveredDir)) {
+      const files = readdirSync(deliveredDir);
+      for (const file of files) {
+        const dotIdx = file.lastIndexOf(".");
+        if (dotIdx > 0) {
+          const messageId = file.slice(0, dotIdx);
+          if (messageId.startsWith("msg_")) {
+            delivered.add(messageId as MessageId);
+          }
+        }
+      }
+    }
+  } catch { /* sidecar read is best-effort */ }
   let count = 0;
   for (const event of events) {
     if (event.eventType !== "agent.message.sent") continue;
