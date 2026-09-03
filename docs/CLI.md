@@ -701,7 +701,11 @@ that holds it there runs in `pnpm check`; see
 [docs/measurements/overlap-precision.md](measurements/overlap-precision.md).
 
 Each reported file carries a `why:` line naming the two writes and the moment the earlier worker
-was last active, so the claim can be checked rather than taken on trust.
+was last active, so the claim can be checked rather than taken on trust. It also carries a
+`precision:` line (`per-call` for observed-tier hosts, `per-window` for session-tier,
+`absent` for declared-tier — the coarsest tier among the participants) and a `kind:` line
+(`contention`, or `boundary` when a role-holding worker wrote outside its role's `owns`
+scope; see `patchmesh performance` and roles below).
 
 ### Usage
 
@@ -741,6 +745,64 @@ When nothing is contested, three answers stay distinct: "no two workers changed 
 at once", the count of files they changed *in sequence*, and "no file changes were observed at
 all". The last is an absence of evidence, not evidence of independence — and the middle one is
 why a file you know two people edited can correctly report as uncontested.
+
+---
+
+## `patchmesh performance`
+
+**Roadmap placement:** Multi-host workspace (F-01). Available, read-only and report-only.
+
+Per-agent observed work over a window: effect density (changes per call), rework rate (share
+of writes another agent rewrote), contention caused (overlaps where this agent wrote first),
+scope adherence (share of writes inside the role's `owns` scope, null without a role), and
+calls before first change. Every row carries its host, host tier, and sample size `n`.
+
+What it refuses: thin samples (fewer than 5 calls) print "too thin to compare" instead of
+rates, tiers are always shown so an observed agent is never silently compared against a
+declared one, and there is no composite score — one blended number would hide which figure
+moved, which is the only part anyone can act on.
+
+### Usage
+
+```bash
+patchmesh performance [--role <id>] [--host <match>] [--within <minutes>] [--json]
+```
+
+`--host` matches host display name, source id, or tier (case-insensitive substring).
+
+### Example output
+
+```text
+Performance is observed work, not worker quality. Window: last 1440m.
+- agent_a [Claude Code / observed] as builder (n=42): density 0.38 changes/call, rework 4.8%, contention caused 1, scope 95.2%, resume 3 call(s)
+- agent_b [Generic MCP / declared] (n=2): too thin to compare (n=2 < 5)
+```
+
+---
+
+## Roles (`patchmesh.roles.json`)
+
+**Roadmap placement:** Multi-host workspace (F-01). Available.
+
+A role names a scope of ownership: which paths an agent owns (`owns` globs), may read
+(`reads` globs), and hands off to (`handoffTo` role ids). The worktree's
+`patchmesh.roles.json` holds the config:
+
+```json
+{
+  "version": 1,
+  "roles": [
+    { "id": "builder", "purpose": "Implements features.", "owns": ["packages/**"], "reads": ["docs/**"], "handoffTo": ["reviewer"] }
+  ],
+  "bindings": [{ "host": "codex", "role": "reviewer" }]
+}
+```
+
+Claiming, first hit wins: the `patchmesh_claim_role` MCP tool (records
+`agent.role.claimed`), the `PATCHMESH_ROLE` environment variable, then the host binding.
+Unassigned agents hold no role — roles are advisory, so an unassigned worker in an overlap
+is still contention, never an excuse. An overlap where a role-holder wrote outside its
+`owns` scope classifies as `boundary` in `patchmesh overlaps`.
 
 ---
 
