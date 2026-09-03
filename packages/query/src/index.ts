@@ -63,6 +63,8 @@ export {
   sendMail,
   undeliveredCount,
 } from "./mailbox.js";
+export { claimRole, findRoleForAgent, isWithinScope, loadRoleConfig, ROLES_FILENAME } from "./roles.js";
+export type { ClaimRoleOptions, FindRoleOptions } from "./roles.js";
 export type {
   AcknowledgeMessageOptions,
   InboxOptions,

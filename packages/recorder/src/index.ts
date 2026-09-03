@@ -43,8 +43,8 @@ export {
 export type { JournalEntry } from "./journal.js";
 export { redactHookPayload, redactText } from "./redact.js";
 export { resolveProvenanceHost, resolveSourceHost, sourceIdForHost } from "./source.js";
-export { hostForSourceId, resolveHostAdapter, tierForSourceId, codexAdapter, normalizeCodexTool, parseCodexEnvelope } from "./hosts/index.js";
-export type { CoverageTier, HostId, HostProvenance } from "./hosts/index.js";
+export { allHostAdapters, hostForSourceId, resolveHostAdapter, tierForSourceId, codexAdapter, normalizeCodexTool, parseCodexEnvelope } from "./hosts/index.js";
+export type { CoverageTier, HostAdapter, HostCheck, HostId, HostProvenance } from "./hosts/index.js";
 export {
   LEDGER_DIRECTORY,
   LEDGER_FILENAME,
@@ -68,6 +68,7 @@ export {
 } from "./turn.js";
 export type { OpenTurn, TurnFields } from "./turn.js";
 export type { NormalizedTool } from "./tool-mapping.js";
+export { resolveRoleClaim, ROLE_ENV_VAR } from "./roles.js";
 export { readInFlightCalls } from "./inflight.js";
 export type { InFlightCall, ReadInFlightOptions } from "./inflight.js";
 export { computeContentionAdvisory, computePostWriteAdvisory, computeTurnStartAdvisory } from "./advisory.js";

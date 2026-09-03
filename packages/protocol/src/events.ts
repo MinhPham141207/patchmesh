@@ -614,6 +614,16 @@ export interface AgentMessageAcknowledgedEvent extends BaseEvent {
   readonly payload: AgentMessageAcknowledgedPayload;
 }
 
+export interface AgentRoleClaimedPayload {
+  readonly roleId: string;
+  readonly method: "mcp" | "env" | "binding";
+}
+
+export interface AgentRoleClaimedEvent extends BaseEvent {
+  readonly eventType: "agent.role.claimed";
+  readonly payload: AgentRoleClaimedPayload;
+}
+
 /**
  * WHICH OF THESE ARE ACTUALLY PRODUCED, as measured against a live ledger on 2026-08-23.
  *
@@ -681,7 +691,8 @@ export type ProjectionEvent =
 export type CoordinationEvent =
   | AgentMessageSentEvent
   | AgentMessageDeliveredEvent
-  | AgentMessageAcknowledgedEvent;
+  | AgentMessageAcknowledgedEvent
+  | AgentRoleClaimedEvent;
 
 export type ProtocolEvent = Phase1InputEvent | ProjectionEvent | CoordinationEvent;
 

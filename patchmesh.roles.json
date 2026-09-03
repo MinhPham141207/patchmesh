@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "roles": [
+    {
+      "id": "builder",
+      "purpose": "Implements features and fixes bugs in application code.",
+      "owns": ["packages/**", "apps/**"],
+      "reads": ["docs/**"],
+      "handoffTo": ["reviewer"]
+    },
+    {
+      "id": "reviewer",
+      "purpose": "Reviews changes and checks cross-cutting concerns.",
+      "owns": ["docs/**"],
+      "reads": ["packages/**", "apps/**"],
+      "handoffTo": ["builder"]
+    }
+  ],
+  "bindings": [{ "host": "codex", "role": "reviewer" }]
+}

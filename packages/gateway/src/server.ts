@@ -96,6 +96,7 @@ let heavy:
       readonly checkContention: (options: import("patchmesh-recorder").ContentionCheckOptions) => import("patchmesh-recorder").ContentionResult;
       readonly readRetryState: (options: import("patchmesh-recorder").RetryOptions) => import("patchmesh-recorder").RetryState | null;
       readonly cleanupExpiredClaims: (options: import("patchmesh-recorder").ReadClaimsOptions) => number;
+      readonly claimRole: (options: import("patchmesh-query").ClaimRoleOptions) => { readonly roleId: string };
     }>
   | undefined;
 
@@ -133,6 +134,7 @@ function loadHeavy(): NonNullable<typeof heavy> {
     checkContention: recorder.checkContention,
     readRetryState: recorder.readRetryState,
     cleanupExpiredClaims: recorder.cleanupExpiredClaims,
+    claimRole: query.claimRole,
   }));
   return heavy;
 }
@@ -681,6 +683,40 @@ export function createGatewayServer(options: GatewayOptions): McpServer {
       } catch (error) {
         const reason = error instanceof Error ? error.message : "unknown failure";
         return { content: [{ type: "text" as const, text: `Resolution check failed (${reason}).` }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "patchmesh_claim_role",
+    {
+      title: "Claim a role",
+      description:
+        "Claim a named role from the worktree's patchmesh.roles.json (e.g. builder, reviewer). " +
+        "An explicit claim beats host bindings. Unassigned agents hold no role.",
+      inputSchema: {
+        role: z.string().describe("Role id to claim, as named in patchmesh.roles.json."),
+        from: z
+          .string()
+          .describe("Your agent id as the session-start context named it."),
+      },
+    },
+    async ({ role, from }) => {
+      try {
+        const modules = await loadHeavy();
+        const ledgerPath = options.ledgerPath ?? modules.ledgerPathFor(options.worktreeRoot);
+        await modules.freshenLedger({ worktreeRoot: options.worktreeRoot, ledgerPath });
+        const claimed = modules.claimRole({
+          worktreeRoot: options.worktreeRoot,
+          ledgerPath,
+          agentId: from,
+          roleId: role,
+          method: "mcp",
+        });
+        return { content: [{ type: "text" as const, text: `Role ${claimed.roleId} claimed for agent ${from}.` }] };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "unknown failure";
+        return { content: [{ type: "text" as const, text: `Role claim failed (${reason}).` }] };
       }
     },
   );
